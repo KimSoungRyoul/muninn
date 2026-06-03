@@ -1,0 +1,52 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: mutating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /mutate-muninn-io-v1beta1-huginnagent
+  failurePolicy: Fail
+  name: mhuginnagent-v1beta1.kb.io
+  rules:
+  - apiGroups:
+    - muninn.io
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - huginnagents
+  sideEffects: None
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-muninn-io-v1beta1-huginnagent
+  failurePolicy: Fail
+  name: vhuginnagent-v1beta1.kb.io
+  rules:
+  - apiGroups:
+    - muninn.io
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - huginnagents
+  sideEffects: None
