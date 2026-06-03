@@ -25,10 +25,30 @@ import (
 // Operator 가 이 CR 에 대응하는 K8s Job(→ Pod)을 backoffLimit=0 으로 만든다.
 // 재시도는 Job 이 아니라 Session controller 가 새 attempt Run 을 만들어 수행한다(operator-design §2.1).
 
-// JobTemplate 은 에이전트 Pod 의 실행 recipe. Session controller 가 채운다(operator-design §2.4).
+// JobTemplate 은 에이전트 Pod 의 실행 recipe(큐레이트된 필드 서브셋).
+// Session controller 가 Agent+Session 컨텍스트로 채우고, Run controller 가 full corev1.PodSpec 으로 확장한다.
+// full PodSpec 을 임베드하지 않는 이유: CRD OpenAPI 스키마가 ~590KB 로 폭증해 client-side apply
+// 256KB 어노테이션 한도를 넘기 때문(슬림화로 ~30KB). 고정 필드(restartPolicy/volumeMount/containerName)는
+// Run controller 가 부여한다.
 type JobTemplate struct {
-	// podSpec: 전체 Pod 명세(image/command/env/volumes/resources/SA).
-	PodSpec corev1.PodSpec `json:"podSpec"`
+	// image: 에이전트 런타임 컨테이너 이미지(HuginnAgent.spec.agent.image)
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
+	// command: 엔트리포인트(비면 기본 ["/usr/local/bin/claude_skill.sh"])
+	// +optional
+	Command []string `json:"command,omitempty"`
+	// env: 주입 컨텍스트 + 인증(secretKeyRef). Session 생성 시점 스냅샷(§5.1).
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+	// resources: 컨테이너 리소스(비면 Run controller 가 §5.1 기본값 부여)
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	// serviceAccountName: 비면 기본 huginn-agent(§6.1)
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+	// claudePVCName: ~/.claude 로 마운트할 앱별 PVC(§5.5). 비면 볼륨 미마운트.
+	// +optional
+	ClaudePVCName string `json:"claudePVCName,omitempty"`
 }
 
 // HuginnRunSpec defines the desired state of HuginnRun.

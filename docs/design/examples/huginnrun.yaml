@@ -22,47 +22,40 @@ spec:
   # 재시도는 Session controller 가 새 attempt Run(run-...-a2)으로 수행, 상한=retryPolicy.maxRuns.
   # suspend: true 면 Operator 가 Job 삭제 + phase=Cancelled(취소/거절 전파; operator-design §2.3).
 
+  # jobTemplate: 큐레이트된 실행 recipe(full PodSpec 미임베드 → CRD 슬림).
+  # Run controller 가 Job 생성 시 고정 필드(restartPolicy=Never, containerName=agent,
+  # volumeMount /root/.claude, claudePVCName→volume)를 더해 full PodSpec 으로 확장한다.
   jobTemplate:
-    podSpec:
-      restartPolicy: Never
-      serviceAccountName: huginn-agent-ai-platform   # 자기 namespace Secret/CM 만 read(§6.1)
-      containers:
-        - name: agent
-          image: registry.platform.local/huginn/agent-runtime:0.1.0
-          command: ["/usr/local/bin/claude_skill.sh"]
-          resources:
-            requests: { cpu: "500m", memory: "512Mi" }
-            limits:   { cpu: "2000m", memory: "2Gi" }
-          volumeMounts:
-            - name: claude-home
-              mountPath: /root/.claude          # 그림 pvc(~/.claude/). 프로젝트 설정/세션만(인증 아님)
-          env:
-            # --- claude_skill.sh 주입 컨텍스트(§5.1) ---
-            - name: MUNINN_GOAL
-              valueFrom: { fieldRef: { fieldPath: "metadata.annotations['muninn.io/goal']" } }
-            - name: MUNINN_GLOBAL_SYSTEM_PROMPT_REF
-              value: configmap/muninn-global-prompt
-            - name: MUNINN_TEAM_SETTINGS_REF
-              value: configmap/muninn-team-settings
-            - name: MUNINN_SOUL_REF                 # ★ Application.spec.agent.soulRef 에서 전파
-              value: configmap/soul-pct-model-server
-            - name: MUNINN_EVENT_PAYLOAD_REF
-              value: secret/sess-e3f8a91-01-event
-            - name: MUNINN_GUARDRAILS               # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
-              value: '{"maxIterations":12,"maxCostUsd":5}'
-            - name: MUNINN_MEMORY_ENDPOINT
-              value: http://muninn-memory.muninn.svc:8080
-            - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)
-              value: http://muninn-api.muninn.svc:8080
-            # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2) ---
-            - name: ANTHROPIC_API_KEY
-              valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key } }
-            - name: GITHUB_PAT
-              valueFrom: { secretKeyRef: { name: gh-ai-pat, key: token } }
-      volumes:
-        - name: claude-home
-          persistentVolumeClaim:
-            claimName: pvc-claude-pct-model-server   # 앱별 격리 PVC(§5.5)
+    image: registry.platform.local/huginn/agent-runtime:0.1.0
+    command: ["/usr/local/bin/claude_skill.sh"]
+    serviceAccountName: huginn-agent          # 자기 namespace Secret/CM 만 read(§6.1)
+    claudePVCName: pvc-claude-pct-model-server # ~/.claude 로 마운트할 앱별 격리 PVC(§5.5)
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    env:
+      # --- claude_skill.sh 주입 컨텍스트(§5.1) ---
+      - name: MUNINN_GOAL
+        value: "PodCrashLooping 이벤트를 진단하고 output 정책(pull_request)에 따라 처리한다."
+      - name: MUNINN_GLOBAL_SYSTEM_PROMPT_REF
+        value: configmap/muninn-global-prompt
+      - name: MUNINN_TEAM_SETTINGS_REF
+        value: configmap/muninn-team-settings
+      - name: MUNINN_SOUL_REF                  # HuginnAgent.spec.agent.soulRef 에서 전파
+        value: configmap/soul-pct-model-server
+      - name: MUNINN_EVENT_PAYLOAD_REF
+        value: secret/sess-e3f8a91-01-event
+      - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
+        value: '{"maxIterations":12,"maxCostUsd":5}'
+      - name: MUNINN_MEMORY_ENDPOINT
+        value: http://muninn-memory.muninn.svc:8080
+      - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)
+        value: http://muninn-api.muninn.svc:8080
+      # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2) ---
+      - name: ANTHROPIC_API_KEY
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key } }
+      - name: GITHUB_PAT
+        valueFrom: { secretKeyRef: { name: gh-ai-pat, key: token } }
 
 status:
   phase: Running                    # Queued | Pending | Running | AwaitingApproval | Succeeded | Failed | Cancelled
