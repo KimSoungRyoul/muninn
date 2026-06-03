@@ -233,7 +233,7 @@ func (r *HuginnSessionReconciler) createRun(ctx context.Context, session *muninn
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-a%d", session.Name, attempt),
 			Namespace: session.Namespace,
-			Labels:    sessionChildLabels(session),
+			Labels:    sessionChildLabels(session, agent),
 		},
 		Spec: muninniov1beta1.HuginnRunSpec{
 			SessionRef:              session.Name,
@@ -280,15 +280,19 @@ func backoffReady(latest *muninniov1beta1.HuginnRun, policy muninniov1beta1.Back
 	return delay - elapsed, false
 }
 
-func sessionChildLabels(session *muninniov1beta1.HuginnSession) map[string]string {
+func sessionChildLabels(session *muninniov1beta1.HuginnSession, agent *muninniov1beta1.HuginnAgent) map[string]string {
 	out := map[string]string{LabelSession: session.Name}
 	for _, k := range []string{LabelWorkspace, LabelAgent} {
 		if v, ok := session.Labels[k]; ok {
 			out[k] = v
 		}
 	}
+	// API 가 라벨을 누락한 경우 권위 소스(spec)에서 보강 — workspace 격리 selector 가 끊기지 않도록(§6.1).
 	if _, ok := out[LabelAgent]; !ok {
 		out[LabelAgent] = session.Spec.AgentRef
+	}
+	if _, ok := out[LabelWorkspace]; !ok && agent.Spec.WorkspaceID != "" {
+		out[LabelWorkspace] = agent.Spec.WorkspaceID
 	}
 	return out
 }
