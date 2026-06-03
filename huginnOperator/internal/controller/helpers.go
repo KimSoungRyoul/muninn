@@ -67,10 +67,10 @@ func defaultAgentResources() corev1.ResourceRequirements {
 	}
 }
 
-// buildAgentPodSpec 은 HuginnAgent + HuginnSession 컨텍스트로 에이전트 Pod 명세를 만든다(operator-design §2.4, §5.1).
-// 인증 키는 PVC 가 아니라 env(Secret)로만 주입한다(§5.1, §6.2).
-func buildAgentPodSpec(agent *muninniov1beta1.HuginnAgent, session *muninniov1beta1.HuginnSession,
-	memoryEndpoint, apiEndpoint string) corev1.PodSpec {
+// buildJobTemplate 은 HuginnAgent + HuginnSession 컨텍스트로 큐레이트된 실행 recipe 를 만든다(operator-design §2.4, §5.1).
+// full corev1.PodSpec 대신 슬림한 JobTemplate 을 반환한다(CRD 스키마 폭증 회피). 인증 키는 env(Secret)로만 주입(§5.1, §6.2).
+func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, session *muninniov1beta1.HuginnSession,
+	memoryEndpoint, apiEndpoint string) muninniov1beta1.JobTemplate {
 
 	g := session.Spec.InheritedGuardrails
 	env := []corev1.EnvVar{
@@ -103,27 +103,12 @@ func buildAgentPodSpec(agent *muninniov1beta1.HuginnAgent, session *muninniov1be
 		}})
 	}
 
-	return corev1.PodSpec{
-		RestartPolicy:      corev1.RestartPolicyNever,
+	return muninniov1beta1.JobTemplate{
+		Image:              agent.Spec.Agent.Image,
+		Command:            []string{agentSkillCmd},
+		Env:                env,
+		Resources:          defaultAgentResources(),
 		ServiceAccountName: serviceAccountName,
-		Containers: []corev1.Container{{
-			Name:      agentContainerName,
-			Image:     agent.Spec.Agent.Image,
-			Command:   []string{agentSkillCmd},
-			Resources: defaultAgentResources(),
-			Env:       env,
-			VolumeMounts: []corev1.VolumeMount{{
-				Name:      claudeVolumeName,
-				MountPath: claudeMountPath,
-			}},
-		}},
-		Volumes: []corev1.Volume{{
-			Name: claudeVolumeName,
-			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: pvcNameForAgent(agent.Name),
-				},
-			},
-		}},
+		ClaudePVCName:      pvcNameForAgent(agent.Name),
 	}
 }

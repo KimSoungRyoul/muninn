@@ -157,11 +157,47 @@ func (r *HuginnRunReconciler) markFinished(run *muninniov1beta1.HuginnRun, phase
 	}
 }
 
-func (r *HuginnRunReconciler) createJob(ctx context.Context, run *muninniov1beta1.HuginnRun) error {
-	podSpec := *run.Spec.JobTemplate.PodSpec.DeepCopy()
-	if podSpec.RestartPolicy == "" {
-		podSpec.RestartPolicy = corev1.RestartPolicyNever
+// expandPodSpec 은 큐레이트된 JobTemplate 을 full corev1.PodSpec 으로 확장한다(고정 필드는 여기서 부여).
+func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
+	command := jt.Command
+	if len(command) == 0 {
+		command = []string{agentSkillCmd}
 	}
+	sa := jt.ServiceAccountName
+	if sa == "" {
+		sa = serviceAccountName
+	}
+	resources := jt.Resources
+	if len(resources.Requests) == 0 && len(resources.Limits) == 0 {
+		resources = defaultAgentResources()
+	}
+	container := corev1.Container{
+		Name:      agentContainerName,
+		Image:     jt.Image,
+		Command:   command,
+		Resources: resources,
+		Env:       jt.Env,
+	}
+	var volumes []corev1.Volume
+	if jt.ClaudePVCName != "" {
+		container.VolumeMounts = []corev1.VolumeMount{{Name: claudeVolumeName, MountPath: claudeMountPath}}
+		volumes = []corev1.Volume{{
+			Name: claudeVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: jt.ClaudePVCName},
+			},
+		}}
+	}
+	return corev1.PodSpec{
+		RestartPolicy:      corev1.RestartPolicyNever,
+		ServiceAccountName: sa,
+		Containers:         []corev1.Container{container},
+		Volumes:            volumes,
+	}
+}
+
+func (r *HuginnRunReconciler) createJob(ctx context.Context, run *muninniov1beta1.HuginnRun) error {
+	podSpec := expandPodSpec(run.Spec.JobTemplate)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.Name,

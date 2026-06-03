@@ -240,9 +240,7 @@ func (r *HuginnSessionReconciler) createRun(ctx context.Context, session *muninn
 			Attempt:                 attempt,
 			TimeoutSeconds:          3600,
 			TTLSecondsAfterFinished: 86400,
-			JobTemplate: muninniov1beta1.JobTemplate{
-				PodSpec: buildAgentPodSpec(agent, session, memEndpoint, apiEndpoint),
-			},
+			JobTemplate:             buildJobTemplate(agent, session, memEndpoint, apiEndpoint),
 		},
 	}
 	if err := controllerutil.SetControllerReference(session, run, r.Scheme); err != nil {

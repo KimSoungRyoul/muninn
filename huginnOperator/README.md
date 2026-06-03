@@ -29,12 +29,10 @@ Make sure you have the proper permission to the registry if the above commands d
 make install
 ```
 
-> **NOTE (대용량 CRD):** `HuginnRun` CRD 는 `corev1.PodSpec` 을 임베드해 약 590KB 로,
-> client-side `kubectl apply` 의 `last-applied-configuration` 어노테이션 256KB 한도를 초과한다.
-> `make install`/`make deploy` 는 이미 **server-side apply**(`kubectl apply --server-side --force-conflicts`)
-> 를 사용한다. 번들(`install.yaml`)을 수동 적용할 때도 `--server-side` 를 붙여라.
-> `metadata.annotations: Too long: must have at most 262144 bytes` 오류가 나면 client-side 로 적용한 것이다.
-> (장기적으로는 `JobTemplate` 에서 full PodSpec 대신 큐레이트된 필드 서브셋을 쓰면 스키마가 크게 줄어든다 — 후속 과제.)
+> **NOTE:** `HuginnRun` 의 `spec.jobTemplate` 은 full `corev1.PodSpec` 대신 큐레이트된 필드
+> 서브셋(image/command/env/resources/serviceAccountName/claudePVCName)만 담는다. 덕분에 CRD 스키마가
+> 작아(~수십KB) 일반 client-side `kubectl apply` 로 설치된다(server-side apply 불요). Run controller 가
+> Job 생성 시 고정 필드(restartPolicy/volumeMount/containerName)를 더해 full PodSpec 으로 확장한다.
 
 **Deploy the Manager to the cluster with the image specified by `IMG`:**
 
@@ -96,7 +94,7 @@ Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
 the project, i.e.:
 
 ```sh
-kubectl apply --server-side --force-conflicts -f https://raw.githubusercontent.com/<org>/huginnoperator/<tag or branch>/dist/install.yaml
+kubectl apply -f https://raw.githubusercontent.com/<org>/huginnoperator/<tag or branch>/dist/install.yaml
 ```
 
 ### By providing a Helm Chart
