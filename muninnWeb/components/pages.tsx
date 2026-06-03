@@ -153,8 +153,8 @@ function defaultSoulMd(a) {
     "## 조사 우선순위",
     "",
     "1. 최근 24시간 동일 fingerprint 의 Memory recall",
-    "2. Loki/Saga 에서 해당 namespace 로그 수집",
-    "3. VictoriaMetrics 에서 CPU/Memory/QPS 패턴 도출",
+    "2. Loki 에서 해당 namespace 로그 수집",
+    "3. Mimir 에서 CPU/Memory/QPS 패턴 도출",
     "4. 가설 검증 후 PR/Issue 초안 작성",
     "",
     "> 승인이 필요한 액션은 반드시 `awaiting_approval` 로 멈춤 상태로 널긴다.",
@@ -367,9 +367,8 @@ function BindingsTab({ app: a }: any) {
         {[
           { gly: "chart", name: "Grafana", inst: "platform-grafana ↗", kv: [["default dashboard uid", "abc123"]], isDefault: true },
           { gly: "fileText", name: "Loki", inst: "prod-loki ↗", kv: [["default query", `{app="${a.name}"}`]], isDefault: true },
-          { gly: "fileText", name: "Saga", inst: "saga-aiplatform ↗", kv: [["default query", `app_name:${a.name} AND level:ERROR`]], isDefault: false },
           { gly: "activity", name: "Tempo", inst: "prod-tempo ↗", kv: [["default service", a.name]], isDefault: true },
-          { gly: "activity", name: "VictoriaMetrics", inst: "prod-vm ↗", kv: [["default filter", `{kubernetes_app="${a.name}"}`]], isDefault: true },
+          { gly: "activity", name: "Mimir", inst: "prod-mimir ↗", kv: [["default filter", `{kubernetes_app="${a.name}"}`]], isDefault: true },
         ].map((b, i) => (
           <div className="hm-binding" key={i}>
             <span className="gly"><Icon name={b.gly} size={15}/></span>
@@ -803,8 +802,8 @@ function ObservabilitySection() {
   const [sub, setSub] = useS_HP("dashboard");
   const TABS = [
     { id: "dashboard", label: "Dashboard", tools: "Grafana",          count: 1 },
-    { id: "metrics",   label: "Metrics",   tools: "VictoriaMetrics",  count: 2 },
-    { id: "logging",   label: "Logging",   tools: "Loki · Saga",      count: 3 },
+    { id: "metrics",   label: "Metrics",   tools: "Mimir",  count: 2 },
+    { id: "logging",   label: "Logging",   tools: "Loki",             count: 2 },
     { id: "tracing",   label: "Tracing",   tools: "Tempo",            count: 1 },
     { id: "profiling", label: "Profiling", tools: "Pyroscope",        count: 2 },
   ];
@@ -832,9 +831,9 @@ function ObservabilitySection() {
 
       {sub === "metrics" && (
         <ToolSection
-          name="VictoriaMetrics"
+          name="Mimir"
           kind="time-series"
-          desc="Prometheus 호환 시계열 DB. 고압축·장기 보관이 강점으로, infra/app 메트릭을 쿼리합니다."
+          desc="Prometheus 호환 메트릭(Mimir). 고압축·장기 보관이 강점으로, infra/app 메트릭을 쿼리합니다."
           count={2}
           brandColor="#E74C3C"
           brandMark={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"><polyline points="4 17 9 12 13 16 20 7"/><circle cx="20" cy="7" r="1.4" fill="white"/></svg>}
@@ -845,14 +844,14 @@ function ObservabilitySection() {
               ...obsCols,
             ]}
             rows={[
-              { k: "vmselect", name: "prod-vm",         e: "vm-select.observability:8481", st: "healthy", used: 9 },
-              { k: "vminsert", name: "prod-vm-ingest",  e: "vm-insert.observability:8480", st: "healthy", used: 9 },
+              { k: "vmselect", name: "prod-mimir",         e: "mimir-query.observability:8481", st: "healthy", used: 9 },
+              { k: "vminsert", name: "prod-mimir-ingest",  e: "mimir-ingest.observability:8480", st: "healthy", used: 9 },
             ]}
           />
         </ToolSection>
       )}
 
-      {sub === "logging" && (<>
+      {sub === "logging" && (
         <ToolSection
           name="Loki"
           kind="log-aggregation"
@@ -868,22 +867,7 @@ function ObservabilitySection() {
             ]}
           />
         </ToolSection>
-
-        <ToolSection
-          name="Saga"
-          kind="log-platform"
-          desc="사내 통합 로그 플랫폼. ai-platform 등 일부 namespace 에서 Saga 라벨로만 접근 가능한 케이스 분석에 사용."
-          count={1}
-          brandColor="#10B981"
-          brandMark={<svg width="20" height="20" viewBox="0 0 24 24" fill="white"><rect x="4" y="6" width="16" height="3" rx="1"/><rect x="4" y="11" width="11" height="3" rx="1"/><rect x="4" y="16" width="8" height="3" rx="1"/></svg>}
-        >
-          <PlatformTable cols={obsCols}
-            rows={[
-              { name: "saga-aiplatform", e: "ws=ai-platform/prod-svc", st: "healthy", used: 7 },
-            ]}
-          />
-        </ToolSection>
-      </>)}
+      )}
 
       {sub === "tracing" && (
         <ToolSection

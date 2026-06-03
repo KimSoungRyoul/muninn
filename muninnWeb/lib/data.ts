@@ -87,7 +87,7 @@ const RUN_DETAIL: RunDetail = {
   recalledMemories: [
     { id: "m1", fact: "Triton OOM — /v1/embed payload 가 4MB 를 넘으면 memory limit 1Gi 로 부족. 4Gi 로 상향 필요.", score: 0.91 },
     { id: "m2", fact: "ai-router 는 warm-up 비용이 크므로 HPA min replicas 는 최소 2 이상으로 유지해야 함.", score: 0.84 },
-    { id: "m3", fact: "ai-platform namespace 에서는 Loki label 중 `app` 이 canonical service selector. `service_name` 은 Saga 에만 존재.", score: 0.78 },
+    { id: "m3", fact: "ai-platform namespace 에서는 Loki label 중 `app` 이 canonical service selector. `service_name` label 은 일부 namespace 에만 존재.", score: 0.78 },
   ],
   toolsUsed: [
     { ns: "muninn", count: 1 },
@@ -110,7 +110,7 @@ const MEMORIES: Memory[] = [
   { id: "mem_g03", scope: "global", appId: null, appName: null, fact: "ArgoCD sync 가 `Healthy/Synced` 인데 pod 가 구버전인 경우, `imagePullPolicy: Always` 가 아니거나 image SHA digest pinning 미사용을 의심.", run: null, when: "2026-03-10", tags: ["argocd", "general", "image"], score: 0.88, curated: true },
   { id: "mem_01", scope: "app", appId: "app_01", appName: "ai-router-svc", fact: "Triton inference server 가 /v1/embed payload 4MB 초과 시 memory limit 1Gi 로 OOMKilled. Working set 은 약 3.2Gi.", run: "run_7d1", when: "2026-04-15", tags: ["triton", "oom", "memory"], score: 0.91 },
   { id: "mem_02", scope: "app", appId: "app_01", appName: "ai-router-svc", fact: "ai-router 는 cold start 가 약 12 초 소요되므로 HPA min replicas 는 반드시 2 이상으로 운영.", run: "run_4a8", when: "2026-04-12", tags: ["hpa", "warmup"], score: 0.84 },
-  { id: "mem_03", scope: "app", appId: "app_01", appName: "ai-router-svc", fact: "ai-platform namespace 에서는 Loki label 중 `app` 이 canonical service selector. `service_name` 은 Saga 에만 존재.", run: "run_4a8", when: "2026-04-10", tags: ["loki", "label"], score: 0.72 },
+  { id: "mem_03", scope: "app", appId: "app_01", appName: "ai-router-svc", fact: "ai-platform namespace 에서는 Loki label 중 `app` 이 canonical service selector. `service_name` label 은 일부 namespace 에만 존재.", run: "run_4a8", when: "2026-04-10", tags: ["loki", "label"], score: 0.72 },
   { id: "mem_11", scope: "app", appId: "app_02", appName: "payment-worker", fact: "billing/load_to_dw DAG 의 task timeout 은 30분 — 그 이상은 upstream snowflake query 가 시간 초과한 케이스. retry 보다 query 분할이 필요.", run: "run_61a", when: "2026-04-30", tags: ["airflow", "timeout"], score: 0.87 },
   { id: "mem_21", scope: "app", appId: "app_03", appName: "search-indexer", fact: "image SHA 변경 후에도 ArgoCD 가 'Healthy/Synced' 로 보이지만 pod 는 이전 digest 그대로 돌아가는 케이스. ImagePullPolicy 와 configMap 기반 build 를 점검할 것.", run: "run_4a8", when: "2026-04-22", tags: ["argocd", "image-pull"], score: 0.79 },
   { id: "mem_31", scope: "app", appId: "app_04", appName: "data-etl", fact: "Airflow on_failure_callback HTTP 502 폭주는 보통 배포 후 load_balancer 5분 cooldown 때문에 발생.", run: "run_2bc", when: "2026-03-28", tags: ["airflow", "callback"], score: 0.68 },

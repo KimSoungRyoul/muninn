@@ -20,8 +20,8 @@ function HmNewApp({ workspaceId, onCancel, onCreated }: any) {
     output: "pull_request",
     bindings: {
       argocd: true, airflow: false,
-      grafana: true, victoriametrics: false,
-      loki: true, saga: false,
+      grafana: true, mimir: false,
+      loki: true,
       tempo: true, pyroscope: false,
       harbor: false,
     },
@@ -271,9 +271,8 @@ function PlatformToolsPicker({ bindings, setBinding, kind }: any) {
   ];
   const obsTools = [
     { id:"grafana",         name:"Grafana",         desc:"메트릭 · 로그 · 트레이스 통합 대시보드", brand:"#F46800" },
-    { id:"victoriametrics", name:"VictoriaMetrics", desc:"시계열 메트릭",                          brand:"#E74C3C" },
+    { id:"mimir", name:"Mimir", desc:"시계열 메트릭",                          brand:"#E74C3C" },
     { id:"loki",            name:"Loki",            desc:"LogQL 기반 로그 검색",                    brand:"#4D9BB8" },
-    { id:"saga",            name:"Saga",            desc:"사내 통합 로그 플랫폼",                 brand:"#10B981" },
     { id:"tempo",           name:"Tempo",           desc:"분산 트레이싱",                          brand:"#A88AED" },
     { id:"pyroscope",       name:"Pyroscope",       desc:"CPU · memory 프로파일링",                 brand:"#E8772E" },
   ];
