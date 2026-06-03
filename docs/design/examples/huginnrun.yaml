@@ -1,0 +1,85 @@
+# HuginnRun — 세션 내부의 실제 에이전트 실행 1회.
+# Operator 가 이 CR 에 대응하는 K8s Job(→ Pod)을 만든다. retry 마다 새 Run 이 생성된다.
+# 아키텍처 그림의 "Huginn Run" + "claude_skill.sh" 박스에 해당.
+apiVersion: muninn.io/v1beta1
+kind: HuginnRun
+metadata:
+  name: run-82c0f1a
+  namespace: ns-ai-platform
+  ownerReferences:
+    - apiVersion: muninn.io/v1beta1
+      kind: HuginnSession
+      name: sess-e3f8a91-01
+      controller: true              # cascade GC
+spec:
+  sessionRef: sess-e3f8a91-01
+  attempt: 1
+
+  # --- 실행 한도(MVP 는 K8s Job 으로 매핑; §3.3) ---
+  timeoutSeconds: 3600              # → Job.spec.activeDeadlineSeconds
+  ttlSecondsAfterFinished: 86400    # → Job.spec.ttlSecondsAfterFinished (24h)
+  # backoffLimit 은 HuginnSession.retryPolicy.maxRuns 에서 상속
+
+  jobTemplate:
+    podSpec:
+      restartPolicy: Never
+      serviceAccountName: huginn-agent-ai-platform   # 자기 namespace Secret/CM 만 read(§6.1)
+      containers:
+        - name: agent
+          image: registry.platform.local/huginn/agent-runtime:0.1.0
+          command: ["/usr/local/bin/claude_skill.sh"]
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits:   { cpu: "2000m", memory: "2Gi" }
+          volumeMounts:
+            - name: claude-home
+              mountPath: /root/.claude          # 그림 pvc(~/.claude/). 프로젝트 설정/세션만(인증 아님)
+          env:
+            # --- claude_skill.sh 주입 컨텍스트(§5.1) ---
+            - name: MUNINN_GOAL
+              valueFrom: { fieldRef: { fieldPath: "metadata.annotations['muninn.io/goal']" } }
+            - name: MUNINN_GLOBAL_SYSTEM_PROMPT_REF
+              value: configmap/muninn-global-prompt
+            - name: MUNINN_TEAM_SETTINGS_REF
+              value: configmap/muninn-team-settings
+            - name: MUNINN_SOUL_REF                 # ★ Application.spec.agent.soulRef 에서 전파
+              value: configmap/soul-pct-model-server
+            - name: MUNINN_EVENT_PAYLOAD_REF
+              value: secret/sess-e3f8a91-01-event
+            - name: MUNINN_GUARDRAILS               # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
+              value: '{"maxIterations":12,"maxCostUsd":5}'
+            - name: MUNINN_MEMORY_ENDPOINT
+              value: http://muninn-memory.muninn.svc:8080
+            - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)
+              value: http://muninn-api.muninn.svc:8080
+            # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2) ---
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key } }
+            - name: GITHUB_PAT
+              valueFrom: { secretKeyRef: { name: gh-ai-pat, key: token } }
+      volumes:
+        - name: claude-home
+          persistentVolumeClaim:
+            claimName: pvc-claude-pct-model-server   # 앱별 격리 PVC(§5.5)
+
+status:
+  phase: Running                    # Queued | Pending | Running | AwaitingApproval | Succeeded | Failed | Cancelled
+  step: 4                           # 현재 실행 중 Step 의 ix(1부터)
+  maxStep: 12                       # = guardrails.maxIterations
+  cost: 0.18                        # ResultMessage.total_cost_usd 기반 예상치
+  maxCostUsd: 5                     # 세션 상속값 복사(영속화)
+  tokens: 47120
+  maxTokens: 100000
+  startedAt: "2026-06-03T14:32:14+09:00"
+  finishedAt: null                  # 종료 시 Pod 보고 → Operator 가 duration_s 계산(§5.6)
+  recalledMemoryIds:                # API recall-report 로 보고(id+score+근거)
+    - { id: m1, score: 0.91, reason: "vector 0.93 + bm25 0.88 (hybrid)" }
+    - { id: m2, score: 0.84 }
+    - { id: m3, score: 0.78 }
+  output: null                      # 완료 시 "PR #842" / "Issue #143"
+  approval: null                    # AwaitingApproval 시 {reasons,state,requestedAt,expiresAt,decidedBy}(§6.4)
+  conditions:
+    - type: PodScheduled
+      status: "True"
+      reason: Started
+      lastTransitionTime: "2026-06-03T14:32:14+09:00"
