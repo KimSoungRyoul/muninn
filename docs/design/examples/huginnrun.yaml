@@ -18,7 +18,9 @@ spec:
   # --- 실행 한도(MVP 는 K8s Job 으로 매핑; §3.3) ---
   timeoutSeconds: 3600              # → Job.spec.activeDeadlineSeconds
   ttlSecondsAfterFinished: 86400    # → Job.spec.ttlSecondsAfterFinished (24h)
-  # backoffLimit 은 HuginnSession.retryPolicy.maxRuns 에서 상속
+  # Job.backoffLimit=0 강제(operator-design §2.1): Pod-level 재시도 없음(에이전트 비멱등).
+  # 재시도는 Session controller 가 새 attempt Run(run-...-a2)으로 수행, 상한=retryPolicy.maxRuns.
+  # suspend: true 면 Operator 가 Job 삭제 + phase=Cancelled(취소/거절 전파; operator-design §2.3).
 
   jobTemplate:
     podSpec:

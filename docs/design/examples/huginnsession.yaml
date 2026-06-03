@@ -7,16 +7,16 @@ metadata:
   name: sess-e3f8a91-01
   namespace: ns-ai-platform
   labels:
-    muninn.io/application: pct-model-server
+    muninn.io/agent: pct-model-server
     muninn.io/workspace: ws-ai
     muninn.io/event-fingerprint: PodCrashLooping
   ownerReferences:
     - apiVersion: muninn.io/v1beta1
-      kind: HuginnApplication
+      kind: HuginnAgent
       name: pct-model-server
-      controller: true              # cascade GC
+      controller: true              # cascade GC (Operator 가 누락 시 보강)
 spec:
-  applicationRef: pct-model-server
+  agentRef: pct-model-server
 
   # --- 정규화된 event payload(§4.3). 원본 alert 는 Secret sess-e3f8a91-01-event 에 보존 ---
   event:
