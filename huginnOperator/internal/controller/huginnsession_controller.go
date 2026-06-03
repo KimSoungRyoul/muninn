@@ -280,17 +280,20 @@ func backoffReady(latest *muninniov1beta1.HuginnRun, policy muninniov1beta1.Back
 
 func sessionChildLabels(session *muninniov1beta1.HuginnSession, agent *muninniov1beta1.HuginnAgent) map[string]string {
 	out := map[string]string{LabelSession: session.Name}
-	for _, k := range []string{LabelWorkspace, LabelAgent} {
+	for _, k := range []string{LabelWorkspace, LabelAgent, LabelFingerprint} {
 		if v, ok := session.Labels[k]; ok {
 			out[k] = v
 		}
 	}
-	// API 가 라벨을 누락한 경우 권위 소스(spec)에서 보강 — workspace 격리 selector 가 끊기지 않도록(§6.1).
+	// API 가 라벨을 누락한 경우 권위 소스(spec)에서 보강 — 격리/dedup selector 가 끊기지 않도록(§4.4, §6.1).
 	if _, ok := out[LabelAgent]; !ok {
 		out[LabelAgent] = session.Spec.AgentRef
 	}
 	if _, ok := out[LabelWorkspace]; !ok && agent.Spec.WorkspaceID != "" {
 		out[LabelWorkspace] = agent.Spec.WorkspaceID
+	}
+	if _, ok := out[LabelFingerprint]; !ok && session.Spec.Event.Fingerprint != "" {
+		out[LabelFingerprint] = session.Spec.Event.Fingerprint
 	}
 	return out
 }

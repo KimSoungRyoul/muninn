@@ -32,6 +32,7 @@ import (
 // Run controller 가 부여한다.
 type JobTemplate struct {
 	// image: 에이전트 런타임 컨테이너 이미지(HuginnAgent.spec.agent.image)
+	// +kubebuilder:validation:MinLength=1
 	Image string `json:"image"`
 	// command: 엔트리포인트(비면 기본 ["/usr/local/bin/claude_skill.sh"])
 	// +optional

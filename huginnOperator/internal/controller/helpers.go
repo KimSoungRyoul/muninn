@@ -77,7 +77,7 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, session *muninniov1bet
 		{Name: "MUNINN_GOAL", Value: session.Spec.Goal},
 		{Name: "MUNINN_GLOBAL_SYSTEM_PROMPT_REF", Value: "configmap/muninn-global-prompt"},
 		{Name: "MUNINN_TEAM_SETTINGS_REF", Value: "configmap/muninn-team-settings"},
-		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d}`, g.MaxIterations, g.MaxCostUsd)},
+		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d}`, g.MaxIterations, g.MaxCostUsd, g.MaxTokens)},
 		{Name: "MUNINN_MEMORY_ENDPOINT", Value: memoryEndpoint},
 		{Name: "MUNINN_API_ENDPOINT", Value: apiEndpoint},
 		// 인증: env(Secret)로만(§5.1, §6.2)

@@ -238,6 +238,7 @@ spec:
                     type: array
                   image:
                     description: 'image: 에이전트 런타임 컨테이너 이미지(HuginnAgent.spec.agent.image)'
+                    minLength: 1
                     type: string
                   resources:
                     description: 'resources: 컨테이너 리소스(비면 Run controller 가 §5.1 기본값
