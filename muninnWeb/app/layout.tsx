@@ -6,7 +6,7 @@ import { WorkspaceProvider } from "@/lib/workspace-context";
 import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
-  title: "Huginn & Muninn — DevOps Agent Platform",
+  title: "Muninn — DevOps Agent Platform",
   description: "Muninn DevOps Agent Platform console",
 };
 

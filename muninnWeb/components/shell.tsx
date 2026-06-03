@@ -84,8 +84,8 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
           <BrandLogo size={40}/>
         </span>
         <div className="wm" style={{display:"flex", gap:0, flexDirection:"column", alignItems:"flex-start", lineHeight:1.05}}>
-          <span style={{fontWeight:800, fontSize:15, letterSpacing:"-0.018em", color:"var(--on-surface)"}}>Huginn Agent</span>
-          <small style={{fontSize:11, color:"var(--on-surface-muted)", fontWeight:500, marginTop:2}}>DevOps Agent</small>
+          <span style={{fontWeight:800, fontSize:15, letterSpacing:"-0.018em", color:"var(--on-surface)"}}>Muninn</span>
+          <small style={{fontSize:11, color:"var(--on-surface-muted)", fontWeight:500, marginTop:2}}>DevOps Agent Platform</small>
         </div>
       </div>
       <WorkspaceSwitcher workspaceId={workspaceId} onSwitch={onSwitchWorkspace} onManage={onManageWorkspaces}/>

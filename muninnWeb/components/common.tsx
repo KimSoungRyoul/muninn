@@ -179,7 +179,7 @@ function RavenMark({ which = "huginn", size = 16, color }: any) {
 // ===========================================================
 //  BrandLogo — user-uploaded two-raven artwork, tintable via CSS mask
 // ===========================================================
-function BrandLogo({ size = 36, color, title = "Huginn & Muninn" }: any) {
+function BrandLogo({ size = 36, color, title = "Muninn — DevOps Agent Platform" }: any) {
   // Source artwork aspect: 1151 × 1000. Inline SVG so it tints with currentColor.
   const h = Math.round(size * (1000 / 1151));
   return (
