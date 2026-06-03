@@ -1,8 +1,8 @@
 # Muninn DevOps Agent Platform — 설계서
 
-> **상태**: Draft v0.2 · 2026-06-03 · (v0.1 → v0.2: 6개 영역 적대 검증으로 49개 개선점 반영)
+> **상태**: Draft v0.3 · 2026-06-03 · (v0.2 → v0.3: Operator 구현·검토 반영 — CRD kind `HuginnApplication`→`HuginnAgent` 확정, [operator-design.md](./operator-design.md) 추가)
 > **출처**: `muninnAgentPlatform_architecture.png`(아키텍처 그림, 우선) + `muninnAgentPlatform디자인/`(UI 프로토타입)
-> **네이밍 규칙**: 아키텍처 그림의 구조를 우선한다. 그림의 `huggin`/`hugginSession`(오타)은 노르드 신화 정식 철자인 **Huginn** 으로 교정해, CRD `kind` 는 `HuginnApplication`/`HuginnSession`/`HuginnRun` 로 쓴다. 디자인 파일 내부의 `hugginAgent` 같은 임시 네이밍은 무시한다.
+> **네이밍 규칙**: 아키텍처 그림의 구조를 우선한다. 그림의 `huggin`/`hugginSession`(오타)은 노르드 신화 정식 철자인 **Huginn** 으로 교정한다(짝이 되는 **Muninn** 과 철자 일관성). CRD `kind` 는 **`HuginnAgent`**(운영 대상=영속적 에이전트 정의) / **`HuginnSession`**(이벤트 1건) / **`HuginnRun`**(실행 1회). 최상위는 그림의 `kind: huggin` 과 그림의 'Agent' 용어(*huggin AgentOperator*)를 반영해 `HuginnAgent` 로 확정했다(초안의 `HuginnApplication` 에서 변경; 도메인상으로는 여전히 "Application" 을 표현). 오타 철자(`hugginAgent` 등)는 쓰지 않는다.
 
 ---
 
@@ -39,7 +39,7 @@ Grafana alert ─▶ Muninn API(Gateway) ─▶ (정규화·dedup) ─▶ K8s AP
 | `User → Muninn UI → Muninn API → PostgreSQL(metaDB)` | 운영자 콘솔. metaDB 에 application·event·run·memory 상태를 저장하고 조회한다. |
 | "N개의 memories 를 보고 application 데이터/상태/회상 확인" | Muninn UI 의 핵심 가치는 **에이전트가 무엇을 기억하고 어떻게 회상했는지**를 운영자가 검수하는 것. |
 | `Huginn Agent Operator` | Kubernetes Operator. CR 을 watch 하며 조정(reconcile)한다. |
-| `Huginn Custom Resource` (그림 표기 `kind: huggin`, `name: pct-model-server-huggin`) → 정식 **`kind: HuginnApplication`**, `apiVersion: muninn.io/v1beta1`. "Application 들로 한번에 생성", `pvc(~/.claude/)` 공유 | Application 1개 = CR 1개. PVC 로 `~/.claude`(Claude Code **프로젝트 설정/세션**)를 마운트한다. **인증 키는 PVC 가 아니라 env(Secret)** 로 주입한다(§5.1). |
+| `Huginn Custom Resource` (그림 표기 `kind: huggin`, `name: pct-model-server-huggin`) → 정식 **`kind: HuginnAgent`**, `apiVersion: muninn.io/v1beta1`. "Application 들로 한번에 생성", `pvc(~/.claude/)` 공유 | Application 1개 = CR 1개. PVC 로 `~/.claude`(Claude Code **프로젝트 설정/세션**)를 마운트한다. **인증 키는 PVC 가 아니라 env(Secret)** 로 주입한다(§5.1). |
 | `Huginn Session` (그림 `kind: hugginSession`) → 정식 **`kind: HuginnSession`** | **이벤트 페이로드 1건 = HuginnSession 1개.** 동시에 여러 세션이 뜬다. |
 | `Huginn Run` (세션 안에 여러 개) → **`kind: HuginnRun`** | 세션 내부의 실제 에이전트 실행. retry/replay 시 run 이 늘어난다. |
 | `claude_skill.sh` 박스: goal / muninn global system prompt / 운영팀 settings / claude code huginn run / event payload | 에이전트 컨테이너의 **엔트리포인트와 주입 컨텍스트**. goal 은 "이 event payload 의 문제를 인식하고 처리하라". |
@@ -141,7 +141,7 @@ Operator 는 **외부 webhook 수신자가 아니라 K8s API watch 기반 contro
 
 ```mermaid
 flowchart LR
-    APP["HuginnApplication<br/>(운영 대상 1개)"]
+    APP["HuginnAgent<br/>(운영 대상 1개)"]
     SESS["HuginnSession<br/>(이벤트 1건)"]
     RUN["HuginnRun<br/>(실행 1회 · Job)"]
     APP -- "1:N · spec 상속(identity·guardrails·bindings)" --> SESS
@@ -150,7 +150,7 @@ flowchart LR
 
 전체 샘플: [`examples/`](./examples/). 아래는 핵심과 변경점만.
 
-### 3.1 `HuginnApplication`
+### 3.1 `HuginnAgent`
 
 UI "새 Application 등록" 6단계 위저드 → spec 직렬화.
 
@@ -177,7 +177,7 @@ UI "새 Application 등록" 6단계 위저드 → spec 직렬화.
 
 **이벤트 1건당 1개**. Gateway 가 dedup 통과 후 생성.
 
-- `spec.applicationRef`, `spec.event`(정규화 payload; 원본은 Secret 참조), `spec.goal`.
+- `spec.agentRef`(부모 HuginnAgent 이름), `spec.event`(정규화 payload; 원본은 Secret 참조), `spec.goal`.
 - **상속**: `spec.inheritedGuardrails`(maxIterations/maxCostUsd) + `spec.inheritedBindings`(Application.spec.bindings 복사, Phase 2 에서 세션 override 허용). `spec.identity` 도 Application 에서 복사.
 - `spec.retryPolicy.maxRuns`(세션이 만들 수 있는 Run 상한) → Job `backoffLimit` 매핑.
 - `status.phase`(§3.4), `status.conditions[]`(Approved/OutputReady/Reconciled 등), `status.runRefs[]`, `status.dedupCount`(그림의 `dedup:17`), `status.approval`(§6.4 — AwaitingApproval 시 해당 Run 들의 승인 메타 집계).
@@ -189,7 +189,7 @@ UI "새 Application 등록" 6단계 위저드 → spec 직렬화.
 - `spec.sessionRef`, `spec.attempt`, `spec.jobTemplate.podSpec`(image, `command:["/usr/local/bin/claude_skill.sh"]`, volumeMounts `~/.claude`, env, **resources**).
 - **재시도/타임아웃/정리**: `spec.timeoutSeconds`(기본 3600)→`activeDeadlineSeconds`, `HuginnSession.retryPolicy.maxRuns`→`backoffLimit`(기본 3), `spec.ttlSecondsAfterFinished`(기본 86400).
 - `status`: `phase`(§3.4), `conditions[]`, `step/maxStep`, `cost`, `tokens`, **`maxCostUsd`/`maxTokens`**(생성 시 세션 상속값 복사), `startedAt`/**`finishedAt`**, `recalledMemoryIds[]`(§5.6), `output`, `approval`(§6.4).
-- **주입 메커니즘**: Operator 가 Run 생성 시 `HuginnApplication.spec.agent.soulRef` → `MUNINN_SOUL_REF` env, `inheritedGuardrails` → env, 인증 Secret → env 로 전파(§5.1).
+- **주입 메커니즘**: Operator 가 Run 생성 시 `HuginnAgent.spec.agent.soulRef` → `MUNINN_SOUL_REF` env, `inheritedGuardrails` → env, 인증 Secret → env 로 전파(§5.1).
 
 > **Pod vs Job**: Pod 직접 생성은 Operator 가 재시도를 수동 구현해야 한다. Job 은 표준 필드로 재시도/타임아웃/TTL 을 얻으므로 MVP 채택. 장기 실행 세션(컨텍스트 재사용)이 필요하면 Open Question §11-3 참조.
 

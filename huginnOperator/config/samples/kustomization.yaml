@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- v1beta1_huginnagent.yaml
+- v1beta1_huginnsession.yaml
+- v1beta1_huginnrun.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
