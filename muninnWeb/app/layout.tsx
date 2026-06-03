@@ -1,13 +1,16 @@
 import "./tokens.css";
 import "./styles.css";
 import "./hm-theme.css";
+import type { Metadata } from "next";
+import { WorkspaceProvider } from "@/lib/workspace-context";
+import { AppShell } from "@/components/app-shell";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Huginn & Muninn — DevOps Agent Platform",
-  description: "Muninn DevOps Agent Platform UI (review prototype)",
+  description: "Muninn DevOps Agent Platform console",
 };
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
       <head>
@@ -21,7 +24,11 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <WorkspaceProvider>
+          <AppShell>{children}</AppShell>
+        </WorkspaceProvider>
+      </body>
     </html>
   );
 }
