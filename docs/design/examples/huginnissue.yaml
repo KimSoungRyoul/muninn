@@ -7,16 +7,16 @@ metadata:
   name: issue-e3f8a91-01
   namespace: ns-ai-platform
   labels:
-    muninn.io/agent: pct-model-server
+    muninn.io/agent: ai-router-svc
     muninn.io/workspace: ws-ai
     muninn.io/event-fingerprint: PodCrashLooping
   ownerReferences:
     - apiVersion: muninn.io/v1beta1
       kind: HuginnAgent
-      name: pct-model-server
+      name: ai-router-svc
       controller: true              # cascade GC (Operator 가 누락 시 보강)
 spec:
-  agentRef: pct-model-server
+  agentRef: ai-router-svc
 
   # --- 정규화된 event payload(§4.3). 원본 alert 는 Secret issue-e3f8a91-01-event 에 보존 ---
   event:
@@ -30,7 +30,7 @@ spec:
     payload:                        # 정규화 요약(축약)
       alertname: PodCrashLooping
       namespace: ns-ai-platform
-      pod: pct-model-server-7d9f-x2k
+      pod: ai-router-svc-7d9f-x2k
       reason: OOMKilled
 
   goal: "PodCrashLooping 이벤트를 진단하고 output 정책(pull_request)에 따라 처리한다."
@@ -47,7 +47,7 @@ spec:
       metrics: { backend: mimir, instance: prod-mimir }
     registry: { harbor: { instance: harbor-prod } }
   identity:
-    otelServiceName: pct-model-server
+    otelServiceName: ai-router-svc
     k8sNamespace: ns-ai-platform
 
   retryPolicy:

@@ -39,13 +39,13 @@ Grafana alert ─▶ Muninn API(Gateway) ─▶ (정규화·dedup) ─▶ K8s AP
 | `User → Muninn UI → Muninn API → PostgreSQL(metaDB)` | 운영자 콘솔. metaDB 에 application·event·run·memory 상태를 저장하고 조회한다. |
 | "N개의 memories 를 보고 application 데이터/상태/회상 확인" | Muninn UI 의 핵심 가치는 **에이전트가 무엇을 기억하고 어떻게 회상했는지**를 운영자가 검수하는 것. |
 | `Huginn Agent Operator` | Kubernetes Operator. CR 을 watch 하며 조정(reconcile)한다. |
-| `Huginn Custom Resource` (그림 표기 `kind: huggin`, `name: pct-model-server-huggin`) → 정식 **`kind: HuginnAgent`**, `apiVersion: muninn.io/v1beta1`. "Application 들로 한번에 생성", `pvc(~/.claude/)` 공유 | Application 1개 = CR 1개. PVC 로 `~/.claude`(Claude Code **프로젝트 설정/Claude SDK transcript**)를 마운트한다. **인증 키는 PVC 가 아니라 env(Secret)** 로 주입한다(§5.1). |
+| `Huginn Custom Resource` (그림 표기 `kind: huggin`, `name: ai-router-svc-huggin`) → 정식 **`kind: HuginnAgent`**, `apiVersion: muninn.io/v1beta1`. "Application 들로 한번에 생성", `pvc(~/.claude/)` 공유 | Application 1개 = CR 1개. PVC 로 `~/.claude`(Claude Code **프로젝트 설정/Claude SDK transcript**)를 마운트한다. **인증 키는 PVC 가 아니라 env(Secret)** 로 주입한다(§5.1). |
 | `Huginn Issue` (그림 표기 `kind: hugginSession`) → 정식 **`kind: HuginnIssue`** | **이벤트 페이로드 1건 = HuginnIssue 1개.** 동시에 여러 이슈가 뜬다. |
 | `Huginn Run` (이슈 안에 여러 개) → **`kind: HuginnRun`** | 이슈 내부의 실제 에이전트 실행. retry/replay 시 run 이 늘어난다. |
 | `claude_skill.sh` 박스: goal / muninn global system prompt / 운영팀 settings / claude code huginn run / event payload | 에이전트 컨테이너의 **엔트리포인트와 주입 컨텍스트**. goal 은 "이 event payload 의 문제를 인식하고 처리하라". |
 | `grafana alert (webhook)` → `event payload` | 진입 트리거는 Grafana alerting webhook. |
 | `grafana datasource: mimir, loki, tempo` | 관측 백엔드: **메트릭=Mimir, 로그=Loki, 트레이스=Tempo** (에이전트의 조사 도구). |
-| `Application(faiss) name: pct model server`, `Application(airflow Dags)`, `Application 들` | 운영 대상은 다양한 워크로드(추론 서버/배치 DAG 등). |
+| `Application(faiss) name: ai router service`, `Application(airflow Dags)`, `Application 들` | 운영 대상은 다양한 워크로드(추론 서버/배치 DAG 등). |
 | "Python 이나 TypeScript 로 작성하세요 — Agent SDK" | 에이전트 구현은 **Claude Agent SDK** (https://code.claude.com/docs/ko/sdk/agent-sdk/overview). |
 
 ### 1.2 UI 프로토타입에서 도출한 도메인 모델

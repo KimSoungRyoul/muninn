@@ -5,13 +5,13 @@
 apiVersion: muninn.io/v1beta1
 kind: HuginnAgent
 metadata:
-  name: pct-model-server            # UI 검증 규칙: ^[a-z0-9-]+$ (webhook 가 재검증)
+  name: ai-router-svc            # UI 검증 규칙: ^[a-z0-9-]+$ (webhook 가 재검증)
   namespace: ns-ai-platform         # Operator 가 spec.workspaceId 로 강제(§6.1)
   labels:
     muninn.io/workspace: ws-ai      # defaulting webhook 가 spec.workspaceId 로 자동 주입
 spec:
   workspaceId: ws-ai                # ★ 1급 필드(required, immutable). webhook+CEL 이중 검증
-  displayName: "PCT Model Server"
+  displayName: "AI Router Service"
   description: "추론 서비스 (Triton Inference Server)"
   kind: triton                      # triton | fastapi | airflow | other
   output: pull_request              # pull_request | github_issue
@@ -19,7 +19,7 @@ spec:
   # --- Source: GitHub 은 모든 앱에 자동 연결(필수) ---
   source:
     provider: github
-    repo: acme/pct-model-server
+    repo: acme/ai-router-svc
     defaultBranch: main
     pr:
       draft: true                   # 항상 draft 로 생성(강제)
@@ -48,27 +48,27 @@ spec:
       argocd: { instance: production-argocd }
     observability:
       grafana: { instance: platform-grafana, config: { dashboardUid: abc123 } }
-      loki:    { instance: prod-loki, config: { defaultQuery: '{app="pct-model-server"}' } }
-      tempo:   { instance: prod-tempo, config: { defaultService: pct-model-server } }
+      loki:    { instance: prod-loki, config: { defaultQuery: '{app="ai-router-svc"}' } }
+      tempo:   { instance: prod-tempo, config: { defaultService: ai-router-svc } }
       metrics: { backend: mimir, instance: prod-mimir,
-                 config: { defaultFilter: '{kubernetes_app="pct-model-server"}' } }
+                 config: { defaultFilter: '{kubernetes_app="ai-router-svc"}' } }
     registry:
       harbor:  { instance: harbor-prod }
 
   # --- Identity: 관측 신호 ↔ 워크로드 매핑(Issue 로 상속) ---
   identity:
-    otelServiceName: pct-model-server
+    otelServiceName: ai-router-svc
     k8sNamespace: ns-ai-platform
-    k8sLabels: { app: pct-model-server }
+    k8sLabels: { app: ai-router-svc }
 
   # --- Agent ---
   agent:
     runtime: claude-code
-    soulRef: soul-pct-model-server  # SOUL.md(ConfigMap). Run 생성 시 MUNINN_SOUL_REF 로 주입
+    soulRef: soul-ai-router-svc  # SOUL.md(ConfigMap). Run 생성 시 MUNINN_SOUL_REF 로 주입
     image: registry.platform.local/huginn/agent-runtime:0.1.0
 
 status:
-  webhookUrl: https://muninn-api.platform.local/hooks/pct-model-server   # Operator 발급(§4.5)
+  webhookUrl: https://muninn-api.platform.local/hooks/ai-router-svc   # Operator 발급(§4.5)
   phase: Ready                      # Pending | Ready | Degraded
   activeIssues: 2                 # Operator 가 reconcile 마다 계산(§8.4)
   lastEventAt: "2026-06-03T14:33:40+09:00"

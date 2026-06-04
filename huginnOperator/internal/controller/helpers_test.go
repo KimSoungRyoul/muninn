@@ -35,9 +35,9 @@ func envByName(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
 
 func testFixtures() (*muninniov1beta1.HuginnAgent, *muninniov1beta1.HuginnIssue) {
 	agent := &muninniov1beta1.HuginnAgent{}
-	agent.Name = "pct-model-server"
+	agent.Name = "ai-router-svc"
 	agent.Spec.Agent.Image = "registry.local/agent:0.1.0"
-	agent.Spec.Agent.SoulRef = "soul-pct"
+	agent.Spec.Agent.SoulRef = "soul-ai-router-svc"
 	agent.Spec.Source.SecretRef = "gh-pat"
 
 	issue := &muninniov1beta1.HuginnIssue{}
@@ -57,7 +57,7 @@ func TestBuildJobTemplate(t *testing.T) {
 	if jt.Image != "registry.local/agent:0.1.0" {
 		t.Errorf("image = %q", jt.Image)
 	}
-	if jt.ClaudePVCName != "pvc-claude-pct-model-server" {
+	if jt.ClaudePVCName != "pvc-claude-ai-router-svc" {
 		t.Errorf("claudePVCName = %q", jt.ClaudePVCName)
 	}
 	if jt.ServiceAccountName != serviceAccountName {
@@ -90,7 +90,7 @@ func TestBuildJobTemplate(t *testing.T) {
 	}
 
 	// 조건부 ref 주입.
-	if soul, ok := envByName(jt.Env, "MUNINN_SOUL_REF"); !ok || soul.Value != "configmap/soul-pct" {
+	if soul, ok := envByName(jt.Env, "MUNINN_SOUL_REF"); !ok || soul.Value != "configmap/soul-ai-router-svc" {
 		t.Errorf("MUNINN_SOUL_REF = %q", soul.Value)
 	}
 	if ev, ok := envByName(jt.Env, "MUNINN_EVENT_PAYLOAD_REF"); !ok || ev.Value != "secret/issue-1-event" {
