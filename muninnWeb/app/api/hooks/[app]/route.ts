@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
       accepted: false,
       reason: "below-threshold",
       event,
-      sessionId: null,
+      issueId: null,
       runId: null,
       dedupCount: 0,
     });
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
     accepted: true,
     reason,
     event,
-    sessionId: "sess-" + slug,
+    issueId: "issue-" + slug,
     runId: "run-" + slug,
     dedupCount,
   });

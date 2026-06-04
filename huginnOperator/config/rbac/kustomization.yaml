@@ -25,9 +25,9 @@ resources:
 - huginnrun_admin_role.yaml
 - huginnrun_editor_role.yaml
 - huginnrun_viewer_role.yaml
-- huginnsession_admin_role.yaml
-- huginnsession_editor_role.yaml
-- huginnsession_viewer_role.yaml
+- huginnissue_admin_role.yaml
+- huginnissue_editor_role.yaml
+- huginnissue_viewer_role.yaml
 - huginnagent_admin_role.yaml
 - huginnagent_editor_role.yaml
 - huginnagent_viewer_role.yaml

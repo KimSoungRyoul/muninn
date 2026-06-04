@@ -71,12 +71,12 @@ export interface NormalizedEvent {
   payload: Record<string, unknown>;
 }
 
-// webhook 수신 결과 (dedup 판정 + 세션/런 트리거 시뮬레이션, 설계 §4.4)
+// webhook 수신 결과 (dedup 판정 + 이슈/런 트리거 시뮬레이션, 설계 §4.4)
 export interface HookResult {
   accepted: boolean;
   reason: "new" | "recurrence" | "dedup-hit" | "below-threshold";
   event: NormalizedEvent;
-  sessionId: string | null;
+  issueId: string | null;
   runId: string | null;
   dedupCount: number;
 }

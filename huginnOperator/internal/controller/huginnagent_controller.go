@@ -35,11 +35,11 @@ import (
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 )
 
-// agentRefIndexKey 는 HuginnSession 을 spec.agentRef 로 인덱싱하는 키(activeSessions 집계용; operator-design §1).
+// agentRefIndexKey 는 HuginnIssue 을 spec.agentRef 로 인덱싱하는 키(activeIssues 집계용; operator-design §1).
 const agentRefIndexKey = "spec.agentRef"
 
 // HuginnAgentReconciler reconciles a HuginnAgent object.
-// 책임(operator-design §1, §2.4): 앱별 PVC/SA 보장, webhookUrl 발급(§4.5), activeSessions 집계(§8.4).
+// 책임(operator-design §1, §2.4): 앱별 PVC/SA 보장, webhookUrl 발급(§4.5), activeIssues 집계(§8.4).
 type HuginnAgentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -54,7 +54,7 @@ type HuginnAgentReconciler struct {
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnagents,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnagents/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnagents/finalizers,verbs=update
-// +kubebuilder:rbac:groups=muninn.io,resources=huginnsessions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=muninn.io,resources=huginnissues,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;watch
@@ -88,12 +88,12 @@ func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// 3) webhookUrl 발급(§4.5).
 	agent.Status.WebhookURL = fmt.Sprintf("%s/hooks/%s", orDefault(r.APIBaseURL, defaultAPIBaseURL), agent.Name)
 
-	// 4) activeSessions 집계(§8.4).
-	active, err := r.countActiveSessions(ctx, &agent)
+	// 4) activeIssues 집계(§8.4).
+	active, err := r.countActiveIssues(ctx, &agent)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	agent.Status.ActiveSessions = active
+	agent.Status.ActiveIssues = active
 
 	// 5) Ready.
 	agent.Status.Phase = muninniov1beta1.AppReady
@@ -108,7 +108,7 @@ func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Status().Patch(ctx, &agent, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
 	}
-	log.V(1).Info("HuginnAgent reconciled", "activeSessions", active)
+	log.V(1).Info("HuginnAgent reconciled", "activeIssues", active)
 	return ctrl.Result{}, nil
 }
 
@@ -212,10 +212,10 @@ func (r *HuginnAgentReconciler) ensureAgentRBAC(ctx context.Context, namespace s
 	return nil
 }
 
-// countActiveSessions 는 phase∈{Pending,Running,AwaitingApproval} 인 세션 수를 센다(§8.4).
+// countActiveIssues 는 phase∈{Pending,Running,AwaitingApproval} 인 세션 수를 센다(§8.4).
 // spec.agentRef field indexer 로 조회한다(namespace 전체 list+필터 회피).
-func (r *HuginnAgentReconciler) countActiveSessions(ctx context.Context, agent *muninniov1beta1.HuginnAgent) (int32, error) {
-	var list muninniov1beta1.HuginnSessionList
+func (r *HuginnAgentReconciler) countActiveIssues(ctx context.Context, agent *muninniov1beta1.HuginnAgent) (int32, error) {
+	var list muninniov1beta1.HuginnIssueList
 	if err := r.List(ctx, &list, client.InNamespace(agent.Namespace),
 		client.MatchingFields{agentRefIndexKey: agent.Name}); err != nil {
 		return 0, err
@@ -223,7 +223,7 @@ func (r *HuginnAgentReconciler) countActiveSessions(ctx context.Context, agent *
 	var n int32
 	for i := range list.Items {
 		switch list.Items[i].Status.Phase {
-		case muninniov1beta1.SessionPending, muninniov1beta1.SessionRunning, muninniov1beta1.SessionAwaitingApproval:
+		case muninniov1beta1.IssuePending, muninniov1beta1.IssueRunning, muninniov1beta1.IssueAwaitingApproval:
 			n++
 		}
 	}
@@ -232,17 +232,17 @@ func (r *HuginnAgentReconciler) countActiveSessions(ctx context.Context, agent *
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *HuginnAgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// HuginnSession 을 spec.agentRef 로 인덱싱(activeSessions 집계용).
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &muninniov1beta1.HuginnSession{},
+	// HuginnIssue 을 spec.agentRef 로 인덱싱(activeIssues 집계용).
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &muninniov1beta1.HuginnIssue{},
 		agentRefIndexKey, func(obj client.Object) []string {
-			return []string{obj.(*muninniov1beta1.HuginnSession).Spec.AgentRef}
+			return []string{obj.(*muninniov1beta1.HuginnIssue).Spec.AgentRef}
 		}); err != nil {
 		return err
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&muninniov1beta1.HuginnAgent{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
-		Owns(&muninniov1beta1.HuginnSession{}).
+		Owns(&muninniov1beta1.HuginnIssue{}).
 		Named("huginnagent").
 		Complete(r)
 }

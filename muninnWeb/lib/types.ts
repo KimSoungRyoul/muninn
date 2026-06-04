@@ -14,7 +14,7 @@ export interface Workspace {
 }
 
 export type AppKind = "triton" | "fastapi" | "airflow" | "other";
-export type AppOutput = "pull_request" | "issue";
+export type AppOutput = "pull_request" | "github_issue";
 
 export interface Application {
   id: string;

@@ -233,8 +233,8 @@ function OutputCards({ value, onChange }: any) {
       icon:"gitBranch",
     },
     {
-      id:"issue",
-      name:"Issue",
+      id:"github_issue",
+      name:"GitHub Issue",
       desc:"수동 조치 / 추가 조사가 필요한 경우. 분석 리포트를 GitHub Issue 로 남깁니다.",
       hint:"label: huginn, triage",
       icon:"alert",
@@ -383,7 +383,7 @@ function NewAppPreview({ form, ws, canSubmit, errors }: any) {
 
           <dt>결과</dt>
           <dd style={{color: form.output === "pull_request" ? "var(--primary-40)" : "var(--muninn-700)", fontWeight:600}}>
-            {form.output === "pull_request" ? "Pull Request" : "Issue"}
+            {form.output === "pull_request" ? "Pull Request" : "GitHub Issue"}
           </dd>
 
           <dt>저장소</dt>

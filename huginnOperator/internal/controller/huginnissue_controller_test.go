@@ -30,7 +30,7 @@ import (
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 )
 
-var _ = Describe("HuginnSession Controller", func() {
+var _ = Describe("HuginnIssue Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -40,13 +40,13 @@ var _ = Describe("HuginnSession Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		huginnsession := &muninniov1beta1.HuginnSession{}
+		huginnissue := &muninniov1beta1.HuginnIssue{}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind HuginnSession")
-			err := k8sClient.Get(ctx, typeNamespacedName, huginnsession)
+			By("creating the custom resource for the Kind HuginnIssue")
+			err := k8sClient.Get(ctx, typeNamespacedName, huginnissue)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &muninniov1beta1.HuginnSession{
+				resource := &muninniov1beta1.HuginnIssue{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
@@ -59,16 +59,16 @@ var _ = Describe("HuginnSession Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &muninniov1beta1.HuginnSession{}
+			resource := &muninniov1beta1.HuginnIssue{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Cleanup the specific resource instance HuginnSession")
+			By("Cleanup the specific resource instance HuginnIssue")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &HuginnSessionReconciler{
+			controllerReconciler := &HuginnIssueReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}

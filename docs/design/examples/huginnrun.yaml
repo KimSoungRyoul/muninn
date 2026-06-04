@@ -1,4 +1,4 @@
-# HuginnRun — 세션 내부의 실제 에이전트 실행 1회.
+# HuginnRun — 이슈 내부의 실제 에이전트 실행 1회.
 # Operator 가 이 CR 에 대응하는 K8s Job(→ Pod)을 만든다. retry 마다 새 Run 이 생성된다.
 # 아키텍처 그림의 "Huginn Run" + "claude_skill.sh" 박스에 해당.
 apiVersion: muninn.io/v1beta1
@@ -8,18 +8,18 @@ metadata:
   namespace: ns-ai-platform
   ownerReferences:
     - apiVersion: muninn.io/v1beta1
-      kind: HuginnSession
-      name: sess-e3f8a91-01
+      kind: HuginnIssue
+      name: issue-e3f8a91-01
       controller: true              # cascade GC
 spec:
-  sessionRef: sess-e3f8a91-01
+  issueRef: issue-e3f8a91-01
   attempt: 1
 
   # --- 실행 한도(MVP 는 K8s Job 으로 매핑; §3.3) ---
   timeoutSeconds: 3600              # → Job.spec.activeDeadlineSeconds
   ttlSecondsAfterFinished: 86400    # → Job.spec.ttlSecondsAfterFinished (24h)
   # Job.backoffLimit=0 강제(operator-design §2.1): Pod-level 재시도 없음(에이전트 비멱등).
-  # 재시도는 Session controller 가 새 attempt Run(run-...-a2)으로 수행, 상한=retryPolicy.maxRuns.
+  # 재시도는 Issue controller 가 새 attempt Run(run-...-a2)으로 수행, 상한=retryPolicy.maxRuns.
   # suspend: true 면 Operator 가 Job 삭제 + phase=Cancelled(취소/거절 전파; operator-design §2.3).
 
   # jobTemplate: 큐레이트된 실행 recipe(full PodSpec 미임베드 → CRD 슬림).
@@ -44,7 +44,7 @@ spec:
       - name: MUNINN_SOUL_REF                  # HuginnAgent.spec.agent.soulRef 에서 전파
         value: configmap/soul-pct-model-server
       - name: MUNINN_EVENT_PAYLOAD_REF
-        value: secret/sess-e3f8a91-01-event
+        value: secret/issue-e3f8a91-01-event
       - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
         value: '{"maxIterations":12,"maxCostUsd":5}'
       - name: MUNINN_MEMORY_ENDPOINT
@@ -62,7 +62,7 @@ status:
   step: 4                           # 현재 실행 중 Step 의 ix(1부터)
   maxStep: 12                       # = guardrails.maxIterations
   cost: 0.18                        # ResultMessage.total_cost_usd 기반 예상치
-  maxCostUsd: 5                     # 세션 상속값 복사(영속화)
+  maxCostUsd: 5                     # 이슈 상속값 복사(영속화)
   tokens: 47120
   maxTokens: 100000
   startedAt: "2026-06-03T14:32:14+09:00"

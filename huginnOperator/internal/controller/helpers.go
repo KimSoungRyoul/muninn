@@ -29,7 +29,7 @@ import (
 const (
 	LabelWorkspace   = "muninn.io/workspace"
 	LabelAgent       = "muninn.io/agent"
-	LabelSession     = "muninn.io/session"
+	LabelIssue       = "muninn.io/issue"
 	LabelFingerprint = "muninn.io/event-fingerprint"
 	AnnotationGoal   = "muninn.io/goal"
 
@@ -67,14 +67,14 @@ func defaultAgentResources() corev1.ResourceRequirements {
 	}
 }
 
-// buildJobTemplate 은 HuginnAgent + HuginnSession 컨텍스트로 큐레이트된 실행 recipe 를 만든다(operator-design §2.4, §5.1).
+// buildJobTemplate 은 HuginnAgent + HuginnIssue 컨텍스트로 큐레이트된 실행 recipe 를 만든다(operator-design §2.4, §5.1).
 // full corev1.PodSpec 대신 슬림한 JobTemplate 을 반환한다(CRD 스키마 폭증 회피). 인증 키는 env(Secret)로만 주입(§5.1, §6.2).
-func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, session *muninniov1beta1.HuginnSession,
+func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1.HuginnIssue,
 	memoryEndpoint, apiEndpoint string) muninniov1beta1.JobTemplate {
 
-	g := session.Spec.InheritedGuardrails
+	g := issue.Spec.InheritedGuardrails
 	env := []corev1.EnvVar{
-		{Name: "MUNINN_GOAL", Value: session.Spec.Goal},
+		{Name: "MUNINN_GOAL", Value: issue.Spec.Goal},
 		{Name: "MUNINN_GLOBAL_SYSTEM_PROMPT_REF", Value: "configmap/muninn-global-prompt"},
 		{Name: "MUNINN_TEAM_SETTINGS_REF", Value: "configmap/muninn-team-settings"},
 		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d}`, g.MaxIterations, g.MaxCostUsd, g.MaxTokens)},
@@ -91,8 +91,8 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, session *muninniov1bet
 	if agent.Spec.Agent.SoulRef != "" {
 		env = append(env, corev1.EnvVar{Name: "MUNINN_SOUL_REF", Value: "configmap/" + agent.Spec.Agent.SoulRef})
 	}
-	if session.Spec.Event.PayloadSecretRef != "" {
-		env = append(env, corev1.EnvVar{Name: "MUNINN_EVENT_PAYLOAD_REF", Value: "secret/" + session.Spec.Event.PayloadSecretRef})
+	if issue.Spec.Event.PayloadSecretRef != "" {
+		env = append(env, corev1.EnvVar{Name: "MUNINN_EVENT_PAYLOAD_REF", Value: "secret/" + issue.Spec.Event.PayloadSecretRef})
 	}
 	if agent.Spec.Source.SecretRef != "" {
 		env = append(env, corev1.EnvVar{Name: "GITHUB_PAT", ValueFrom: &corev1.EnvVarSource{

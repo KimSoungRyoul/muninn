@@ -186,11 +186,11 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnAgent")
 		os.Exit(1)
 	}
-	if err := (&controller.HuginnSessionReconciler{
+	if err := (&controller.HuginnIssueReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "HuginnSession")
+		setupLog.Error(err, "Failed to create controller", "controller", "HuginnIssue")
 		os.Exit(1)
 	}
 	if err := (&controller.HuginnRunReconciler{

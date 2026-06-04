@@ -56,8 +56,8 @@ rules:
   - muninn.io
   resources:
   - huginnagents
+  - huginnissues
   - huginnruns
-  - huginnsessions
   verbs:
   - create
   - delete
@@ -70,16 +70,16 @@ rules:
   - muninn.io
   resources:
   - huginnagents/finalizers
+  - huginnissues/finalizers
   - huginnruns/finalizers
-  - huginnsessions/finalizers
   verbs:
   - update
 - apiGroups:
   - muninn.io
   resources:
   - huginnagents/status
+  - huginnissues/status
   - huginnruns/status
-  - huginnsessions/status
   verbs:
   - get
   - patch

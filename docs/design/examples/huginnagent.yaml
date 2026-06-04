@@ -14,7 +14,7 @@ spec:
   displayName: "PCT Model Server"
   description: "추론 서비스 (Triton Inference Server)"
   kind: triton                      # triton | fastapi | airflow | other
-  output: pull_request              # pull_request | issue
+  output: pull_request              # pull_request | github_issue
 
   # --- Source: GitHub 은 모든 앱에 자동 연결(필수) ---
   source:
@@ -42,7 +42,7 @@ spec:
     maxCostUsd: 5                   # → SDK max_budget_usd (cost 는 예상치)
     dailyRunCap: 50                 # 24h 슬라이딩 윈도우 Run 상한
 
-  # --- Bindings: 에이전트가 사용할 Platform Tool (MCP 서버). 모든 Session 의 기본값 source ---
+  # --- Bindings: 에이전트가 사용할 Platform Tool (MCP 서버). 모든 Issue 의 기본값 source ---
   bindings:
     deployment:
       argocd: { instance: production-argocd }
@@ -55,7 +55,7 @@ spec:
     registry:
       harbor:  { instance: harbor-prod }
 
-  # --- Identity: 관측 신호 ↔ 워크로드 매핑(Session 으로 상속) ---
+  # --- Identity: 관측 신호 ↔ 워크로드 매핑(Issue 로 상속) ---
   identity:
     otelServiceName: pct-model-server
     k8sNamespace: ns-ai-platform
@@ -70,7 +70,7 @@ spec:
 status:
   webhookUrl: https://muninn-api.platform.local/hooks/pct-model-server   # Operator 발급(§4.5)
   phase: Ready                      # Pending | Ready | Degraded
-  activeSessions: 2                 # Operator 가 reconcile 마다 계산(§8.4)
+  activeIssues: 2                 # Operator 가 reconcile 마다 계산(§8.4)
   lastEventAt: "2026-06-03T14:33:40+09:00"
   memoryCount: { app: 3, globalShared: 3 }
   conditions:

@@ -17,8 +17,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.sessionRef
-      name: Session
+    - jsonPath: .spec.issueRef
+      name: Issue
       type: string
     - jsonPath: .spec.attempt
       name: Attempt
@@ -66,6 +66,10 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              issueRef:
+                description: 'issueRef: 부모 HuginnIssue 의 metadata.name'
+                minLength: 1
+                type: string
               jobTemplate:
                 description: 'jobTemplate: Pod 실행 recipe'
                 properties:
@@ -79,7 +83,7 @@ spec:
                       type: string
                     type: array
                   env:
-                    description: 'env: 주입 컨텍스트 + 인증(secretKeyRef). Session 생성 시점 스냅샷(§5.1).'
+                    description: 'env: 주입 컨텍스트 + 인증(secretKeyRef). Issue 생성 시점 스냅샷(§5.1).'
                     items:
                       description: EnvVar represents an environment variable present
                         in a Container.
@@ -306,10 +310,6 @@ spec:
                 required:
                 - image
                 type: object
-              sessionRef:
-                description: 'sessionRef: 부모 HuginnSession 의 metadata.name'
-                minLength: 1
-                type: string
               suspend:
                 description: |-
                   suspend: true 면 Operator 가 Job 을 삭제하고 phase=Cancelled 로 전이(operator-design §2.3).
@@ -330,8 +330,8 @@ spec:
                 type: integer
             required:
             - attempt
+            - issueRef
             - jobTemplate
-            - sessionRef
             type: object
           status:
             description: |-

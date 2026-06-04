@@ -45,7 +45,7 @@ type HuginnRunReconciler struct {
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnruns/finalizers,verbs=update
-// +kubebuilder:rbac:groups=muninn.io,resources=huginnsessions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=muninn.io,resources=huginnissues,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
@@ -65,15 +65,15 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	base := run.DeepCopy()
 
-	// 상속 caps 1회 복사(Operator 소유): session.inheritedGuardrails → status.maxStep/maxCostUsd/maxTokens.
+	// 상속 caps 1회 복사(Operator 소유): issue.inheritedGuardrails → status.maxStep/maxCostUsd/maxTokens.
 	// 가드는 maxStep 으로만 닫는다 — maxStep(=maxIterations, Minimum=1)은 복사 후 항상 ≥1 이라 정확히 1회만 실행된다.
 	// (maxCostUsd/maxTokens 는 0 이 정당값이라 OR 가드로 쓰면 재실행됨.)
 	if run.Status.MaxStep == 0 {
-		var session muninniov1beta1.HuginnSession
-		if err := r.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: run.Spec.SessionRef}, &session); err == nil {
-			run.Status.MaxStep = session.Spec.InheritedGuardrails.MaxIterations
-			run.Status.MaxCostUsd = session.Spec.InheritedGuardrails.MaxCostUsd
-			run.Status.MaxTokens = session.Spec.InheritedGuardrails.MaxTokens
+		var issue muninniov1beta1.HuginnIssue
+		if err := r.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: run.Spec.IssueRef}, &issue); err == nil {
+			run.Status.MaxStep = issue.Spec.InheritedGuardrails.MaxIterations
+			run.Status.MaxCostUsd = issue.Spec.InheritedGuardrails.MaxCostUsd
+			run.Status.MaxTokens = issue.Spec.InheritedGuardrails.MaxTokens
 		}
 	}
 
@@ -205,7 +205,7 @@ func (r *HuginnRunReconciler) createJob(ctx context.Context, run *muninniov1beta
 			Labels:    childLabels(run.Labels),
 		},
 		Spec: batchv1.JobSpec{
-			// backoffLimit=0: Pod-level 재시도 비활성. 재시도는 Session 이 새 attempt Run 으로 수행(§2.1).
+			// backoffLimit=0: Pod-level 재시도 비활성. 재시도는 Issue 이 새 attempt Run 으로 수행(§2.1).
 			BackoffLimit:            ptr.To[int32](0),
 			ActiveDeadlineSeconds:   nonZero(run.Spec.TimeoutSeconds),
 			TTLSecondsAfterFinished: ptr.To(run.Spec.TTLSecondsAfterFinished),
@@ -273,7 +273,7 @@ func setRunCondition(run *muninniov1beta1.HuginnRun, condType string, status met
 // childLabels 는 부모 라벨 중 식별 라벨만 자식에 전파한다.
 func childLabels(in map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, k := range []string{LabelWorkspace, LabelAgent, LabelSession, LabelFingerprint} {
+	for _, k := range []string{LabelWorkspace, LabelAgent, LabelIssue, LabelFingerprint} {
 		if v, ok := in[k]; ok {
 			out[k] = v
 		}

@@ -18,8 +18,8 @@ const isoMinus = (m: number) => new Date(HM_NOW.getTime() - m * 60_000).toISOStr
 const APPS: Application[] = [
   { id: "app_01", workspaceId: "ws_ai",      name: "ai-router-svc",  kind: "triton",  output: "pull_request", repo: "acme/ai-router-svc",  runs24h: 23, failed24h: 18, lastRun: isoMinus(1),   cost7d: 12.40 },
   { id: "app_02", workspaceId: "ws_payment", name: "payment-worker", kind: "fastapi", output: "pull_request", repo: "acme/payment-worker", runs24h: 15, failed24h:  9, lastRun: isoMinus(15),  cost7d:  8.20 },
-  { id: "app_03", workspaceId: "ws_ai",      name: "search-indexer", kind: "fastapi", output: "issue",        repo: "acme/search-indexer", runs24h: 11, failed24h:  4, lastRun: isoMinus(89),  cost7d:  4.10 },
-  { id: "app_04", workspaceId: "ws_data",    name: "data-etl",       kind: "airflow", output: "issue",        repo: "acme/data-etl",       runs24h:  3, failed24h:  0, lastRun: isoMinus(220), cost7d:  1.20 },
+  { id: "app_03", workspaceId: "ws_ai",      name: "search-indexer", kind: "fastapi", output: "github_issue",        repo: "acme/search-indexer", runs24h: 11, failed24h:  4, lastRun: isoMinus(89),  cost7d:  4.10 },
+  { id: "app_04", workspaceId: "ws_data",    name: "data-etl",       kind: "airflow", output: "github_issue",        repo: "acme/data-etl",       runs24h:  3, failed24h:  0, lastRun: isoMinus(220), cost7d:  1.20 },
   { id: "app_05", workspaceId: "ws_data",    name: "legacy-batch",   kind: "other",   output: "pull_request", repo: "acme/legacy-batch",   runs24h:  0, failed24h:  0, lastRun: null,          cost7d:  0.00 },
 ];
 

@@ -33,26 +33,26 @@ func envByName(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
 	return corev1.EnvVar{}, false
 }
 
-func testFixtures() (*muninniov1beta1.HuginnAgent, *muninniov1beta1.HuginnSession) {
+func testFixtures() (*muninniov1beta1.HuginnAgent, *muninniov1beta1.HuginnIssue) {
 	agent := &muninniov1beta1.HuginnAgent{}
 	agent.Name = "pct-model-server"
 	agent.Spec.Agent.Image = "registry.local/agent:0.1.0"
 	agent.Spec.Agent.SoulRef = "soul-pct"
 	agent.Spec.Source.SecretRef = "gh-pat"
 
-	session := &muninniov1beta1.HuginnSession{}
-	session.Name = "sess-1"
-	session.Spec.Goal = "diagnose"
-	session.Spec.Event.PayloadSecretRef = "sess-1-event"
-	session.Spec.InheritedGuardrails = muninniov1beta1.InheritedGuardrails{
+	issue := &muninniov1beta1.HuginnIssue{}
+	issue.Name = "issue-1"
+	issue.Spec.Goal = "diagnose"
+	issue.Spec.Event.PayloadSecretRef = "issue-1-event"
+	issue.Spec.InheritedGuardrails = muninniov1beta1.InheritedGuardrails{
 		MaxIterations: 3, MaxCostUsd: 5, MaxTokens: 100000,
 	}
-	return agent, session
+	return agent, issue
 }
 
 func TestBuildJobTemplate(t *testing.T) {
-	agent, session := testFixtures()
-	jt := buildJobTemplate(agent, session, "http://mem", "http://api")
+	agent, issue := testFixtures()
+	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
 
 	if jt.Image != "registry.local/agent:0.1.0" {
 		t.Errorf("image = %q", jt.Image)
@@ -93,7 +93,7 @@ func TestBuildJobTemplate(t *testing.T) {
 	if soul, ok := envByName(jt.Env, "MUNINN_SOUL_REF"); !ok || soul.Value != "configmap/soul-pct" {
 		t.Errorf("MUNINN_SOUL_REF = %q", soul.Value)
 	}
-	if ev, ok := envByName(jt.Env, "MUNINN_EVENT_PAYLOAD_REF"); !ok || ev.Value != "secret/sess-1-event" {
+	if ev, ok := envByName(jt.Env, "MUNINN_EVENT_PAYLOAD_REF"); !ok || ev.Value != "secret/issue-1-event" {
 		t.Errorf("MUNINN_EVENT_PAYLOAD_REF = %q", ev.Value)
 	}
 	if goal, ok := envByName(jt.Env, "MUNINN_GOAL"); !ok || goal.Value != "diagnose" {

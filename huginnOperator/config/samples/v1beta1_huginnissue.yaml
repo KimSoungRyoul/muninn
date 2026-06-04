@@ -1,9 +1,9 @@
 apiVersion: muninn.io/v1beta1
-kind: HuginnSession
+kind: HuginnIssue
 metadata:
   labels:
     app.kubernetes.io/name: huginnoperator
     app.kubernetes.io/managed-by: kustomize
-  name: huginnsession-sample
+  name: huginnissue-sample
 spec:
   # TODO(user): Add fields here

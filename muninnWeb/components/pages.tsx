@@ -56,7 +56,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
                 <td><Badge tone="default">{a.kind}</Badge></td>
                 <td>
                   <span style={{fontSize:12.5, fontWeight:600, color: a.output === "pull_request" ? "var(--primary-40)" : "var(--muninn-700)"}}>
-                    {a.output === "pull_request" ? "Pull Request" : "Issue"}
+                    {a.output === "pull_request" ? "Pull Request" : "GitHub Issue"}
                   </span>
                 </td>
                 <td>
@@ -105,7 +105,7 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
             <Badge tone="default">{a.kind}</Badge>
           </div>
           <div style={{fontSize:13, color:"var(--on-surface-muted)", marginTop:6, fontFamily:"var(--font-sans)"}}>
-            결과 형식: <b style={{color:"var(--on-surface)", fontWeight:600}}>{a.output === "pull_request" ? "Pull Request" : "Issue"}</b> · <a href="#" style={{color:"var(--primary-40)", textDecoration:"none", fontWeight:500}}>{a.repo} ↗</a>
+            결과 형식: <b style={{color:"var(--on-surface)", fontWeight:600}}>{a.output === "pull_request" ? "Pull Request" : "GitHub Issue"}</b> · <a href="#" style={{color:"var(--primary-40)", textDecoration:"none", fontWeight:500}}>{a.repo} ↗</a>
           </div>
         </div>
         <div style={{display:"flex", gap:6}}>
