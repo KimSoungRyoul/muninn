@@ -23,10 +23,10 @@ import (
 
 // HuginnRun 은 세션 내부의 실제 에이전트 실행 1회를 표현한다(설계서 §3.3).
 // Operator 가 이 CR 에 대응하는 K8s Job(→ Pod)을 backoffLimit=0 으로 만든다.
-// 재시도는 Job 이 아니라 Session controller 가 새 attempt Run 을 만들어 수행한다(operator-design §2.1).
+// 재시도는 Job 이 아니라 Issue controller 가 새 attempt Run 을 만들어 수행한다(operator-design §2.1).
 
 // JobTemplate 은 에이전트 Pod 의 실행 recipe(큐레이트된 필드 서브셋).
-// Session controller 가 Agent+Session 컨텍스트로 채우고, Run controller 가 full corev1.PodSpec 으로 확장한다.
+// Issue controller 가 Agent+Issue 컨텍스트로 채우고, Run controller 가 full corev1.PodSpec 으로 확장한다.
 // full PodSpec 을 임베드하지 않는 이유: CRD OpenAPI 스키마가 ~590KB 로 폭증해 client-side apply
 // 256KB 어노테이션 한도를 넘기 때문(슬림화로 ~30KB). 고정 필드(restartPolicy/volumeMount/containerName)는
 // Run controller 가 부여한다.
@@ -37,7 +37,7 @@ type JobTemplate struct {
 	// command: 엔트리포인트(비면 기본 ["/usr/local/bin/claude_skill.sh"])
 	// +optional
 	Command []string `json:"command,omitempty"`
-	// env: 주입 컨텍스트 + 인증(secretKeyRef). Session 생성 시점 스냅샷(§5.1).
+	// env: 주입 컨텍스트 + 인증(secretKeyRef). Issue 생성 시점 스냅샷(§5.1).
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 	// resources: 컨테이너 리소스(비면 Run controller 가 §5.1 기본값 부여)
@@ -53,9 +53,9 @@ type JobTemplate struct {
 
 // HuginnRunSpec defines the desired state of HuginnRun.
 type HuginnRunSpec struct {
-	// sessionRef: 부모 HuginnSession 의 metadata.name
+	// issueRef: 부모 HuginnIssue 의 metadata.name
 	// +kubebuilder:validation:MinLength=1
-	SessionRef string `json:"sessionRef"`
+	IssueRef string `json:"issueRef"`
 	// attempt: 1부터. 재시도 시 새 Run(attempt N+1)으로 증가.
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
@@ -186,7 +186,7 @@ type HuginnRunStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=hrun
-// +kubebuilder:printcolumn:name="Session",type=string,JSONPath=`.spec.sessionRef`
+// +kubebuilder:printcolumn:name="Issue",type=string,JSONPath=`.spec.issueRef`
 // +kubebuilder:printcolumn:name="Attempt",type=integer,JSONPath=`.spec.attempt`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Step",type=integer,JSONPath=`.status.step`

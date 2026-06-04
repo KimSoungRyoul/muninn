@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: huginnsessions.muninn.io
+  name: huginnissues.muninn.io
 spec:
   group: muninn.io
   names:
-    kind: HuginnSession
-    listKind: HuginnSessionList
-    plural: huginnsessions
+    kind: HuginnIssue
+    listKind: HuginnIssueList
+    plural: huginnissues
     shortNames:
-    - hsess
-    singular: huginnsession
+    - hissue
+    singular: huginnissue
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -38,7 +38,7 @@ spec:
     name: v1beta1
     schema:
       openAPIV3Schema:
-        description: HuginnSession is the Schema for the huginnsessions API
+        description: HuginnIssue is the Schema for the huginnissues API
         properties:
           apiVersion:
             description: |-
@@ -58,7 +58,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: HuginnSessionSpec defines the desired state of HuginnSession.
+            description: HuginnIssueSpec defines the desired state of HuginnIssue.
             properties:
               agentRef:
                 description: 'agentRef: 부모 HuginnAgent 의 metadata.name(도메인상 "Application").'
@@ -278,7 +278,7 @@ spec:
                   backoff:
                     default: exponential
                     description: 'BackoffPolicy 는 재시도 간 대기 증가 방식(operator-design §2.1:
-                      Session controller 가 RequeueAfter 로 구현).'
+                      Issue controller 가 RequeueAfter 로 구현).'
                     enum:
                     - exponential
                     - linear
@@ -307,7 +307,7 @@ spec:
             - inheritedGuardrails
             type: object
           status:
-            description: HuginnSessionStatus defines the observed state of HuginnSession.
+            description: HuginnIssueStatus defines the observed state of HuginnIssue.
             properties:
               approval:
                 description: 'approval: AwaitingApproval 시 승인 메타 집계(§6.4)'
@@ -413,7 +413,7 @@ spec:
                   갱신.'
                 type: string
               phase:
-                description: SessionPhase 는 세션 거시 상태(§3.4). Run 들의 phase 집계로 산출.
+                description: IssuePhase 는 세션 거시 상태(§3.4). Run 들의 phase 집계로 산출.
                 enum:
                 - Pending
                 - Running

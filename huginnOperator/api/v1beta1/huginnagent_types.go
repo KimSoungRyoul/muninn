@@ -28,7 +28,7 @@ import (
 type AppKind string
 
 // AppOutput 은 에이전트 결과 형식.
-// +kubebuilder:validation:Enum=pull_request;issue
+// +kubebuilder:validation:Enum=pull_request;github_issue
 type AppOutput string
 
 // Severity 는 이벤트 심각도.
@@ -143,7 +143,7 @@ type MetricsBinding struct {
 	Config map[string]string `json:"config,omitempty"`
 }
 
-// Bindings 는 에이전트가 사용할 Platform Tool(MCP 서버) 집합. 모든 Session 의 기본값 source(§3.1).
+// Bindings 는 에이전트가 사용할 Platform Tool(MCP 서버) 집합. 모든 Issue 의 기본값 source(§3.1).
 type Bindings struct {
 	// +optional
 	Deployment *DeploymentBindings `json:"deployment,omitempty"`
@@ -176,7 +176,7 @@ type RegistryBindings struct {
 	Harbor *ToolBinding `json:"harbor,omitempty"`
 }
 
-// Identity 는 관측 신호 ↔ 워크로드 매핑(Session 으로 상속).
+// Identity 는 관측 신호 ↔ 워크로드 매핑(Issue 으로 상속).
 type Identity struct {
 	// +optional
 	OtelServiceName string `json:"otelServiceName,omitempty"`
@@ -248,9 +248,9 @@ type HuginnAgentStatus struct {
 	WebhookURL string `json:"webhookUrl,omitempty"`
 	// +optional
 	Phase AppPhase `json:"phase,omitempty"`
-	// activeSessions: reconcile 마다 계산(phase∈{Pending,Running,AwaitingApproval} 세션 수; §8.4)
+	// activeIssues: reconcile 마다 계산(phase∈{Pending,Running,AwaitingApproval} 세션 수; §8.4)
 	// +optional
-	ActiveSessions int32 `json:"activeSessions,omitempty"`
+	ActiveIssues int32 `json:"activeIssues,omitempty"`
 	// +optional
 	LastEventAt *metav1.Time `json:"lastEventAt,omitempty"`
 	// +optional
@@ -270,7 +270,7 @@ type HuginnAgentStatus struct {
 // +kubebuilder:printcolumn:name="Kind",type=string,JSONPath=`.spec.kind`
 // +kubebuilder:printcolumn:name="Output",type=string,JSONPath=`.spec.output`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=`.status.activeSessions`
+// +kubebuilder:printcolumn:name="Active",type=integer,JSONPath=`.status.activeIssues`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // HuginnAgent is the Schema for the huginnagents API

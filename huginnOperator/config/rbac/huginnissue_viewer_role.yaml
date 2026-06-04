@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: huginnoperator
     app.kubernetes.io/managed-by: kustomize
-  name: huginnsession-viewer-role
+  name: huginnissue-viewer-role
 rules:
 - apiGroups:
   - muninn.io
   resources:
-  - huginnsessions
+  - huginnissues
   verbs:
   - get
   - list
@@ -24,6 +24,6 @@ rules:
 - apiGroups:
   - muninn.io
   resources:
-  - huginnsessions/status
+  - huginnissues/status
   verbs:
   - get

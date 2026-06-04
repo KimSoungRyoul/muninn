@@ -31,13 +31,13 @@
 HuginnApplicationReconciler
   For:   HuginnApplication
   Owns:  PersistentVolumeClaim, ServiceAccount   (앱별 격리 리소스, §5.5/§6.1)
-  Watch: HuginnSession (→ owner App 으로 enqueue, status.activeSessions 재계산, §8.4)
-  할 일: webhookUrl 발급(§4.5) · bindings 검증 · 앱 PVC/SA 보장 · activeSessions/conditions
+  Watch: HuginnIssue (→ owner App 으로 enqueue, status.activeIssues 재계산, §8.4)
+  할 일: webhookUrl 발급(§4.5) · bindings 검증 · 앱 PVC/SA 보장 · activeIssues/conditions
 
-HuginnSessionReconciler
-  For:   HuginnSession
+HuginnIssueReconciler
+  For:   HuginnIssue
   Owns:  HuginnRun
-  할 일: retryPolicy 에 따라 HuginnRun(attempt N) 생성/재시도 · run phase 집계 → session phase
+  할 일: retryPolicy 에 따라 HuginnRun(attempt N) 생성/재시도 · run phase 집계 → issue phase
          · AwaitingApproval 집계(§6.4) · suspend 전파
 
 HuginnRunReconciler
@@ -48,7 +48,7 @@ HuginnRunReconciler
          · Job 상태 → Run.status.phase 매핑 · timeout/ttl 을 Job 네이티브 필드로 위임 · suspend 시 Job 삭제
 ```
 
-**field indexer**(reconcile 성능): `HuginnSession.spec.applicationRef`, `HuginnRun.spec.sessionRef` 에 인덱스를 건다. `Owns()` 가 자동 생성하는 ownerRef 역참조와 별개로, 이름 기반 cross-ref 조회에 사용.
+**field indexer**(reconcile 성능): `HuginnIssue.spec.applicationRef`, `HuginnRun.spec.issueRef` 에 인덱스를 건다. `Owns()` 가 자동 생성하는 ownerRef 역참조와 별개로, 이름 기반 cross-ref 조회에 사용.
 
 ---
 
@@ -58,17 +58,17 @@ HuginnRunReconciler
 
 설계서 §3.3 은 **둘 다** 적었다: ① "retry/replay 시 run 이 늘어난다" ② "`retryPolicy.maxRuns → Job backoffLimit`". 이 둘은 양립 불가다. backoffLimit 으로 Pod 를 재시도하면 Run CR 은 1개로 유지되기 때문이다.
 
-**확정안: Run = 1 attempt = backoffLimit 0 인 Job 1개. 재시도는 Session controller 가 새 Run(attempt N+1)을 만들어 수행한다.**
+**확정안: Run = 1 attempt = backoffLimit 0 인 Job 1개. 재시도는 Issue controller 가 새 Run(attempt N+1)을 만들어 수행한다.**
 
 근거:
 - 에이전트 실행은 **비멱등**이다(PR/Issue/메모리 저장 부작용). Pod 를 무지성 재시작하면 중복 PR 위험 → Pod-level 재시도(backoffLimit)는 부적합.
 - attempt 마다 **독립 transcript·cost·token 회계**가 필요(UI Run 목록은 attempt 단위). Run CR 분리가 이를 자연히 만족.
-- "retry 마다 새 Run" 이라는 설계 의도(§3.3, 그림의 "세션 안에 여러 Run")와 일치.
+- "retry 마다 새 Run" 이라는 설계 의도(§3.3, 그림의 "이슈 안에 여러 Run")와 일치.
 
 따라서:
 - `HuginnRun → Job.spec.backoffLimit = 0`(Pod 실패 = attempt 실패).
-- `HuginnSession.spec.retryPolicy.maxRuns` = **세션이 만들 수 있는 Run 총개수 상한**. Session controller 가 직전 Run 이 `Failed` 면 `len(runRefs) < maxRuns` 일 때 다음 attempt Run 생성.
-- `backoff: exponential` 은 Session controller 가 **재시도 간 `RequeueAfter`** 로 구현(예: 30s·60s·120s). Job 네이티브 backoff 아님.
+- `HuginnIssue.spec.retryPolicy.maxRuns` = **이슈가 만들 수 있는 Run 총개수 상한**. Issue controller 가 직전 Run 이 `Failed` 면 `len(runRefs) < maxRuns` 일 때 다음 attempt Run 생성.
+- `backoff: exponential` 은 Issue controller 가 **재시도 간 `RequeueAfter`** 로 구현(예: 30s·60s·120s). Job 네이티브 backoff 아님.
 - **멱등 가드(에이전트 측 책임, 문서화)**: PR 생성 전 `huginn` 라벨 열린 PR 존재 여부 확인 후 생성/갱신. (Operator 가 강제할 수 없으니 SOUL/global prompt 에 규약으로 명시.)
 
 > 설계서 §3.3 의 "maxRuns→backoffLimit" 문구는 **본 문서가 정정**한다(메인 설계서 차기 개정 반영 대상).
@@ -85,7 +85,7 @@ HuginnRunReconciler
 | `finishedAt`, `duration` 계산 | Operator | Job 종료 |
 | `step` | **Agent→API** | SDK 메시지 스트림(§5.3) |
 | `cost`, `tokens` | **Agent→API** | ResultMessage(§5.4) |
-| `maxStep`, `maxCostUsd`, `maxTokens` | Operator(생성 시 1회) | 세션 상속 복사(maxStep=maxIterations) |
+| `maxStep`, `maxCostUsd`, `maxTokens` | Operator(생성 시 1회) | 이슈 상속 복사(maxStep=maxIterations) |
 | `recalledMemoryIds` | **API**(recall-report, §5.6) | 에이전트 보고 |
 | `output`(PR/Issue) | **Agent→API** | 발행 결과 |
 | `conditions[]` | Operator(전이 사유) + API(승인 사유) | — |
@@ -99,7 +99,7 @@ HuginnRunReconciler
 승인 거절/사용자 취소 시 **실행 중 Pod 를 멈춰야** 한다. K8s-native 하게:
 
 - `HuginnRun.spec.suspend: bool`(기본 false) — Job 의 suspend 의미를 차용하되, 에이전트 Pod 는 suspend-resume 이 무의미하므로 **Operator 는 suspend=true 를 보면 Job 을 삭제하고 phase=Cancelled** 로 전이.
-- 흐름: 운영자 거절 → Muninn API 가 해당 Run 들 `spec.suspend=true` 패치 + Session `status.phase=Cancelled` → Run reconciler 가 Job 삭제 → phase=Cancelled, condition `reason=ApprovalRejected`.
+- 흐름: 운영자 거절 → Muninn API 가 해당 Run 들 `spec.suspend=true` 패치 + Issue `status.phase=Cancelled` → Run reconciler 가 Job 삭제 → phase=Cancelled, condition `reason=ApprovalRejected`.
 - graceful: 삭제 시 `propagationPolicy=Background`, Pod `terminationGracePeriodSeconds`(기본 30s) 동안 에이전트가 finishedAt/recall-report flush. 더 강한 보장이 필요하면 §3 finalizer.
 
 ### 2.4 부수 리소스 생성 주체
@@ -111,13 +111,13 @@ HuginnRunReconciler
 | ServiceAccount `huginn-agent-{ns}` | **HuginnApplicationReconciler** (Owns) | 자기 ns Secret/CM 만 read(§6.1) |
 | guardrails/context ConfigMap | **HuginnRunReconciler** 또는 env 직접 주입 | MVP=env 직접(`MUNINN_GUARDRAILS` JSON), CM 은 global-prompt/team-settings/soul 만 |
 | Job (→Pod) | **HuginnRunReconciler** (Owns) | jobTemplate.podSpec 기반 |
-| event Secret `{session}-event` | **Muninn API** (CR 생성 시 함께) | Operator 는 참조만 |
+| event Secret `{issue}-event` | **Muninn API** (CR 생성 시 함께) | Operator 는 참조만 |
 
 ---
 
 ## 3. Finalizer (§11-7 구체화)
 
-- **MVP**: ownerReference cascade GC 로 충분(App 삭제 → Session → Run → Job → Pod). finalizer **선택**.
+- **MVP**: ownerReference cascade GC 로 충분(App 삭제 → Issue → Run → Job → Pod). finalizer **선택**.
 - **추가 시점**: 진행 중 Run 이 삭제될 때 (a) 에이전트가 recall-report/finishedAt 를 flush 하고 (b) 외부 부작용(열린 draft PR) 정리 훅이 필요하면 `HuginnRun` 에 finalizer `muninn.io/run-cleanup` 추가. Operator 가 finalize 시 Job graceful delete + API 에 종료 통지.
 - 본 구현: finalizer 상수/헬퍼를 Run reconciler 에 **스캐폴딩만** 두고 기본 비활성(주석). 부작용 정리 정책 확정 후 활성화.
 
@@ -130,7 +130,7 @@ HuginnRunReconciler
 - **Validating(순수, 외부 의존 없음)**:
   - `spec.workspaceId` required & **immutable**(update 시 변경 거부).
   - `metadata.name` 형식 `^[a-z0-9-]+$`(CRD OpenAPI 패턴과 이중 방어).
-  - `spec.output ∈ {pull_request, issue}`, `spec.kind ∈ {triton,fastapi,airflow,other}` (CRD enum 과 이중).
+  - `spec.output ∈ {pull_request, github_issue}`, `spec.kind ∈ {triton,fastapi,airflow,other}` (CRD enum 과 이중).
   - (선택) `metadata.namespace` 가 workspaceId 규약과 정합한지.
 - **Defaulting**: 라벨 `muninn.io/workspace=<workspaceId>` 자동 주입(selector 보조, §3.1).
 - **멤버십(owner|member) 검증은 webhook 에 넣지 않는다**: metaDB 조회가 필요해 webhook 가 DB 가용성에 의존하게 되고, webhook 다운 시 모든 CR 연산이 막힌다(가용성 리스크). **CR 생성자인 Muninn API 가 이미 사용자 인증 후 멤버십을 검사**하므로 그 계층에서 집행. (webhook 는 인증 주체를 신뢰할 수 없는 경우의 최후 방어선이지만, 본 플랫폼은 API 가 유일 생성 경로이므로 API 검증으로 충분.)
@@ -163,7 +163,7 @@ HuginnRunReconciler
 | `spec.suspend=true` | `Cancelled` | `Cancelled=True, reason=ApprovalRejected/UserCancel` |
 | `activeDeadlineSeconds` 초과 | `Failed` | `reason=DeadlineExceeded` |
 
-Session.phase = Run 들의 집계:
+Issue.phase = Run 들의 집계:
 - 활성 Run 이 `Running/Pending/Queued` → `Running`.
 - 활성 Run 이 `AwaitingApproval` → `AwaitingApproval`.
 - 최신 Run `Succeeded` → `Succeeded`(`status.outcome` = Run.output).
@@ -177,10 +177,10 @@ Session.phase = Run 들의 집계:
 - [x] kubebuilder init + API 3종 + types(spec/status, OpenAPI 마커)
 - [x] CRD/RBAC 매니페스트 생성(`make manifests`)
 - [x] HuginnRunReconciler: Run→Job 생성, env/volume 주입, Job→phase 매핑, suspend→Cancel
-- [x] HuginnSessionReconciler: Session→Run(attempt 1) 생성, run phase 집계, 재시도(maxRuns)
-- [x] HuginnApplicationReconciler: webhookUrl 발급, PVC/SA 보장, activeSessions 집계
+- [x] HuginnIssueReconciler: Issue→Run(attempt 1) 생성, run phase 집계, 재시도(maxRuns)
+- [x] HuginnApplicationReconciler: webhookUrl 발급, PVC/SA 보장, activeIssues 집계
 - [x] HuginnApplication ValidatingWebhook(workspaceId required/immutable) + Defaulting(label)
-- [x] field indexer(sessionRef/applicationRef), Owns 토폴로지
+- [x] field indexer(issueRef/applicationRef), Owns 토폴로지
 - [x] `make build` 컴파일 통과
 - [ ] (차기) envtest 단위테스트, e2e(kind), finalizer 활성화, AwaitingApproval API 연동, 멤버십(API)
 
@@ -188,7 +188,7 @@ Session.phase = Run 들의 집계:
 
 ## 8. 메인 설계서 정정 제안(요약)
 
-1. §3.3 "retryPolicy.maxRuns → Job backoffLimit" → **"Job.backoffLimit=0; Session controller 가 attempt 별 Run 생성, maxRuns=Run 상한"** 으로 정정(본 문서 §2.1).
+1. §3.3 "retryPolicy.maxRuns → Job backoffLimit" → **"Job.backoffLimit=0; Issue controller 가 attempt 별 Run 생성, maxRuns=Run 상한"** 으로 정정(본 문서 §2.1).
 2. §3.3/§3.4 status 필드에 **소유자(Operator vs API)** 주석 추가(본 문서 §2.2).
 3. `HuginnRun.spec.suspend` 필드 신설 — 취소/거절 전파 경로(본 문서 §2.3).
 4. §6.4 승인 멤버십·§3.1 workspaceId 멤버십 검증을 **API 계층** 책임으로 명시(webhook 는 순수 검증만; 본 문서 §4).

@@ -14,12 +14,12 @@ v0.1 초안을 6개 영역으로 병렬 검토하고, 각 발견을 적대적으
 | 4 | SDK | 메시지→Step 변환(AssistantMessage/ToolUseBlock/ResultMessage) | §5.3 |
 | 5 | SDK | guardrail = `max_turns`/`max_budget_usd`, cost 는 예상치 | §5.4 |
 | 6 | SDK | MCP 도구명 규칙 `mcp__<ns>__<fn>` + `allowedTools` | §5.2 |
-| 7 | SDK | `~/.claude` 역할 정정(설정/세션), 인증은 env(Secret) | §5.1 |
+| 7 | SDK | `~/.claude` 역할 정정(설정/Claude session), 인증은 env(Secret) | §5.1 |
 | 8 | SDK | `permission_mode`(plan/dontAsk)와 승인 흐름 연결 | §5.4 |
-| 9 | K8s | Session/Run `status.conditions[]` K8s 표준 | §3.x, YAML |
+| 9 | K8s | Issue/Run `status.conditions[]` K8s 표준 | §3.x, YAML |
 | 10 | K8s | Run = **Job** 기반(backoffLimit/activeDeadlineSeconds/ttl) | §3.3, huginnrun.yaml |
 | 11 | K8s | PVC `~/.claude` 동시쓰기 충돌 → 격리 전략(A/B/C) | §5.5 |
-| 12 | K8s | Session 생성 경로 명확화(API→K8s API→Operator watch) | §2.2, §4 |
+| 12 | K8s | Issue 생성 경로 명확화(API→K8s API→Operator watch) | §2.2, §4 |
 | 13 | 기억 | hybrid 점수 정규화/결합(RRF 또는 가중합) | §7.1 |
 | 14 | 기억 | global/app scope 병합·랭킹 | §7.2 |
 | 15 | 기억 | 자동 distill 파이프라인(트리거/품질/중복) | §7.5 |
@@ -37,7 +37,7 @@ v0.1 초안을 6개 영역으로 병렬 검토하고, 각 발견을 적대적으
 | 27 | 도메인 | webhook 생성/등록 흐름 | §4.5 |
 | 28 | 도메인 | dedup 영속/TTL/재발 조건(`dedup:{app}:{fp}`) | §4.4 |
 | 29 | 도메인 | platform_tool name→tool_id 매핑, enum CHECK | §8.5, §8 |
-| 30 | 도메인 | Event↔Run 역방향 FK 명확화, soul_ref 동기화, duration/finishedAt, activeSessions, goal | §8.2~8.6 |
+| 30 | 도메인 | Event↔Run 역방향 FK 명확화, soul_ref 동기화, duration/finishedAt, activeIssues, goal | §8.2~8.6 |
 
 (medium 다수 — 임베딩 전략 §7.4, recall 감사 §7.6, step/maxStep 의미 §3.4, bindings 상속 §3.2, 관측 백엔드 권한 §6.3 등 — 도 함께 반영)
 

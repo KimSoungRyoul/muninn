@@ -20,7 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// HuginnSession 은 이벤트 페이로드 1건을 표현한다(설계서 §3.2).
+// HuginnIssue 은 이벤트 페이로드 1건을 표현한다(설계서 §3.2).
 // Muninn API(Gateway)가 dedup 통과 후 K8s API 에 생성하고, Operator 의 watch 가 감지한다(§2.2).
 
 // EventSource 는 트리거 출처.
@@ -46,7 +46,7 @@ type NormalizedEvent struct {
 }
 
 // InheritedGuardrails 는 HuginnAgent.spec.guardrails 에서 복사한 한도 스냅샷.
-// Muninn API/Gateway 가 Session 생성 시 채운다(operator 는 Session 을 만들지 않음).
+// Muninn API/Gateway 가 Issue 생성 시 채운다(operator 는 Issue 을 만들지 않음).
 type InheritedGuardrails struct {
 	// +kubebuilder:validation:Minimum=1
 	MaxIterations int32 `json:"maxIterations"`
@@ -58,7 +58,7 @@ type InheritedGuardrails struct {
 	MaxTokens int64 `json:"maxTokens,omitempty"`
 }
 
-// BackoffPolicy 는 재시도 간 대기 증가 방식(operator-design §2.1: Session controller 가 RequeueAfter 로 구현).
+// BackoffPolicy 는 재시도 간 대기 증가 방식(operator-design §2.1: Issue controller 가 RequeueAfter 로 구현).
 // +kubebuilder:validation:Enum=exponential;linear;none
 type BackoffPolicy string
 
@@ -74,8 +74,8 @@ type RetryPolicy struct {
 	Backoff BackoffPolicy `json:"backoff,omitempty"`
 }
 
-// HuginnSessionSpec defines the desired state of HuginnSession.
-type HuginnSessionSpec struct {
+// HuginnIssueSpec defines the desired state of HuginnIssue.
+type HuginnIssueSpec struct {
 	// agentRef: 부모 HuginnAgent 의 metadata.name(도메인상 "Application").
 	// +kubebuilder:validation:MinLength=1
 	AgentRef string `json:"agentRef"`
@@ -103,23 +103,23 @@ type HuginnSessionSpec struct {
 	Suspend bool `json:"suspend,omitempty"`
 }
 
-// SessionPhase 는 세션 거시 상태(§3.4). Run 들의 phase 집계로 산출.
+// IssuePhase 는 세션 거시 상태(§3.4). Run 들의 phase 집계로 산출.
 // +kubebuilder:validation:Enum=Pending;Running;AwaitingApproval;Succeeded;Failed;Cancelled
-type SessionPhase string
+type IssuePhase string
 
 const (
-	SessionPending          SessionPhase = "Pending"
-	SessionRunning          SessionPhase = "Running"
-	SessionAwaitingApproval SessionPhase = "AwaitingApproval"
-	SessionSucceeded        SessionPhase = "Succeeded"
-	SessionFailed           SessionPhase = "Failed"
-	SessionCancelled        SessionPhase = "Cancelled"
+	IssuePending          IssuePhase = "Pending"
+	IssueRunning          IssuePhase = "Running"
+	IssueAwaitingApproval IssuePhase = "AwaitingApproval"
+	IssueSucceeded        IssuePhase = "Succeeded"
+	IssueFailed           IssuePhase = "Failed"
+	IssueCancelled        IssuePhase = "Cancelled"
 )
 
-// HuginnSessionStatus defines the observed state of HuginnSession.
-type HuginnSessionStatus struct {
+// HuginnIssueStatus defines the observed state of HuginnIssue.
+type HuginnIssueStatus struct {
 	// +optional
-	Phase SessionPhase `json:"phase,omitempty"`
+	Phase IssuePhase `json:"phase,omitempty"`
 	// runRefs: 생성된 HuginnRun 이름들(attempt 순)
 	// +optional
 	RunRefs []string `json:"runRefs,omitempty"`
@@ -144,7 +144,7 @@ type HuginnSessionStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=hsess
+// +kubebuilder:resource:shortName=hissue
 // +kubebuilder:printcolumn:name="Agent",type=string,JSONPath=`.spec.agentRef`
 // +kubebuilder:printcolumn:name="Severity",type=string,JSONPath=`.spec.event.severity`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
@@ -152,27 +152,27 @@ type HuginnSessionStatus struct {
 // +kubebuilder:printcolumn:name="Dedup",type=integer,JSONPath=`.status.dedupCount`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// HuginnSession is the Schema for the huginnsessions API
-type HuginnSession struct {
+// HuginnIssue is the Schema for the huginnissues API
+type HuginnIssue struct {
 	metav1.TypeMeta `json:",inline"`
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// +required
-	Spec HuginnSessionSpec `json:"spec"`
+	Spec HuginnIssueSpec `json:"spec"`
 	// +optional
-	Status HuginnSessionStatus `json:"status,omitempty"`
+	Status HuginnIssueStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// HuginnSessionList contains a list of HuginnSession
-type HuginnSessionList struct {
+// HuginnIssueList contains a list of HuginnIssue
+type HuginnIssueList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []HuginnSession `json:"items"`
+	Items           []HuginnIssue `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&HuginnSession{}, &HuginnSessionList{})
+	SchemeBuilder.Register(&HuginnIssue{}, &HuginnIssueList{})
 }

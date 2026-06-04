@@ -35,72 +35,72 @@ import (
 )
 
 const (
-	sessionRefIndexKey = "spec.sessionRef"
-	defaultMaxRuns     = 3
-	baseBackoff        = 30 * time.Second
+	issueRefIndexKey = "spec.issueRef"
+	defaultMaxRuns   = 3
+	baseBackoff      = 30 * time.Second
 )
 
-// HuginnSessionReconciler reconciles a HuginnSession object.
-// 책임(operator-design §1, §2.1): attempt 별 HuginnRun 생성/재시도(maxRuns), run phase 집계→session phase,
+// HuginnIssueReconciler reconciles a HuginnIssue object.
+// 책임(operator-design §1, §2.1): attempt 별 HuginnRun 생성/재시도(maxRuns), run phase 집계→issue phase,
 // suspend cascade, 승인 집계.
-type HuginnSessionReconciler struct {
+type HuginnIssueReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	MemoryEndpoint string
 	APIEndpoint    string
 }
 
-// +kubebuilder:rbac:groups=muninn.io,resources=huginnsessions,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=muninn.io,resources=huginnsessions/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=muninn.io,resources=huginnsessions/finalizers,verbs=update
+// +kubebuilder:rbac:groups=muninn.io,resources=huginnissues,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=muninn.io,resources=huginnissues/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=muninn.io,resources=huginnissues/finalizers,verbs=update
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnruns,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnagents,verbs=get;list;watch
 
-func (r *HuginnSessionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	var session muninniov1beta1.HuginnSession
-	if err := r.Get(ctx, req.NamespacedName, &session); err != nil {
+	var issue muninniov1beta1.HuginnIssue
+	if err := r.Get(ctx, req.NamespacedName, &issue); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if !session.DeletionTimestamp.IsZero() {
+	if !issue.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, nil
 	}
 
 	// 부모 HuginnAgent 확인(Run 빌드에 필요).
 	var agent muninniov1beta1.HuginnAgent
-	if err := r.Get(ctx, client.ObjectKey{Namespace: session.Namespace, Name: session.Spec.AgentRef}, &agent); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: issue.Namespace, Name: issue.Spec.AgentRef}, &agent); err != nil {
 		if apierrors.IsNotFound(err) {
-			base := session.DeepCopy()
-			session.Status.Phase = muninniov1beta1.SessionFailed
-			setSessionCondition(&session, "Reconciled", metav1.ConditionFalse, "AgentNotFound",
-				fmt.Sprintf("agentRef %q 를 찾을 수 없음", session.Spec.AgentRef))
-			return r.patchStatus(ctx, base, &session)
+			base := issue.DeepCopy()
+			issue.Status.Phase = muninniov1beta1.IssueFailed
+			setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "AgentNotFound",
+				fmt.Sprintf("agentRef %q 를 찾을 수 없음", issue.Spec.AgentRef))
+			return r.patchStatus(ctx, base, &issue)
 		}
 		return ctrl.Result{}, err
 	}
 
-	// ownerRef 보강(API 가 누락한 경우; Agent.Owns(Session) 동작 보장).
-	if requeue, err := r.ensureOwnerRef(ctx, &session, &agent); err != nil || requeue {
+	// ownerRef 보강(API 가 누락한 경우; Agent.Owns(Issue) 동작 보장).
+	if requeue, err := r.ensureOwnerRef(ctx, &issue, &agent); err != nil || requeue {
 		return ctrl.Result{Requeue: requeue}, err
 	}
 
-	base := session.DeepCopy()
+	base := issue.DeepCopy()
 
 	// 취소 cascade(operator-design §2.3).
-	if session.Spec.Suspend {
-		if err := r.suspendRuns(ctx, &session); err != nil {
+	if issue.Spec.Suspend {
+		if err := r.suspendRuns(ctx, &issue); err != nil {
 			return ctrl.Result{}, err
 		}
-		session.Status.Phase = muninniov1beta1.SessionCancelled
-		setSessionCondition(&session, "Reconciled", metav1.ConditionTrue, "Suspended", "세션 취소(suspend)")
-		return r.patchStatus(ctx, base, &session)
+		issue.Status.Phase = muninniov1beta1.IssueCancelled
+		setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "Suspended", "세션 취소(suspend)")
+		return r.patchStatus(ctx, base, &issue)
 	}
 
 	// 자식 Run 목록(attempt 오름차순).
 	var runList muninniov1beta1.HuginnRunList
-	if err := r.List(ctx, &runList, client.InNamespace(session.Namespace),
-		client.MatchingFields{sessionRefIndexKey: session.Name}); err != nil {
+	if err := r.List(ctx, &runList, client.InNamespace(issue.Namespace),
+		client.MatchingFields{issueRefIndexKey: issue.Name}); err != nil {
 		return ctrl.Result{}, err
 	}
 	runs := runList.Items
@@ -108,25 +108,25 @@ func (r *HuginnSessionReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	// 최초 Run 생성.
 	if len(runs) == 0 {
-		if err := r.createRun(ctx, &session, &agent, 1); err != nil {
+		if err := r.createRun(ctx, &issue, &agent, 1); err != nil {
 			return ctrl.Result{}, err
 		}
 		log.Info("최초 Run 생성", "attempt", 1)
-		session.Status.Phase = muninniov1beta1.SessionPending
-		session.Status.ObservedRuns = 1
-		setSessionCondition(&session, "Reconciled", metav1.ConditionTrue, "RunCreated", "attempt 1 Run 생성됨")
-		return r.patchStatus(ctx, base, &session)
+		issue.Status.Phase = muninniov1beta1.IssuePending
+		issue.Status.ObservedRuns = 1
+		setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "RunCreated", "attempt 1 Run 생성됨")
+		return r.patchStatus(ctx, base, &issue)
 	}
 
-	maxRuns := session.Spec.RetryPolicy.MaxRuns
+	maxRuns := issue.Spec.RetryPolicy.MaxRuns
 	if maxRuns <= 0 {
 		maxRuns = defaultMaxRuns
 	}
 
 	// phase 집계.
-	session.Status.RunRefs = runNames(runs)
-	session.Status.ObservedRuns = int32(len(runs))
-	session.Status.Approval = nil
+	issue.Status.RunRefs = runNames(runs)
+	issue.Status.ObservedRuns = int32(len(runs))
+	issue.Status.Approval = nil
 
 	anyActive, anyAwaiting := false, false
 	var awaitingRun *muninniov1beta1.HuginnRun
@@ -143,71 +143,71 @@ func (r *HuginnSessionReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	switch {
 	case anyAwaiting:
-		session.Status.Phase = muninniov1beta1.SessionAwaitingApproval
+		issue.Status.Phase = muninniov1beta1.IssueAwaitingApproval
 		if awaitingRun != nil {
-			session.Status.Approval = awaitingRun.Status.Approval
+			issue.Status.Approval = awaitingRun.Status.Approval
 		}
-		setSessionCondition(&session, "Approved", metav1.ConditionFalse, "AwaitingApproval", "운영자 승인 대기")
+		setIssueCondition(&issue, "Approved", metav1.ConditionFalse, "AwaitingApproval", "운영자 승인 대기")
 	case anyActive:
-		session.Status.Phase = muninniov1beta1.SessionRunning
-		setSessionCondition(&session, "Reconciled", metav1.ConditionTrue, "Running", "에이전트 실행 중")
+		issue.Status.Phase = muninniov1beta1.IssueRunning
+		setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "Running", "에이전트 실행 중")
 	case latest.Status.Phase == muninniov1beta1.RunSucceeded:
-		session.Status.Phase = muninniov1beta1.SessionSucceeded
-		session.Status.Outcome = latest.Status.Output
-		setSessionCondition(&session, "OutputReady", metav1.ConditionTrue, "Succeeded", "실행 완료")
+		issue.Status.Phase = muninniov1beta1.IssueSucceeded
+		issue.Status.Outcome = latest.Status.Output
+		setIssueCondition(&issue, "OutputReady", metav1.ConditionTrue, "Succeeded", "실행 완료")
 	case latest.Status.Phase == muninniov1beta1.RunCancelled:
-		session.Status.Phase = muninniov1beta1.SessionCancelled
-		setSessionCondition(&session, "Reconciled", metav1.ConditionTrue, "Cancelled", "취소됨")
+		issue.Status.Phase = muninniov1beta1.IssueCancelled
+		setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "Cancelled", "취소됨")
 	case latest.Status.Phase == muninniov1beta1.RunFailed:
 		// 재시도 판정(operator-design §2.1): maxRuns 미만이면 backoff 후 다음 attempt 생성.
 		if int32(len(runs)) < maxRuns {
-			if wait, ready := backoffReady(latest, session.Spec.RetryPolicy.Backoff); !ready {
-				session.Status.Phase = muninniov1beta1.SessionRunning
-				if _, err := r.patchStatus(ctx, base, &session); err != nil {
+			if wait, ready := backoffReady(latest, issue.Spec.RetryPolicy.Backoff); !ready {
+				issue.Status.Phase = muninniov1beta1.IssueRunning
+				if _, err := r.patchStatus(ctx, base, &issue); err != nil {
 					return ctrl.Result{}, err
 				}
 				return ctrl.Result{RequeueAfter: wait}, nil
 			}
 			next := latest.Spec.Attempt + 1
-			if err := r.createRun(ctx, &session, &agent, next); err != nil {
+			if err := r.createRun(ctx, &issue, &agent, next); err != nil {
 				return ctrl.Result{}, err
 			}
 			log.Info("재시도 Run 생성", "attempt", next)
-			session.Status.Phase = muninniov1beta1.SessionRunning
-			session.Status.ObservedRuns = int32(len(runs)) + 1
-			setSessionCondition(&session, "Reconciled", metav1.ConditionTrue, "Retrying",
+			issue.Status.Phase = muninniov1beta1.IssueRunning
+			issue.Status.ObservedRuns = int32(len(runs)) + 1
+			setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "Retrying",
 				fmt.Sprintf("attempt %d 재시도", next))
 		} else {
-			session.Status.Phase = muninniov1beta1.SessionFailed
-			setSessionCondition(&session, "Reconciled", metav1.ConditionFalse, "MaxRunsExhausted",
+			issue.Status.Phase = muninniov1beta1.IssueFailed
+			setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "MaxRunsExhausted",
 				fmt.Sprintf("maxRuns(%d) 소진", maxRuns))
 		}
 	}
 
-	return r.patchStatus(ctx, base, &session)
+	return r.patchStatus(ctx, base, &issue)
 }
 
-// ensureOwnerRef 는 Session 에 부모 Agent 의 controller ownerRef 를 보강한다.
-func (r *HuginnSessionReconciler) ensureOwnerRef(ctx context.Context, session *muninniov1beta1.HuginnSession,
+// ensureOwnerRef 는 Issue 에 부모 Agent 의 controller ownerRef 를 보강한다.
+func (r *HuginnIssueReconciler) ensureOwnerRef(ctx context.Context, issue *muninniov1beta1.HuginnIssue,
 	agent *muninniov1beta1.HuginnAgent) (bool, error) {
-	for _, o := range session.OwnerReferences {
+	for _, o := range issue.OwnerReferences {
 		if o.UID == agent.UID {
 			return false, nil
 		}
 	}
-	if err := controllerutil.SetControllerReference(agent, session, r.Scheme); err != nil {
+	if err := controllerutil.SetControllerReference(agent, issue, r.Scheme); err != nil {
 		return false, err
 	}
-	if err := r.Update(ctx, session); err != nil {
+	if err := r.Update(ctx, issue); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (r *HuginnSessionReconciler) suspendRuns(ctx context.Context, session *muninniov1beta1.HuginnSession) error {
+func (r *HuginnIssueReconciler) suspendRuns(ctx context.Context, issue *muninniov1beta1.HuginnIssue) error {
 	var runList muninniov1beta1.HuginnRunList
-	if err := r.List(ctx, &runList, client.InNamespace(session.Namespace),
-		client.MatchingFields{sessionRefIndexKey: session.Name}); err != nil {
+	if err := r.List(ctx, &runList, client.InNamespace(issue.Namespace),
+		client.MatchingFields{issueRefIndexKey: issue.Name}); err != nil {
 		return err
 	}
 	for i := range runList.Items {
@@ -224,26 +224,26 @@ func (r *HuginnSessionReconciler) suspendRuns(ctx context.Context, session *muni
 	return nil
 }
 
-func (r *HuginnSessionReconciler) createRun(ctx context.Context, session *muninniov1beta1.HuginnSession,
+func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1beta1.HuginnIssue,
 	agent *muninniov1beta1.HuginnAgent, attempt int32) error {
 	memEndpoint := orDefault(r.MemoryEndpoint, defaultMemoryEndpoint)
 	apiEndpoint := orDefault(r.APIEndpoint, defaultAPIEndpoint)
 
 	run := &muninniov1beta1.HuginnRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-a%d", session.Name, attempt),
-			Namespace: session.Namespace,
-			Labels:    sessionChildLabels(session, agent),
+			Name:      fmt.Sprintf("%s-a%d", issue.Name, attempt),
+			Namespace: issue.Namespace,
+			Labels:    issueChildLabels(issue, agent),
 		},
 		Spec: muninniov1beta1.HuginnRunSpec{
-			SessionRef:              session.Name,
+			IssueRef:                issue.Name,
 			Attempt:                 attempt,
 			TimeoutSeconds:          3600,
 			TTLSecondsAfterFinished: 86400,
-			JobTemplate:             buildJobTemplate(agent, session, memEndpoint, apiEndpoint),
+			JobTemplate:             buildJobTemplate(agent, issue, memEndpoint, apiEndpoint),
 		},
 	}
-	if err := controllerutil.SetControllerReference(session, run, r.Scheme); err != nil {
+	if err := controllerutil.SetControllerReference(issue, run, r.Scheme); err != nil {
 		return err
 	}
 	if err := r.Create(ctx, run); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -252,8 +252,8 @@ func (r *HuginnSessionReconciler) createRun(ctx context.Context, session *muninn
 	return nil
 }
 
-func (r *HuginnSessionReconciler) patchStatus(ctx context.Context, base, session *muninniov1beta1.HuginnSession) (ctrl.Result, error) {
-	if err := r.Status().Patch(ctx, session, client.MergeFrom(base)); err != nil {
+func (r *HuginnIssueReconciler) patchStatus(ctx context.Context, base, issue *muninniov1beta1.HuginnIssue) (ctrl.Result, error) {
+	if err := r.Status().Patch(ctx, issue, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
@@ -278,22 +278,22 @@ func backoffReady(latest *muninniov1beta1.HuginnRun, policy muninniov1beta1.Back
 	return delay - elapsed, false
 }
 
-func sessionChildLabels(session *muninniov1beta1.HuginnSession, agent *muninniov1beta1.HuginnAgent) map[string]string {
-	out := map[string]string{LabelSession: session.Name}
+func issueChildLabels(issue *muninniov1beta1.HuginnIssue, agent *muninniov1beta1.HuginnAgent) map[string]string {
+	out := map[string]string{LabelIssue: issue.Name}
 	for _, k := range []string{LabelWorkspace, LabelAgent, LabelFingerprint} {
-		if v, ok := session.Labels[k]; ok {
+		if v, ok := issue.Labels[k]; ok {
 			out[k] = v
 		}
 	}
 	// API 가 라벨을 누락한 경우 권위 소스(spec)에서 보강 — 격리/dedup selector 가 끊기지 않도록(§4.4, §6.1).
 	if _, ok := out[LabelAgent]; !ok {
-		out[LabelAgent] = session.Spec.AgentRef
+		out[LabelAgent] = issue.Spec.AgentRef
 	}
 	if _, ok := out[LabelWorkspace]; !ok && agent.Spec.WorkspaceID != "" {
 		out[LabelWorkspace] = agent.Spec.WorkspaceID
 	}
-	if _, ok := out[LabelFingerprint]; !ok && session.Spec.Event.Fingerprint != "" {
-		out[LabelFingerprint] = session.Spec.Event.Fingerprint
+	if _, ok := out[LabelFingerprint]; !ok && issue.Spec.Event.Fingerprint != "" {
+		out[LabelFingerprint] = issue.Spec.Event.Fingerprint
 	}
 	return out
 }
@@ -306,7 +306,7 @@ func runNames(runs []muninniov1beta1.HuginnRun) []string {
 	return names
 }
 
-func setSessionCondition(s *muninniov1beta1.HuginnSession, condType string, status metav1.ConditionStatus, reason, msg string) {
+func setIssueCondition(s *muninniov1beta1.HuginnIssue, condType string, status metav1.ConditionStatus, reason, msg string) {
 	apimeta.SetStatusCondition(&s.Status.Conditions, metav1.Condition{
 		Type:               condType,
 		Status:             status,
@@ -324,17 +324,17 @@ func orDefault(v, def string) string {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *HuginnSessionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// HuginnRun 을 spec.sessionRef 로 인덱싱(자식 Run 조회).
+func (r *HuginnIssueReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// HuginnRun 을 spec.issueRef 로 인덱싱(자식 Run 조회).
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &muninniov1beta1.HuginnRun{},
-		sessionRefIndexKey, func(obj client.Object) []string {
-			return []string{obj.(*muninniov1beta1.HuginnRun).Spec.SessionRef}
+		issueRefIndexKey, func(obj client.Object) []string {
+			return []string{obj.(*muninniov1beta1.HuginnRun).Spec.IssueRef}
 		}); err != nil {
 		return err
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&muninniov1beta1.HuginnSession{}).
+		For(&muninniov1beta1.HuginnIssue{}).
 		Owns(&muninniov1beta1.HuginnRun{}).
-		Named("huginnsession").
+		Named("huginnissue").
 		Complete(r)
 }

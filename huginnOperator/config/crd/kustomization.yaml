@@ -3,7 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/muninn.io_huginnagents.yaml
-- bases/muninn.io_huginnsessions.yaml
+- bases/muninn.io_huginnissues.yaml
 - bases/muninn.io_huginnruns.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 

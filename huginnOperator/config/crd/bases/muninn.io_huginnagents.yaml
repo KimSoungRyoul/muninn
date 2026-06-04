@@ -29,7 +29,7 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.activeSessions
+    - jsonPath: .status.activeIssues
       name: Active
       type: integer
     - jsonPath: .metadata.creationTimestamp
@@ -77,7 +77,7 @@ spec:
                 - image
                 type: object
               bindings:
-                description: Bindings 는 에이전트가 사용할 Platform Tool(MCP 서버) 집합. 모든 Session
+                description: Bindings 는 에이전트가 사용할 Platform Tool(MCP 서버) 집합. 모든 Issue
                   의 기본값 source(§3.1).
                 properties:
                   deployment:
@@ -241,7 +241,7 @@ spec:
                 - maxIterations
                 type: object
               identity:
-                description: Identity 는 관측 신호 ↔ 워크로드 매핑(Session 으로 상속).
+                description: Identity 는 관측 신호 ↔ 워크로드 매핑(Issue 으로 상속).
                 properties:
                   k8sLabels:
                     additionalProperties:
@@ -266,7 +266,7 @@ spec:
                 description: 'output: 결과 형식'
                 enum:
                 - pull_request
-                - issue
+                - github_issue
                 type: string
               source:
                 description: SourceSpec 은 GitHub 연결(모든 앱 필수).
@@ -374,8 +374,8 @@ spec:
           status:
             description: HuginnAgentStatus defines the observed state of HuginnAgent.
             properties:
-              activeSessions:
-                description: 'activeSessions: reconcile 마다 계산(phase∈{Pending,Running,AwaitingApproval}
+              activeIssues:
+                description: 'activeIssues: reconcile 마다 계산(phase∈{Pending,Running,AwaitingApproval}
                   세션 수; §8.4)'
                 format: int32
                 type: integer
