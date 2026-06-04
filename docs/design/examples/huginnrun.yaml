@@ -29,7 +29,7 @@ spec:
     image: registry.platform.local/huginn/agent-runtime:0.1.0
     command: ["/usr/local/bin/claude_skill.sh"]
     serviceAccountName: huginn-agent          # 자기 namespace Secret/CM 만 read(§6.1)
-    claudePVCName: pvc-claude-pct-model-server # ~/.claude 로 마운트할 앱별 격리 PVC(§5.5)
+    claudePVCName: pvc-claude-ai-router-svc # ~/.claude 로 마운트할 앱별 격리 PVC(§5.5)
     resources:
       requests: { cpu: "500m", memory: "512Mi" }
       limits:   { cpu: "2000m", memory: "2Gi" }
@@ -42,7 +42,7 @@ spec:
       - name: MUNINN_TEAM_SETTINGS_REF
         value: configmap/muninn-team-settings
       - name: MUNINN_SOUL_REF                  # HuginnAgent.spec.agent.soulRef 에서 전파
-        value: configmap/soul-pct-model-server
+        value: configmap/soul-ai-router-svc
       - name: MUNINN_EVENT_PAYLOAD_REF
         value: secret/issue-e3f8a91-01-event
       - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
