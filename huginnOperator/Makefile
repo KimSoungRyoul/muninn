@@ -187,10 +187,12 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 # 권장: podman 사용 → `make run-kind CONTAINER_TOOL=podman`
 
 .PHONY: kind-create
-kind-create: ## kind 클러스터 생성(이미 있으면 스킵).
+kind-create: ## kind 클러스터 생성(이미 있으면 스킵) + kubectl 컨텍스트 전환.
 	@$(KIND) get clusters 2>/dev/null | grep -qx $(RUNKIND_CLUSTER) \
 		&& echo "kind cluster '$(RUNKIND_CLUSTER)' 이미 존재" \
 		|| $(KIND) create cluster --name $(RUNKIND_CLUSTER) --wait 120s
+	@# install 등 후속 단계가 반드시 kind 클러스터를 타깃하도록 컨텍스트 고정.
+	@$(KUBECTL) config use-context kind-$(RUNKIND_CLUSTER)
 
 .PHONY: kind-delete
 kind-delete: ## kind 클러스터 삭제.
@@ -203,7 +205,7 @@ runtime-build: ## agent-runtime 이미지 빌드(huginnAgentRuntime/).
 .PHONY: kind-load-runtime
 kind-load-runtime: runtime-build ## agent-runtime 이미지를 kind 노드에 적재.
 ifeq ($(CONTAINER_TOOL),podman)
-	@tar="$$(mktemp -t agent-runtime.XXXXXX.tar)"; \
+	@tar="$$(mktemp "$${TMPDIR:-/tmp}/agent-runtime.XXXXXX")"; \
 		trap 'rm -f "$$tar"' EXIT; \
 		$(CONTAINER_TOOL) save $(RUNTIME_IMG) -o "$$tar" && \
 		$(KIND) load image-archive "$$tar" --name $(RUNKIND_CLUSTER)

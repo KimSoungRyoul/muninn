@@ -53,16 +53,23 @@ def _system_prompt() -> str:
     )
 
 
-def build_options(max_turns: int):
-    """ClaudeAgentOptions 를 구성(라이브/셀프테스트 공통). SDK 계약 검증 지점."""
+def build_options(max_turns: int, max_budget_usd: float | None = None):
+    """ClaudeAgentOptions 를 구성(라이브/셀프테스트 공통). SDK 계약 검증 지점.
+
+    guardrails 매핑(§5.4): maxIterations→max_turns, maxCostUsd→max_budget_usd.
+    maxTokens 는 SDK 직접 옵션이 없어 플랫폼(Muninn API)이 step 누적으로 추적/집행한다.
+    """
     from claude_agent_sdk import ClaudeAgentOptions
 
     permission_mode = os.getenv("MUNINN_PERMISSION_MODE", "bypassPermissions")
-    return ClaudeAgentOptions(
-        system_prompt=_system_prompt(),
-        max_turns=max_turns,
-        permission_mode=permission_mode,
-    )
+    opts: dict = {
+        "system_prompt": _system_prompt(),
+        "max_turns": max_turns,
+        "permission_mode": permission_mode,
+    }
+    if max_budget_usd is not None and max_budget_usd > 0:
+        opts["max_budget_usd"] = max_budget_usd
+    return ClaudeAgentOptions(**opts)
 
 
 def selftest() -> int:
@@ -141,9 +148,11 @@ async def run_live() -> int:
     goal = os.environ["MUNINN_GOAL"]
     g = _guardrails()
     max_turns = int(g.get("maxIterations", 12) or 12)
-    options = build_options(max_turns=max_turns)
+    max_cost = g.get("maxCostUsd")
+    max_budget = float(max_cost) if max_cost else None  # 0/None=무제한
+    options = build_options(max_turns=max_turns, max_budget_usd=max_budget)
 
-    log(f"live 시작: max_turns={max_turns}, goal={goal[:120]!r}")
+    log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, goal={goal[:120]!r}")
     cost = 0.0
     tokens = 0
     turns = 0
