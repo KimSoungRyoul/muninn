@@ -87,9 +87,9 @@ def selftest() -> int:
         report["ok"] = False
         report["checks"]["claude_agent_sdk"] = f"IMPORT FAILED: {exc}"
 
-    # 2) ClaudeAgentOptions 구성(API 시그니처 검증)
+    # 2) ClaudeAgentOptions 구성(API 시그니처 검증) — max_budget_usd 배선 경로도 커버
     try:
-        build_options(max_turns=1)
+        build_options(max_turns=1, max_budget_usd=1.0)
         report["checks"]["claude_agent_options"] = "ok"
     except Exception as exc:
         report["ok"] = False

@@ -1,4 +1,5 @@
 # Huginn agent-runtime Python 의존성.
 # claude-agent-sdk 는 Claude Code CLI(@anthropic-ai/claude-code)를 subprocess 로 호출한다.
-# 재현성을 위해 compatible-release 로 핀(0.2.x). 런너는 표준 asyncio 만 쓴다(anyio 불필요).
+# 0.2.x compatible-release 핀(패치 허용). 실제 동작 주체인 claude code CLI 는
+# Dockerfile 에서 정확 핀(2.1.167)된다. 런너는 표준 asyncio 만 쓴다(anyio 불필요).
 claude-agent-sdk~=0.2.93
