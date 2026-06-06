@@ -29,9 +29,10 @@ export type CredentialKind = "oauth" | "apikey" | "pat" | "kubeconfig" | "token"
 
 // 자격 참조(write-only). UI 는 set 여부/갱신시각만 표시하고 값은 보관/노출하지 않는다.
 export interface CredentialRef {
-  key: string;          // secret data key (claude-code-oauth-token / github-pat / kubeconfig / argocd-auth-token …)
+  key: string;          // secret data key (anthropic-api-key / claude-code-oauth-token / token / kubeconfig / argocd-auth-token …)
   label: string;
   kind: CredentialKind;
+  secretName?: string;  // 저장되는 K8s Secret 이름(기본 agent-secrets; GitHub PAT 는 source.secretRef)
   required?: boolean;
   set: boolean;         // 등록 여부
   updatedAt: string | null;

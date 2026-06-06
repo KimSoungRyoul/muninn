@@ -6,7 +6,7 @@ import { Button, IconButton, TextInput, Textarea, Select, Toggle, Badge, Tabs, E
 import { fmtMoney, fmtDuration, fmtTimeAgo, fmtClock, StatusDot, StatusLabel, HmPageHead, HmKpi, HmCard } from "@/components/common";
 import { MarkdownView, MarkdownEditor } from "@/components/markdown";
 import { HM_DATA } from "@/lib/data";
-import { defaultAgentConfig, defaultCredentials, AGENT_SECRET_NAME } from "@/lib/agent-config";
+import { defaultAgentConfig, defaultCredentials } from "@/lib/agent-config";
 
 const { useState: useS_HP } = React;
 
@@ -147,28 +147,30 @@ function CredKindIcon(kind) {
 }
 
 function AgentSettingsTab({ app }) {
-  const initialCfg = defaultAgentConfig(app);
-  const [cfg, setCfg] = useS_HP(() => ({ ...initialCfg }));
+  // baseline 을 state 로 보관 → 저장 성공 시 끌어올려 dirty 해제(mock PATCH 비영속이라 app.agent 는 불변).
+  const [baseCfg, setBaseCfg] = useS_HP(() => ({ ...defaultAgentConfig(app) }));
+  const [cfg, setCfg] = useS_HP(() => ({ ...defaultAgentConfig(app) }));
   const [creds, setCreds] = useS_HP(() => defaultCredentials(app).map(c => ({ ...c, draft: "", cleared: false })));
   const [saving, setSaving] = useS_HP(false);
   const [saved, setSaved] = useS_HP(null);
 
-  const setCfgK = (k, v) => setCfg(c => ({ ...c, [k]: v }));
-  const setDraft = (key, v) => setCreds(cs => cs.map(c => c.key === key ? { ...c, draft: v, cleared: false } : c));
-  const clearCred = (key) => setCreds(cs => cs.map(c => c.key === key ? { ...c, draft: "", cleared: true } : c));
-  const undoClear = (key) => setCreds(cs => cs.map(c => c.key === key ? { ...c, cleared: false } : c));
+  const setCfgK = (k, v) => { setSaved(null); setCfg(c => ({ ...c, [k]: v })); };
+  const setDraft = (key, v) => { setSaved(null); setCreds(cs => cs.map(c => c.key === key ? { ...c, draft: v, cleared: false } : c)); };
+  const clearCred = (key) => { setSaved(null); setCreds(cs => cs.map(c => c.key === key ? { ...c, draft: "", cleared: true } : c)); };
+  const undoClear = (key) => { setSaved(null); setCreds(cs => cs.map(c => c.key === key ? { ...c, cleared: false } : c)); };
 
   const onKubeFile = (key) => (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     const r = new FileReader();
     r.onload = () => setDraft(key, String(r.result || ""));
+    r.onerror = () => setSaved({ tone: "error", msg: `파일 읽기 실패: ${f.name}` });
     r.readAsText(f);
     e.target.value = "";
   };
 
   const dirtyCreds = creds.filter(c => (c.draft && c.draft.trim() !== "") || c.cleared);
-  const cfgChanged = JSON.stringify(cfg) !== JSON.stringify(initialCfg);
+  const cfgChanged = JSON.stringify(cfg) !== JSON.stringify(baseCfg);
   const changed = cfgChanged || dirtyCreds.length > 0;
 
   async function onSave() {
@@ -198,15 +200,14 @@ function AgentSettingsTab({ app }) {
         if (c.cleared) return { ...c, set: false, updatedAt: null, draft: "", cleared: false };
         return c;
       }));
-      setSaved({ tone: "success", msg: `저장됨 · 시크릿 값은 ${AGENT_SECRET_NAME} Secret 에만 보관됩니다(여기엔 노출 안 됨).` });
+      setBaseCfg({ ...cfg }); // baseline 갱신 → cfg dirty 해제
+      setSaved({ tone: "success", msg: `저장됨 · 시크릿 값은 Secret 에만 보관됩니다(여기엔 노출 안 됨).` });
     } catch (e) {
       setSaved({ tone: "error", msg: `저장 실패: ${e.message}` });
     } finally {
       setSaving(false);
     }
   }
-
-  const labelStyle = { fontSize: 12, fontWeight: 600, color: "var(--on-surface-variant)", marginBottom: 6, display: "block" };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -228,17 +229,18 @@ function AgentSettingsTab({ app }) {
       </HmCard>
 
       {/* 2) 자격(Secrets) */}
-      <HmCard title="자격 (Secrets)" meta={`K8s Secret '${AGENT_SECRET_NAME}' · env 로만 주입(§5.1, §6.2) · 값은 저장 후 표시되지 않음`}>
+      <HmCard title="자격 (Secrets)" meta="K8s Secret(env)으로만 주입(§5.1, §6.2) · write-only — 값은 저장 후 표시되지 않음">
         <div style={{ display: "flex", flexDirection: "column" }}>
           {creds.map((c, i) => {
             const isKube = c.kind === "kubeconfig";
             const willSet = c.draft && c.draft.trim() !== "";
+            const secretRef = c.secretName ? `${c.secretName}/${c.key}` : c.key;
             return (
-              <div key={c.key} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "16px 2px", borderTop: i === 0 ? "none" : "1px solid var(--outline-variant, #eceef0)" }}>
+              <div key={c.key} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "16px 2px", borderTop: i === 0 ? "none" : "1px solid var(--border-subtle)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <Icon name={CredKindIcon(c.kind)} size={16} style={{ color: "var(--on-surface-muted)" }} />
                   <span style={{ fontSize: 13.5, fontWeight: 700 }}>{c.label}</span>
-                  <span className="hm-mono dim" style={{ fontSize: 11 }}>{c.key}</span>
+                  <span className="hm-mono dim" style={{ fontSize: 11 }} title="Secret/key">{secretRef}</span>
                   {c.required && <Badge tone="default">필수</Badge>}
                   {c.cleared
                     ? <Badge tone="error" dot>삭제 예정</Badge>
@@ -248,7 +250,7 @@ function AgentSettingsTab({ app }) {
                         ? <Badge tone="success" dot>등록됨{c.updatedAt ? ` · ${fmtTimeAgo(c.updatedAt)}` : ""}</Badge>
                         : <Badge tone="warning" dot>미등록</Badge>}
                   <span style={{ flex: 1 }} />
-                  {c.set && !c.cleared && (
+                  {c.set && !c.cleared && !c.required && (
                     <Button size="sm" variant="ghost" style={{ color: "var(--error-50)" }} onClick={() => clearCred(c.key)}>삭제</Button>
                   )}
                   {c.cleared && (
@@ -259,6 +261,7 @@ function AgentSettingsTab({ app }) {
                 {!c.cleared && (isKube ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <Textarea value={c.draft} onChange={e => setDraft(c.key, e.target.value)}
+                      aria-label={`${c.label} 입력`}
                       placeholder={c.set ? "등록됨 — 교체하려면 새 kubeconfig 를 붙여넣거나 파일을 업로드하세요" : "kubeconfig YAML 붙여넣기"}
                       style={{ minHeight: 96, fontFamily: "var(--font-mono)", fontSize: 12 }} />
                     <label className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", cursor: "pointer" }}>
@@ -268,6 +271,7 @@ function AgentSettingsTab({ app }) {
                   </div>
                 ) : (
                   <input className="input mono" type="password" autoComplete="off" value={c.draft}
+                    aria-label={`${c.label} 값 입력`}
                     onChange={e => setDraft(c.key, e.target.value)}
                     placeholder={c.set ? "•••••••• — 교체하려면 새 값 입력" : "값 입력"} />
                 ))}

@@ -20,33 +20,40 @@ export function defaultAgentConfig(app: Application): AgentRuntimeConfig {
   };
 }
 
+// GitHub PAT 는 agent-secrets 가 아니라 별도 source.secretRef Secret(키 'token')에 보관된다(operator helpers.go).
+export function ghPatSecretName(app: Application): string {
+  return `gh-${app.workspaceId.replace(/^ws[_-]?/, "") || app.name}-pat`;
+}
+
 export function defaultCredentials(app: Application): CredentialRef[] {
   if (app.credentials) return app.credentials;
   const hasArgo = app.kind !== "airflow";
   return [
     {
+      // OAuth/API Key 는 '둘 중 하나' 필수 — 개별 required 로 표시하지 않는다(오해 방지).
       key: "claude-code-oauth-token", label: "Claude Code OAuth Token", kind: "oauth",
-      required: true, set: true, updatedAt: "2026-05-09T10:00:00+09:00",
-      hint: "Pro/Max/team OAuth (ANTHROPIC_API_KEY 대안, 둘 중 하나 필수)",
+      secretName: AGENT_SECRET_NAME, set: true, updatedAt: "2026-05-09T10:00:00+09:00",
+      hint: "Pro/Max/team OAuth · ANTHROPIC_API_KEY 와 둘 중 하나 필수",
     },
     {
       key: "anthropic-api-key", label: "Anthropic API Key", kind: "apikey",
-      set: false, updatedAt: null,
-      hint: "OAuth 토큰이 등록돼 있으면 생략 가능",
+      secretName: AGENT_SECRET_NAME, set: false, updatedAt: null,
+      hint: "OAuth 토큰과 둘 중 하나 필수",
     },
     {
-      key: "github-pat", label: "GitHub PAT", kind: "pat",
-      required: true, set: true, updatedAt: "2026-05-09T10:00:00+09:00",
-      hint: "fine-grained PAT — 해당 repo PR 생성 권한만",
+      // operator 는 GITHUB_PAT 를 source.secretRef Secret(키 'token')에서 주입한다.
+      key: "token", label: "GitHub PAT", kind: "pat",
+      secretName: ghPatSecretName(app), required: true, set: true, updatedAt: "2026-05-09T10:00:00+09:00",
+      hint: "fine-grained PAT — 해당 repo PR 생성 권한만 (source.secretRef)",
     },
     {
       key: "kubeconfig", label: "kubeconfig", kind: "kubeconfig",
-      set: false, updatedAt: null,
-      hint: "kubectl 컨텍스트 (YAML 파일 업로드)",
+      secretName: AGENT_SECRET_NAME, set: false, updatedAt: null,
+      hint: "kubectl 컨텍스트 (YAML 업로드) · 런타임이 KUBECONFIG 로 사용",
     },
     {
       key: "argocd-auth-token", label: "ArgoCD Token", kind: "token",
-      set: hasArgo, updatedAt: hasArgo ? "2026-05-12T09:00:00+09:00" : null,
+      secretName: AGENT_SECRET_NAME, set: hasArgo, updatedAt: hasArgo ? "2026-05-12T09:00:00+09:00" : null,
       hint: "argocd CLI 인증 (ARGOCD_AUTH_TOKEN)",
     },
   ];
