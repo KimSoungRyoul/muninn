@@ -1,6 +1,13 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 
+# --- Local kind E2E (run-kind) ---
+# agent-runtime 이미지(huginnAgentRuntime/)와 kind 클러스터 설정. podman 권장.
+# KIND 변수는 Dependencies 섹션에 이미 정의됨. test-e2e 의 KIND_CLUSTER 와 분리된 전용 클러스터명 사용.
+RUNKIND_CLUSTER ?= huginn-e2e
+RUNTIME_IMG ?= ghcr.io/kimsoungryoul/muninn/agent-runtime:dev
+RUNTIME_DIR ?= ../huginnAgentRuntime
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -13,6 +20,11 @@ endif
 # scaffolded by default. However, you might want to replace it to use other
 # tools. (i.e. podman)
 CONTAINER_TOOL ?= docker
+
+# podman 으로 kind 를 쓸 때 provider 를 지정한다(kind 는 기본 docker).
+ifeq ($(CONTAINER_TOOL),podman)
+export KIND_EXPERIMENTAL_PROVIDER = podman
+endif
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -170,6 +182,43 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+
+##@ Local kind (E2E)
+# 권장: podman 사용 → `make run-kind CONTAINER_TOOL=podman`
+
+.PHONY: kind-create
+kind-create: ## kind 클러스터 생성(이미 있으면 스킵) + kubectl 컨텍스트 전환.
+	@$(KIND) get clusters 2>/dev/null | grep -qx $(RUNKIND_CLUSTER) \
+		&& echo "kind cluster '$(RUNKIND_CLUSTER)' 이미 존재" \
+		|| $(KIND) create cluster --name $(RUNKIND_CLUSTER) --wait 120s
+	@# install 등 후속 단계가 반드시 kind 클러스터를 타깃하도록 컨텍스트 고정.
+	@$(KUBECTL) config use-context kind-$(RUNKIND_CLUSTER)
+
+.PHONY: kind-delete
+kind-delete: ## kind 클러스터 삭제.
+	-$(KIND) delete cluster --name $(RUNKIND_CLUSTER)
+
+.PHONY: runtime-build
+runtime-build: ## agent-runtime 이미지 빌드(huginnAgentRuntime/).
+	$(CONTAINER_TOOL) build -t $(RUNTIME_IMG) $(RUNTIME_DIR)
+
+.PHONY: kind-load-runtime
+kind-load-runtime: runtime-build ## agent-runtime 이미지를 kind 노드에 적재.
+ifeq ($(CONTAINER_TOOL),podman)
+	@tar="$$(mktemp "$${TMPDIR:-/tmp}/agent-runtime.XXXXXX")"; \
+		trap 'rm -f "$$tar"' EXIT; \
+		$(CONTAINER_TOOL) save $(RUNTIME_IMG) -o "$$tar" && \
+		$(KIND) load image-archive "$$tar" --name $(RUNKIND_CLUSTER)
+else
+	$(KIND) load docker-image $(RUNTIME_IMG) --name $(RUNKIND_CLUSTER)
+endif
+
+.PHONY: run-kind
+run-kind: kind-create install kind-load-runtime ## kind 생성+CRD 설치+이미지 적재 후 operator 를 로컬 실행(webhook off). 별도 셸에서 huginnAgentRuntime/examples/kind-e2e.yaml 적용.
+	@echo ">> operator 실행(webhook off). 다른 셸에서:"
+	@echo ">>   kubectl -n ns-huginn-e2e create secret generic agent-secrets --from-literal=claude-code-oauth-token=\$$CLAUDE_CODE_OAUTH_TOKEN"
+	@echo ">>   kubectl apply -f $(RUNTIME_DIR)/examples/kind-e2e.yaml"
+	ENABLE_WEBHOOKS=false go run ./cmd/main.go
 
 ##@ Dependencies
 

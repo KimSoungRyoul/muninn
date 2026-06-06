@@ -24,9 +24,9 @@ spec:
 
   # jobTemplate: 큐레이트된 실행 recipe(full PodSpec 미임베드 → CRD 슬림).
   # Run controller 가 Job 생성 시 고정 필드(restartPolicy=Never, containerName=agent,
-  # volumeMount /root/.claude, claudePVCName→volume)를 더해 full PodSpec 으로 확장한다.
+  # volumeMount /home/node/.claude, claudePVCName→volume, 비-root securityContext)를 더해 full PodSpec 으로 확장한다.
   jobTemplate:
-    image: registry.platform.local/huginn/agent-runtime:0.1.0
+    image: ghcr.io/kimsoungryoul/muninn/agent-runtime:0.1.0  # huginnAgentRuntime/ 이미지(GitHub Packages)
     command: ["/usr/local/bin/claude_skill.sh"]
     serviceAccountName: huginn-agent          # 자기 namespace Secret/CM 만 read(§6.1)
     claudePVCName: pvc-claude-ai-router-svc # ~/.claude 로 마운트할 앱별 격리 PVC(§5.5)
@@ -45,15 +45,17 @@ spec:
         value: configmap/soul-ai-router-svc
       - name: MUNINN_EVENT_PAYLOAD_REF
         value: secret/issue-e3f8a91-01-event
-      - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
-        value: '{"maxIterations":12,"maxCostUsd":5}'
+      - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd/maxTokens → SDK max_turns/max_budget_usd 등
+        value: '{"maxIterations":12,"maxCostUsd":5,"maxTokens":100000}'
       - name: MUNINN_MEMORY_ENDPOINT
         value: http://muninn-memory.muninn.svc:8080
       - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)
         value: http://muninn-api.muninn.svc:8080
-      # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2) ---
+      # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2). API 키/OAuth 토큰 중 하나면 충분(둘 다 optional) ---
       - name: ANTHROPIC_API_KEY
-        valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key } }
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key, optional: true } }
+      - name: CLAUDE_CODE_OAUTH_TOKEN   # Pro/Max/team OAuth 인증 대안
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: claude-code-oauth-token, optional: true } }
       - name: GITHUB_PAT
         valueFrom: { secretKeyRef: { name: gh-ai-pat, key: token } }
 

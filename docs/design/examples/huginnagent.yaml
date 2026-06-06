@@ -65,7 +65,7 @@ spec:
   agent:
     runtime: claude-code
     soulRef: soul-ai-router-svc  # SOUL.md(ConfigMap). Run 생성 시 MUNINN_SOUL_REF 로 주입
-    image: registry.platform.local/huginn/agent-runtime:0.1.0
+    image: ghcr.io/kimsoungryoul/muninn/agent-runtime:0.1.0  # huginnAgentRuntime/ 이미지(GitHub Packages)
 
 status:
   webhookUrl: https://muninn-api.platform.local/hooks/ai-router-svc   # Operator 발급(§4.5)

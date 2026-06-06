@@ -21,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 )
@@ -35,11 +36,17 @@ const (
 
 	agentContainerName = "agent"
 	claudeVolumeName   = "claude-home"
-	claudeMountPath    = "/root/.claude" // 그림 pvc(~/.claude). 프로젝트 설정/세션만(인증 아님; §5.1)
-	agentSkillCmd      = "/usr/local/bin/claude_skill.sh"
+	// claudeMountPath: agent-runtime 이미지는 비-root(node uid 1000)로 동작하므로 ~/.claude=/home/node/.claude.
+	// 프로젝트 설정/세션만 공유(인증 아님; §5.1).
+	claudeMountPath = "/home/node/.claude"
+	agentSkillCmd   = "/usr/local/bin/claude_skill.sh"
 
-	agentSecretName  = "agent-secrets" // ANTHROPIC_API_KEY 소스(§5.1)
-	anthropicKeyName = "anthropic-api-key"
+	// agentRunAsUser: agent-runtime 이미지의 비-root 사용자(node). PVC fsGroup/securityContext 에 사용.
+	agentRunAsUser int64 = 1000
+
+	agentSecretName   = "agent-secrets" // 인증 키 소스(§5.1)
+	anthropicKeyName  = "anthropic-api-key"
+	oauthTokenKeyName = "claude-code-oauth-token" // OAuth 인증 대안(Pro/Max/team)
 
 	serviceAccountName = "huginn-agent" // 자기 namespace Secret/CM 만 read(§6.1)
 
@@ -80,11 +87,20 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d}`, g.MaxIterations, g.MaxCostUsd, g.MaxTokens)},
 		{Name: "MUNINN_MEMORY_ENDPOINT", Value: memoryEndpoint},
 		{Name: "MUNINN_API_ENDPOINT", Value: apiEndpoint},
-		// 인증: env(Secret)로만(§5.1, §6.2)
+		// 인증: env(Secret)로만(§5.1, §6.2). API 키 또는 OAuth 토큰 중 하나면 충분 →
+		// 둘 다 optional 로 주입하고 "최소 하나 존재"는 런타임(claude_skill.sh)이 강제한다.
 		{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
 			SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
 				Key:                  anthropicKeyName,
+				Optional:             ptr.To(true),
+			},
+		}},
+		{Name: "CLAUDE_CODE_OAUTH_TOKEN", ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
+				Key:                  oauthTokenKeyName,
+				Optional:             ptr.To(true),
 			},
 		}},
 	}
