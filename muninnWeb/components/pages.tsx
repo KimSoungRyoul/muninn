@@ -2,10 +2,11 @@
 import React from "react";
 // Huginn & Muninn — Apps list, App detail (with Events→Runs), Platform Tools, Memories, Settings
 import { Icon } from "@/components/icons";
-import { Button, IconButton, Select, Toggle, Badge, Tabs, Empty } from "@/components/ui";
+import { Button, IconButton, TextInput, Textarea, Select, Toggle, Badge, Tabs, Empty } from "@/components/ui";
 import { fmtMoney, fmtDuration, fmtTimeAgo, fmtClock, StatusDot, StatusLabel, HmPageHead, HmKpi, HmCard } from "@/components/common";
 import { MarkdownView, MarkdownEditor } from "@/components/markdown";
 import { HM_DATA } from "@/lib/data";
+import { defaultAgentConfig, defaultCredentials } from "@/lib/agent-config";
 
 const { useState: useS_HP } = React;
 
@@ -109,7 +110,7 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
           </div>
         </div>
         <div style={{display:"flex", gap:6}}>
-          <Button size="sm" variant="ghost" leftIcon="edit">편집</Button>
+          <Button size="sm" variant="ghost" leftIcon="edit" onClick={() => setTab("settings")}>편집</Button>
           <Button size="sm" variant="ghost">비활성</Button>
           <Button size="sm" variant="ghost" leftIcon="trash" style={{color:"var(--error-50)"}}>삭제</Button>
         </div>
@@ -121,8 +122,8 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
           {label:"Events", value:"events", count: appEvents.length},
           {label:"Memories", value:"memories", count: HM_DATA.MEMORIES.filter(m => m.appId === a.id).length},
           {label:"Platform tools", value:"bindings"},
+          {label:"설정", value:"settings"},
           {label:"Webhooks", value:"webhooks"},
-          {label:"Secrets",  value:"secrets"},
         ]}/>
       </div>
 
@@ -130,10 +131,169 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
       {tab === "events"   && <EventsTab a={a} events={appEvents} onOpenRun={onOpenRun}/>}
       {tab === "memories" && <AppMemoriesTab app={a}/>}
       {tab === "bindings" && <BindingsTab app={a}/>}
-      {(tab === "webhooks" || tab === "secrets") && (
-        <HmCard><div style={{padding:"40px 24px"}}><Empty icon="layers" title={`${tab} 탭`} sub="이 데모에서는 Overview / Events / Memories / Bindings 동작을 보여줍니다." /></div></HmCard>
+      {tab === "settings" && <AgentSettingsTab app={a}/>}
+      {tab === "webhooks" && (
+        <HmCard><div style={{padding:"40px 24px"}}><Empty icon="layers" title="Webhooks 탭" sub="이 데모에서는 Overview / Events / Memories / Platform tools / 설정 동작을 보여줍니다." /></div></HmCard>
       )}
     </>
+  );
+}
+
+// ===================================================================
+// /apps/[id] · 설정 — HuginnAgent 런타임 + 자격(Secrets) 조회/수정
+// ===================================================================
+function CredKindIcon(kind) {
+  return kind === "kubeconfig" ? "layers" : kind === "pat" ? "gitBranch" : "lock";
+}
+
+function AgentSettingsTab({ app }) {
+  // baseline 을 state 로 보관 → 저장 성공 시 끌어올려 dirty 해제(mock PATCH 비영속이라 app.agent 는 불변).
+  const [baseCfg, setBaseCfg] = useS_HP(() => ({ ...defaultAgentConfig(app) }));
+  const [cfg, setCfg] = useS_HP(() => ({ ...defaultAgentConfig(app) }));
+  const [creds, setCreds] = useS_HP(() => defaultCredentials(app).map(c => ({ ...c, draft: "", cleared: false })));
+  const [saving, setSaving] = useS_HP(false);
+  const [saved, setSaved] = useS_HP(null);
+
+  const setCfgK = (k, v) => { setSaved(null); setCfg(c => ({ ...c, [k]: v })); };
+  const setDraft = (key, v) => { setSaved(null); setCreds(cs => cs.map(c => c.key === key ? { ...c, draft: v, cleared: false } : c)); };
+  const clearCred = (key) => { setSaved(null); setCreds(cs => cs.map(c => c.key === key ? { ...c, draft: "", cleared: true } : c)); };
+  const undoClear = (key) => { setSaved(null); setCreds(cs => cs.map(c => c.key === key ? { ...c, cleared: false } : c)); };
+
+  const onKubeFile = (key) => (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => setDraft(key, String(r.result || ""));
+    r.onerror = () => setSaved({ tone: "error", msg: `파일 읽기 실패: ${f.name}` });
+    r.readAsText(f);
+    e.target.value = "";
+  };
+
+  const dirtyCreds = creds.filter(c => (c.draft && c.draft.trim() !== "") || c.cleared);
+  const cfgChanged = JSON.stringify(cfg) !== JSON.stringify(baseCfg);
+  const changed = cfgChanged || dirtyCreds.length > 0;
+
+  async function onSave() {
+    setSaving(true); setSaved(null);
+    const payload = {
+      agent: { image: cfg.image, runtime: cfg.runtime, soulRef: cfg.soulRef, argocdServer: cfg.argocdServer },
+      credentials: dirtyCreds.map(c => ({
+        key: c.key,
+        action: (c.draft && c.draft.trim() !== "") ? "set" : "clear",
+        // 값(value)은 전송 후 즉시 폐기되며 어디에도 저장하지 않는다.
+        value: (c.draft && c.draft.trim() !== "") ? c.draft : undefined,
+      })),
+    };
+    try {
+      const res = await fetch(`/api/apps/${app.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const now = new Date().toISOString();
+      setCreds(cs => cs.map(c => {
+        if (c.draft && c.draft.trim() !== "") return { ...c, set: true, updatedAt: now, draft: "", cleared: false };
+        if (c.cleared) return { ...c, set: false, updatedAt: null, draft: "", cleared: false };
+        return c;
+      }));
+      setBaseCfg({ ...cfg }); // baseline 갱신 → cfg dirty 해제
+      setSaved({ tone: "success", msg: `저장됨 · 시크릿 값은 Secret 에만 보관됩니다(여기엔 노출 안 됨).` });
+    } catch (e) {
+      setSaved({ tone: "error", msg: `저장 실패: ${e.message}` });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 1) 에이전트 런타임 */}
+      <HmCard title="에이전트 런타임" meta="HuginnRun(Job/Pod)이 claude run 으로 SDK 를 실행할 때 사용">
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px" }}>
+          <TextInput label="런타임 이미지 (spec.agent.image)" className="input mono"
+            value={cfg.image} onChange={e => setCfgK("image", e.target.value)}
+            hint="GitHub Packages: ghcr.io/kimsoungryoul/muninn/agent-runtime:<tag>" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <Select label="런타임" value={cfg.runtime} onChange={e => setCfgK("runtime", e.target.value)}
+              options={[{ value: "claude-code", label: "claude-code" }]} />
+            <TextInput label="SOUL.md ConfigMap (soulRef)" value={cfg.soulRef || ""}
+              onChange={e => setCfgK("soulRef", e.target.value)} hint="에이전트 정체성 프롬프트" />
+          </div>
+          <TextInput label="ArgoCD Server (ARGOCD_SERVER)" className="input mono" value={cfg.argocdServer || ""}
+            onChange={e => setCfgK("argocdServer", e.target.value)} hint="비밀 아님 · argocd CLI 접속 주소(비우면 미사용)" />
+        </div>
+      </HmCard>
+
+      {/* 2) 자격(Secrets) */}
+      <HmCard title="자격 (Secrets)" meta="K8s Secret(env)으로만 주입(§5.1, §6.2) · write-only — 값은 저장 후 표시되지 않음">
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {creds.map((c, i) => {
+            const isKube = c.kind === "kubeconfig";
+            const willSet = c.draft && c.draft.trim() !== "";
+            const secretRef = c.secretName ? `${c.secretName}/${c.key}` : c.key;
+            return (
+              <div key={c.key} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "16px 2px", borderTop: i === 0 ? "none" : "1px solid var(--border-subtle)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <Icon name={CredKindIcon(c.kind)} size={16} style={{ color: "var(--on-surface-muted)" }} />
+                  <span style={{ fontSize: 13.5, fontWeight: 700 }}>{c.label}</span>
+                  <span className="hm-mono dim" style={{ fontSize: 11 }} title="Secret/key">{secretRef}</span>
+                  {c.required && <Badge tone="default">필수</Badge>}
+                  {c.cleared
+                    ? <Badge tone="error" dot>삭제 예정</Badge>
+                    : willSet
+                      ? <Badge tone="primary" dot>{c.set ? "교체 예정" : "등록 예정"}</Badge>
+                      : c.set
+                        ? <Badge tone="success" dot>등록됨{c.updatedAt ? ` · ${fmtTimeAgo(c.updatedAt)}` : ""}</Badge>
+                        : <Badge tone="warning" dot>미등록</Badge>}
+                  <span style={{ flex: 1 }} />
+                  {c.set && !c.cleared && !c.required && (
+                    <Button size="sm" variant="ghost" style={{ color: "var(--error-50)" }} onClick={() => clearCred(c.key)}>삭제</Button>
+                  )}
+                  {c.cleared && (
+                    <Button size="sm" variant="ghost" onClick={() => undoClear(c.key)}>되돌리기</Button>
+                  )}
+                </div>
+                {c.hint && <span style={{ fontSize: 11.5, color: "var(--on-surface-muted)" }}>{c.hint}</span>}
+                {!c.cleared && (isKube ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <Textarea value={c.draft} onChange={e => setDraft(c.key, e.target.value)}
+                      aria-label={`${c.label} 입력`}
+                      placeholder={c.set ? "등록됨 — 교체하려면 새 kubeconfig 를 붙여넣거나 파일을 업로드하세요" : "kubeconfig YAML 붙여넣기"}
+                      style={{ minHeight: 96, fontFamily: "var(--font-mono)", fontSize: 12 }} />
+                    <label className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", cursor: "pointer" }}>
+                      <Icon name="upload" size={14} /> 파일 선택
+                      <input type="file" accept=".yaml,.yml,.conf,.config,text/*" style={{ display: "none" }} onChange={onKubeFile(c.key)} />
+                    </label>
+                  </div>
+                ) : (
+                  <input className="input mono" type="password" autoComplete="off" value={c.draft}
+                    aria-label={`${c.label} 값 입력`}
+                    onChange={e => setDraft(c.key, e.target.value)}
+                    placeholder={c.set ? "•••••••• — 교체하려면 새 값 입력" : "값 입력"} />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </HmCard>
+
+      {/* 저장 바 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button variant="primary" leftIcon="check" disabled={!changed || saving} onClick={onSave}>
+          {saving ? "저장 중…" : "변경사항 저장"}
+        </Button>
+        {changed && <span style={{ fontSize: 12, color: "var(--on-surface-muted)" }}>{dirtyCreds.length + (cfgChanged ? 1 : 0)}개 변경됨</span>}
+        {saved && (
+          <span style={{ fontSize: 12.5, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, color: saved.tone === "error" ? "var(--error-50)" : "var(--positive-50)" }}>
+            <Icon name={saved.tone === "error" ? "xCircle" : "checkCircle"} size={15} /> {saved.msg}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
