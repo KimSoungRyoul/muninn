@@ -177,6 +177,11 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		Command:   command,
 		Resources: resources,
 		Env:       jt.Env,
+		// 컨테이너 하드닝: 권한 상승 차단 + 모든 capability 드롭(비-root 런타임).
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: ptr.To(false),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		},
 	}
 	var volumes []corev1.Volume
 	if jt.ClaudePVCName != "" {
@@ -193,6 +198,14 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		ServiceAccountName: sa,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
+		// 비-root 강제 + PVC(~/.claude) 를 node(uid 1000)가 쓰도록 fsGroup 지정. seccomp=RuntimeDefault.
+		SecurityContext: &corev1.PodSecurityContext{
+			RunAsNonRoot:   ptr.To(true),
+			RunAsUser:      ptr.To(agentRunAsUser),
+			RunAsGroup:     ptr.To(agentRunAsUser),
+			FSGroup:        ptr.To(agentRunAsUser),
+			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		},
 	}
 }
 

@@ -1,0 +1,4 @@
+# Huginn agent-runtime Python 의존성.
+# claude-agent-sdk 는 Claude Code CLI(@anthropic-ai/claude-code)를 subprocess 로 호출한다.
+claude-agent-sdk>=0.1.0
+anyio>=4.0.0

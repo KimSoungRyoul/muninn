@@ -85,6 +85,20 @@ func TestBuildJobTemplate(t *testing.T) {
 	if ak.ValueFrom.SecretKeyRef.Name != agentSecretName || ak.ValueFrom.SecretKeyRef.Key != anthropicKeyName {
 		t.Errorf("ANTHROPIC_API_KEY ref = %+v", ak.ValueFrom.SecretKeyRef)
 	}
+	// API 키/OAuth 토큰 둘 중 하나면 충분 → 둘 다 optional secretKeyRef(§5.1).
+	if ak.ValueFrom.SecretKeyRef.Optional == nil || !*ak.ValueFrom.SecretKeyRef.Optional {
+		t.Error("ANTHROPIC_API_KEY secretKeyRef 는 optional 이어야 함")
+	}
+	oauth, ok := envByName(jt.Env, "CLAUDE_CODE_OAUTH_TOKEN")
+	if !ok || oauth.ValueFrom == nil || oauth.ValueFrom.SecretKeyRef == nil {
+		t.Fatal("CLAUDE_CODE_OAUTH_TOKEN secretKeyRef 누락")
+	}
+	if oauth.ValueFrom.SecretKeyRef.Name != agentSecretName || oauth.ValueFrom.SecretKeyRef.Key != oauthTokenKeyName {
+		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN ref = %+v", oauth.ValueFrom.SecretKeyRef)
+	}
+	if oauth.ValueFrom.SecretKeyRef.Optional == nil || !*oauth.ValueFrom.SecretKeyRef.Optional {
+		t.Error("CLAUDE_CODE_OAUTH_TOKEN secretKeyRef 는 optional 이어야 함")
+	}
 	if gh, ok := envByName(jt.Env, "GITHUB_PAT"); !ok || gh.ValueFrom == nil || gh.ValueFrom.SecretKeyRef.Name != "gh-pat" {
 		t.Error("GITHUB_PAT secretKeyRef(gh-pat) 누락")
 	}
@@ -135,6 +149,20 @@ func TestExpandPodSpec(t *testing.T) {
 	if len(ps.Volumes) != 1 || ps.Volumes[0].PersistentVolumeClaim == nil ||
 		ps.Volumes[0].PersistentVolumeClaim.ClaimName != "pvc-claude-app" {
 		t.Errorf("PVC volume = %+v", ps.Volumes)
+	}
+
+	// 비-root 하드닝(§5.1, §6.1): pod fsGroup/runAsNonRoot + 컨테이너 capability 드롭.
+	if ps.SecurityContext == nil || ps.SecurityContext.RunAsNonRoot == nil || !*ps.SecurityContext.RunAsNonRoot {
+		t.Error("pod runAsNonRoot 미설정")
+	}
+	if ps.SecurityContext == nil || ps.SecurityContext.FSGroup == nil || *ps.SecurityContext.FSGroup != agentRunAsUser {
+		t.Errorf("pod fsGroup = %v, want %d", ps.SecurityContext.FSGroup, agentRunAsUser)
+	}
+	if c.SecurityContext == nil || c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
+		t.Error("컨테이너 allowPrivilegeEscalation 은 false 여야 함")
+	}
+	if c.SecurityContext == nil || c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) == 0 {
+		t.Error("컨테이너 capability 드롭 미설정")
 	}
 
 	// ClaudePVCName 비면 볼륨/마운트 미부착.

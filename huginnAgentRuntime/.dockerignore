@@ -1,0 +1,6 @@
+# 빌드 컨텍스트 최소화 — 빌드에 필요한 것만 남긴다.
+**
+!Dockerfile
+!claude_skill.sh
+!agent/requirements.txt
+!agent/runner.py
