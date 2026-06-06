@@ -16,6 +16,28 @@ export interface Workspace {
 export type AppKind = "triton" | "fastapi" | "airflow" | "other";
 export type AppOutput = "pull_request" | "github_issue";
 
+// 에이전트 런타임 설정(HuginnAgent.spec.agent). UI 에서 조회/수정.
+export interface AgentRuntimeConfig {
+  image: string;        // HuginnRun 이 실행하는 이미지(ghcr.io/.../agent-runtime:<tag>)
+  runtime: string;      // "claude-code"
+  soulRef?: string;     // SOUL.md ConfigMap 이름
+  argocdServer?: string; // ARGOCD_SERVER (비밀 아님)
+}
+
+// 자격 종류. 값은 K8s Secret(agent-secrets/gh-pat)으로만 저장되며 UI 는 등록 여부만 다룬다.
+export type CredentialKind = "oauth" | "apikey" | "pat" | "kubeconfig" | "token";
+
+// 자격 참조(write-only). UI 는 set 여부/갱신시각만 표시하고 값은 보관/노출하지 않는다.
+export interface CredentialRef {
+  key: string;          // secret data key (claude-code-oauth-token / github-pat / kubeconfig / argocd-auth-token …)
+  label: string;
+  kind: CredentialKind;
+  required?: boolean;
+  set: boolean;         // 등록 여부
+  updatedAt: string | null;
+  hint?: string;
+}
+
 export interface Application {
   id: string;
   workspaceId: string;
@@ -27,6 +49,9 @@ export interface Application {
   failed24h: number;
   lastRun: string | null;
   cost7d: number;
+  // 에이전트 설정/자격(optional — 없으면 lib/agent-config 기본값으로 seed)
+  agent?: AgentRuntimeConfig;
+  credentials?: CredentialRef[];
 }
 
 export type EventSource = "grafana" | "airflow" | "argocd" | "manual";
