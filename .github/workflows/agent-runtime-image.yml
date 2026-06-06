@@ -70,7 +70,8 @@ jobs:
         with:
           context: ./huginnAgentRuntime
           file: ./huginnAgentRuntime/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # PR=amd64 단일(검증), push/tag=멀티아치(QEMU arm64 에뮬레이션은 푸시 빌드에만)
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

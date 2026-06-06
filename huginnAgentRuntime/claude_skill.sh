@@ -40,8 +40,8 @@ preflight() {
 configure_auth() {
   if [[ -n "${GITHUB_PAT:-}" ]]; then
     git config --global credential.helper store
-    printf 'https://x-access-token:%s@github.com\n' "${GITHUB_PAT}" >"${HOME}/.git-credentials"
-    chmod 600 "${HOME}/.git-credentials"
+    # umask 077 로 생성 시점부터 0600 보장(쓰기 후 chmod 윈도우 제거).
+    (umask 077; printf 'https://x-access-token:%s@github.com\n' "${GITHUB_PAT}" >"${HOME}/.git-credentials")
     export GH_TOKEN="${GITHUB_PAT}"
     log "configured github credentials (git + gh)"
   fi
@@ -52,7 +52,8 @@ configure_auth() {
 
 case "${MODE}" in
 selftest)
-  preflight
+  # preflight 는 진단용(로그) — set -e 로 스크립트를 죽이지 않는다. 최종 판정/JSON 은 runner 가 소유.
+  preflight || true
   exec python3 /opt/agent/runner.py --selftest
   ;;
 run)
@@ -63,8 +64,9 @@ run)
       exit 1
     fi
   fi
-  preflight
-  configure_auth
+  preflight || true
+  # selftest(센티넬) 경로에선 자격을 디스크에 쓰지 않는다.
+  is_selftest || configure_auth
   exec python3 /opt/agent/runner.py
   ;;
 *)

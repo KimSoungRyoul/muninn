@@ -17,7 +17,8 @@ ARG HELM_VERSION="v3.16.4"
 ARG ARGOCD_VERSION="v2.13.3"
 ARG GH_VERSION="2.63.2"
 ARG YQ_VERSION="v4.44.6"
-ARG CLAUDE_CODE_VERSION="latest"
+# claude code CLI 는 SDK 가 subprocess 로 의존하는 핵심 컴포넌트 → 재현성 위해 구체 버전 핀.
+ARG CLAUDE_CODE_VERSION="2.1.167"
 # buildx 가 주입(미지정 시 dpkg 로 폴백)
 ARG TARGETARCH=""
 
@@ -30,7 +31,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-      ca-certificates curl git jq tar gzip unzip bash less openssh-client \
+      ca-certificates curl git jq tar gzip bash less openssh-client \
       python3 python3-venv; \
     rm -rf /var/lib/apt/lists/*
 

@@ -45,8 +45,8 @@ spec:
         value: configmap/soul-ai-router-svc
       - name: MUNINN_EVENT_PAYLOAD_REF
         value: secret/issue-e3f8a91-01-event
-      - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd → SDK max_turns/max_budget_usd
-        value: '{"maxIterations":12,"maxCostUsd":5}'
+      - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd/maxTokens → SDK max_turns/max_budget_usd 등
+        value: '{"maxIterations":12,"maxCostUsd":5,"maxTokens":100000}'
       - name: MUNINN_MEMORY_ENDPOINT
         value: http://muninn-memory.muninn.svc:8080
       - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)

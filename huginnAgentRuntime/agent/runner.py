@@ -88,6 +88,21 @@ def selftest() -> int:
         report["ok"] = False
         report["checks"]["claude_agent_options"] = f"FAILED: {exc}"
 
+    # 2b) live 경로가 의존하는 심볼 import 검증(런너 자체 회귀 방지)
+    try:
+        from claude_agent_sdk import (  # noqa: F401
+            AssistantMessage,
+            ResultMessage,
+            TextBlock,
+            ToolUseBlock,
+            query,
+        )
+
+        report["checks"]["live_symbols"] = "ok"
+    except Exception as exc:
+        report["ok"] = False
+        report["checks"]["live_symbols"] = f"IMPORT FAILED: {exc}"
+
     # 3) 플랫폼 CLI 존재 + claude CLI 응답(Node 런타임 동작 확인)
     for tool in ("claude", "kubectl", "helm", "argocd", "gh", "git", "jq", "yq"):
         path = shutil.which(tool)
@@ -132,6 +147,8 @@ async def run_live() -> int:
     cost = 0.0
     tokens = 0
     turns = 0
+    is_error = False
+    subtype = ""
     async for message in query(prompt=goal, options=options):
         if isinstance(message, AssistantMessage):
             for block in message.content:
@@ -142,16 +159,21 @@ async def run_live() -> int:
         elif isinstance(message, ResultMessage):
             cost = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
             turns = int(getattr(message, "num_turns", 0) or 0)
+            # 에이전트 실패(에러/max_turns 초과 등)를 성공으로 보고하지 않는다.
+            is_error = bool(getattr(message, "is_error", False))
+            subtype = str(getattr(message, "subtype", "") or "")
             usage = getattr(message, "usage", None)
             if isinstance(usage, dict):
                 tokens = int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0))
 
-    log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}")
+    ok = not is_error
+    log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}, subtype={subtype!r}, is_error={is_error}")
     print(json.dumps(
-        {"mode": "live", "ok": True, "turns": turns, "cost_usd": cost, "tokens": tokens},
+        {"mode": "live", "ok": ok, "turns": turns, "cost_usd": cost, "tokens": tokens,
+         "subtype": subtype, "is_error": is_error},
         ensure_ascii=False,
     ))
-    return 0
+    return 0 if ok else 1
 
 
 def main() -> int:

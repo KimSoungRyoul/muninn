@@ -3,8 +3,8 @@ IMG ?= controller:latest
 
 # --- Local kind E2E (run-kind) ---
 # agent-runtime 이미지(huginnAgentRuntime/)와 kind 클러스터 설정. podman 권장.
-KIND ?= kind
-KIND_CLUSTER ?= huginn-e2e
+# KIND 변수는 Dependencies 섹션에 이미 정의됨. test-e2e 의 KIND_CLUSTER 와 분리된 전용 클러스터명 사용.
+RUNKIND_CLUSTER ?= huginn-e2e
 RUNTIME_IMG ?= ghcr.io/kimsoungryoul/muninn/agent-runtime:dev
 RUNTIME_DIR ?= ../huginnAgentRuntime
 
@@ -188,13 +188,13 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 .PHONY: kind-create
 kind-create: ## kind 클러스터 생성(이미 있으면 스킵).
-	@$(KIND) get clusters 2>/dev/null | grep -qx $(KIND_CLUSTER) \
-		&& echo "kind cluster '$(KIND_CLUSTER)' 이미 존재" \
-		|| $(KIND) create cluster --name $(KIND_CLUSTER) --wait 120s
+	@$(KIND) get clusters 2>/dev/null | grep -qx $(RUNKIND_CLUSTER) \
+		&& echo "kind cluster '$(RUNKIND_CLUSTER)' 이미 존재" \
+		|| $(KIND) create cluster --name $(RUNKIND_CLUSTER) --wait 120s
 
 .PHONY: kind-delete
 kind-delete: ## kind 클러스터 삭제.
-	-$(KIND) delete cluster --name $(KIND_CLUSTER)
+	-$(KIND) delete cluster --name $(RUNKIND_CLUSTER)
 
 .PHONY: runtime-build
 runtime-build: ## agent-runtime 이미지 빌드(huginnAgentRuntime/).
@@ -203,11 +203,12 @@ runtime-build: ## agent-runtime 이미지 빌드(huginnAgentRuntime/).
 .PHONY: kind-load-runtime
 kind-load-runtime: runtime-build ## agent-runtime 이미지를 kind 노드에 적재.
 ifeq ($(CONTAINER_TOOL),podman)
-	$(CONTAINER_TOOL) save $(RUNTIME_IMG) -o /tmp/agent-runtime-kind.tar
-	$(KIND) load image-archive /tmp/agent-runtime-kind.tar --name $(KIND_CLUSTER)
-	@rm -f /tmp/agent-runtime-kind.tar
+	@tar="$$(mktemp -t agent-runtime.XXXXXX.tar)"; \
+		trap 'rm -f "$$tar"' EXIT; \
+		$(CONTAINER_TOOL) save $(RUNTIME_IMG) -o "$$tar" && \
+		$(KIND) load image-archive "$$tar" --name $(RUNKIND_CLUSTER)
 else
-	$(KIND) load docker-image $(RUNTIME_IMG) --name $(KIND_CLUSTER)
+	$(KIND) load docker-image $(RUNTIME_IMG) --name $(RUNKIND_CLUSTER)
 endif
 
 .PHONY: run-kind
