@@ -30,37 +30,53 @@ function IconButton({ icon, size = "md", tooltip, "aria-label": ariaLabel, ...re
 }
 
 // ---------- Inputs ----------
-function TextInput({ label, hint, error, leftIcon, ...rest }: any) {
+function TextInput({ label, hint, error, leftIcon, id, ...rest }: any) {
+  const autoId = React.useId();
+  const fieldId = id || autoId;
+  const helpId = (hint || error) ? `${fieldId}-help` : undefined;
+  const field = (
+    <input
+      id={fieldId}
+      className={`input ${error ? "is-error" : ""}`}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={helpId}
+      {...rest}
+    />
+  );
   const inp = leftIcon ? (
-    <span className="input-with-icon"><Icon name={leftIcon} size={16} /><input className={`input ${error ? "is-error" : ""}`} {...rest} /></span>
-  ) : (
-    <input className={`input ${error ? "is-error" : ""}`} {...rest} />
-  );
+    <span className="input-with-icon"><Icon name={leftIcon} size={16} />{field}</span>
+  ) : field;
   return (
     <div className="input-group">
-      {label && <label className="label">{label}</label>}
+      {label && <label className="label" htmlFor={fieldId}>{label}</label>}
       {inp}
-      {(hint || error) && <span className={`helper ${error ? "is-error" : ""}`}>{error || hint}</span>}
+      {(hint || error) && <span id={helpId} className={`helper ${error ? "is-error" : ""}`}>{error || hint}</span>}
     </div>
   );
 }
-function Textarea({ label, hint, ...rest }: any) {
+function Textarea({ label, hint, id, ...rest }: any) {
+  const autoId = React.useId();
+  const fieldId = id || autoId;
+  const helpId = hint ? `${fieldId}-help` : undefined;
   return (
     <div className="input-group">
-      {label && <label className="label">{label}</label>}
-      <textarea className="textarea" {...rest} />
-      {hint && <span className="helper">{hint}</span>}
+      {label && <label className="label" htmlFor={fieldId}>{label}</label>}
+      <textarea id={fieldId} className="textarea" aria-describedby={helpId} {...rest} />
+      {hint && <span id={helpId} className="helper">{hint}</span>}
     </div>
   );
 }
-function Select({ label, hint, options, ...rest }: any) {
+function Select({ label, hint, options, id, ...rest }: any) {
+  const autoId = React.useId();
+  const fieldId = id || autoId;
+  const helpId = hint ? `${fieldId}-help` : undefined;
   return (
     <div className="input-group">
-      {label && <label className="label">{label}</label>}
-      <select className="select" {...rest}>
+      {label && <label className="label" htmlFor={fieldId}>{label}</label>}
+      <select id={fieldId} className="select" aria-describedby={helpId} {...rest}>
         {options.map(o => typeof o === "string" ? <option key={o}>{o}</option> : <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
-      {hint && <span className="helper">{hint}</span>}
+      {hint && <span id={helpId} className="helper">{hint}</span>}
     </div>
   );
 }
