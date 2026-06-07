@@ -51,7 +51,26 @@ var _ = Describe("HuginnIssue Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: muninniov1beta1.HuginnIssueSpec{
+						AgentRef: "test-agent",
+						Goal:     "test goal",
+						Event: muninniov1beta1.NormalizedEvent{
+							ID:          "evt-1",
+							Source:      muninniov1beta1.EventSource("manual"),
+							Severity:    muninniov1beta1.Severity("warning"),
+							Fingerprint: "fp-1",
+						},
+						InheritedGuardrails: muninniov1beta1.InheritedGuardrails{
+							MaxIterations: 2,
+							MaxCostUsd:    1,
+						},
+						Identity: muninniov1beta1.Identity{
+							K8sNamespace: "default",
+						},
+						RetryPolicy: muninniov1beta1.RetryPolicy{
+							MaxRuns: 1,
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -67,6 +86,10 @@ var _ = Describe("HuginnIssue Controller", func() {
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
+			// 일치하는 HuginnAgent 를 만들지 않으므로 reconcile 는 AgentNotFound 의
+			// graceful 처리 경로(phase=Failed, nil 반환)를 검증한다. Run 생성/재시도/
+			// phase 집계 경로는 spec.issueRef field selector(캐시 field indexer)를 거쳐
+			// HuginnAgent 와 동일하게 manager 기반 캐시 client 가 필요하다(후속 작업).
 			By("Reconciling the created resource")
 			controllerReconciler := &HuginnIssueReconciler{
 				Client: k8sClient,
@@ -77,8 +100,6 @@ var _ = Describe("HuginnIssue Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
 	})
 })
