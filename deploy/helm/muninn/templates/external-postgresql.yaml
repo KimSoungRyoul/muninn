@@ -5,7 +5,7 @@
 {{- end }}
 # 외부 PostgreSQL 연결 정보. chart 는 DB 워크로드를 만들지 않는다(요구사항).
 # 미구현 소비자(muninn-api / muninn-memory, 설계 §8 Phase 0)가 참조할 연결 메타를 등록한다.
-# 비밀번호는 existingSecret 위임을 권장한다(그 경우 password/DATABASE_URL 은 여기 포함하지 않는다).
+# 비밀번호는 여기에 평문으로 넣지 않는다 — existingSecret 의 키로만 주입한다(CLAUDE.md).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -28,9 +28,4 @@ stringData:
   database: {{ $pg.database | quote }}
   username: {{ $pg.username | quote }}
   sslmode: {{ $pg.sslmode | quote }}
-  {{- if and (not $pg.existingSecret) $pg.password }}
-  password: {{ $pg.password | quote }}
-  # 편의용 DSN(소비 워크로드가 DATABASE_URL 로 바로 사용 가능; 테스트 전용 — 운영은 existingSecret 권장).
-  DATABASE_URL: {{ printf "postgresql://%s:%s@%s:%v/%s?sslmode=%s" $pg.username $pg.password $pg.host $pg.port $pg.database $pg.sslmode | quote }}
-  {{- end }}
 {{- end }}

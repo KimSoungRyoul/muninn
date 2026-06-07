@@ -18,7 +18,8 @@ Muninn DevOps Agent Platform 을 Kubernetes 에 배포하는 Helm chart.
 
 - Kubernetes ≥ 1.27, Helm ≥ 3.x
 - operator/web 이미지는 아직 CI 미발행 → 로컬 빌드 후 클러스터에 load 하거나, 발행 후 `*.image.repository/tag` 로 교체.
-- webhook(`operator.webhook.enabled=true`) 사용 시 [cert-manager](https://cert-manager.io) 필요.
+- webhook(`operator.webhook.enabled=true`) 사용 시 [cert-manager](https://cert-manager.io) 필요 (없으면 설치가 fail-fast 로 막힘).
+- ServiceMonitor(`operator.metrics.serviceMonitor.enabled=true`) 사용 시 Prometheus Operator(`monitoring.coreos.com` CRD) 필요.
 
 ## 빠른 설치
 
@@ -33,8 +34,11 @@ webhook 비활성(기본)에서는 cert-manager 없이 바로 뜬다.
 
 ```bash
 # 1) operator 이미지 빌드 + load
-make -C huginnOperator docker-build IMG=controller:latest CONTAINER_TOOL=podman
-podman save controller:latest -o /tmp/op.tar
+#    주의: huginnOperator/.dockerignore 가 buildah(podman)에서 cmd/main.go 를 누락시키므로
+#    ignorefile 우회로 빌드한다(별도 수정 PR 권장).
+printf '.git\nbin\n' > /tmp/op.ignore
+podman build -t controller:latest --ignorefile /tmp/op.ignore huginnOperator
+podman save localhost/controller:latest -o /tmp/op.tar
 KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/op.tar --name <cluster>
 
 # 2) (선택) web 이미지 빌드 + load
@@ -42,9 +46,13 @@ podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev muninnWeb
 podman save ghcr.io/kimsoungryoul/muninn/muninn-web:dev -o /tmp/web.tar
 KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/web.tar --name <cluster>
 
-# 3) 설치
-helm install muninn deploy/helm/muninn -n muninn --create-namespace
+# 3) 설치 (podman 은 로컬 이미지를 localhost/ 로 태그하므로 repository 를 맞춘다)
+helm install muninn deploy/helm/muninn -n muninn --create-namespace \
+  --set operator.image.repository=localhost/controller \
+  --set operator.image.pullPolicy=IfNotPresent
 ```
+
+> kind 에 load 한 로컬 이미지는 `pullPolicy: IfNotPresent`(기본)면 노드에 있을 때 재pull 하지 않는다.
 
 ## 자격(Secret) — 절대 커밋 금지
 
@@ -88,8 +96,7 @@ CRD 는 Helm 의 `crds/` 디렉토리로 관리된다(원본: `huginnOperator/co
 | `web.image.repository/tag` | `ghcr.io/kimsoungryoul/muninn/muninn-web`/`dev` | 콘솔 이미지 |
 | `web.auth.existingSecret` | `""` | CopilotKit 자격 Secret 이름 |
 | `web.ingress.enabled` | `false` | 콘솔 Ingress |
-| `agent.serviceAccount.create/name` | `true`/`huginn-agent` | Job SA |
-| `agent.secrets.create` | `false` | (테스트 전용) agent-secrets 생성 |
+| `agent.serviceAccount.create/name` | `true`/`huginn-agent` | Job SA (operator.enabled 시) |
 | `externalPostgresql.enabled` | `false` | 외부 DB 연결 Secret 등록 |
 | `externalPostgresql.host` | `""` | DB 호스트(enabled 시 필수) |
 | `externalPostgresql.existingSecret` | `""` | 비밀번호 Secret(권장) |

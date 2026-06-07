@@ -14,6 +14,9 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
   {{- else }}
   webhook: 활성(cert-manager 필요). caBundle 주입까지 수십 초 걸릴 수 있습니다.
   {{- end }}
+  {{- if .Values.operator.metrics.serviceMonitor.enabled }}
+  ⚠️ ServiceMonitor 활성: Prometheus Operator(monitoring.coreos.com CRD)가 클러스터에 설치돼 있어야 합니다.
+  {{- end }}
 {{- end }}
 
 {{- if .Values.web.enabled }}

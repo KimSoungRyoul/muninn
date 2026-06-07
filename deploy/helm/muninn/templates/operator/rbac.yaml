@@ -120,17 +120,4 @@ subjects:
   name: {{ $sa }}
   namespace: {{ .Release.Namespace }}
 {{- end }}
-{{- if .Values.operator.metrics.reader.create }}
----
-# ── metrics-reader (외부 스크레이퍼가 /metrics 를 읽을 수 있게 부여) ──
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "muninn.fullname" . }}-metrics-reader
-  labels:
-    {{- include "muninn.operator.labels" . | nindent 4 }}
-rules:
-- nonResourceURLs: ["/metrics"]
-  verbs: [get]
-{{- end }}
 {{- end }}

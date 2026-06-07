@@ -11,7 +11,7 @@ spec:
   selector:
     {{- include "muninn.operator.selectorLabels" . | nindent 4 }}
   ports:
-    - name: {{ if .Values.operator.metrics.secure }}https{{ else }}http{{ end }}
+    - name: metrics
       port: {{ .Values.operator.metrics.port }}
       targetPort: metrics
       protocol: TCP
@@ -33,7 +33,7 @@ spec:
     matchLabels:
       {{- include "muninn.operator.selectorLabels" . | nindent 6 }}
   endpoints:
-    - port: {{ if .Values.operator.metrics.secure }}https{{ else }}http{{ end }}
+    - port: metrics
       path: /metrics
       interval: {{ .Values.operator.metrics.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.operator.metrics.serviceMonitor.scrapeTimeout }}
