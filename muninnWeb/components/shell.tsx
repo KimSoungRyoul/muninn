@@ -117,7 +117,7 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
   );
 }
 
-function HmHeader({ onCommand, onNotif, pendingApprovals = 3, todayCost = 4.12 }: any) {
+function HmHeader({ onCommand, onNotif, pendingApprovals = 0, todayCost = 4.12 }: any) {
   return (
     <header className="topbar">
       <div className="topbar-search">

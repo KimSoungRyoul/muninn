@@ -324,12 +324,14 @@ function defaultSoulMd(a) {
 function OverviewTab({ a, appEvents, appRuns, onOpenRun, setTab }: any) {
   const [soul, setSoul] = useS_HP(() => defaultSoulMd(a));
   const [editing, setEditing] = useS_HP(false);
+  // 성공률: 하드코딩 대신 앱의 24시간 run/실패 수에서 계산
+  const successRate = a.runs24h > 0 ? (((a.runs24h - a.failed24h) / a.runs24h) * 100).toFixed(1) : "0";
   return (
     <>
       <div className="hm-kpi-grid">
         <HmKpi label="24시간 Events" value={`${appEvents.length}`} hint="webhook 수신"/>
         <HmKpi label="7일 실행"      value={`${a.runs24h * 7}`} delta={4} dir="up"/>
-        <HmKpi label="성공률"        value="85.7" unit="%" delta={2.1} dir="up"/>
+        <HmKpi label="성공률"        value={successRate} unit="%" delta={2.1} dir="up"/>
         <HmKpi label="7일 비용"      value={fmtMoney(a.cost7d)} hint={`한도 ${fmtMoney(350)}`}/>
       </div>
 

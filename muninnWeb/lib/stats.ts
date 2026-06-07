@@ -9,9 +9,8 @@ export function computeDashboard(workspaceId: string): DashboardData {
   const runs24h = apps.reduce((s, a) => s + a.runs24h, 0);
   const failed24h = apps.reduce((s, a) => s + a.failed24h, 0);
   const successRate = runs24h > 0 ? +(((runs24h - failed24h) / runs24h) * 100).toFixed(1) : 0;
-  const awaiting = LIVE_RUNS.filter((r) => r.status === "awaiting").length;
-
   const appNames = new Set(apps.map((a) => a.name));
+  const awaiting = LIVE_RUNS.filter((r) => r.status === "awaiting" && appNames.has(r.app)).length;
   const wsRuns = RECENT_RUNS.filter((r) => appNames.has(r.app));
   const avgCostPerRun = wsRuns.length
     ? +(wsRuns.reduce((s, r) => s + r.cost, 0) / wsRuns.length).toFixed(3)

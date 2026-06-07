@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { Icon } from "@/components/icons";
-import { Tabs, Button, Toggle } from "@/components/ui";
+import { Tabs, Button, Toggle, Empty } from "@/components/ui";
 import {
   fmtMoney,
   fmtTokens,
@@ -110,6 +110,14 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
     return () => clearTimeout(t);
   }, []);
 
+  // 전체 트랜스크립트(steps/memories/tools)는 데모 데이터상 RUN_DETAIL(run_82c0f1a) 에만 있다.
+  // 그 외 runId 로 진입하면 LIVE_RUNS/RECENT_RUNS 에서 해당 run 을 찾아 요약 뷰를 보여준다.
+  const hasFullDetail = !runId || runId === R.id;
+  if (!hasFullDetail) {
+    const summary = [...HM_DATA.LIVE_RUNS, ...HM_DATA.RECENT_RUNS].find(r => r.id === runId);
+    return <RunSummaryDetail runId={runId} run={summary} onBack={onBack} fullRunId={R.id}/>;
+  }
+
   // Allow page to enter awaiting state via prop
   const status = awaitingMode ? "awaiting" : R.status;
 
@@ -161,7 +169,7 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
         <HmCard>
           <div style={{display:"flex", flexDirection:"column", gap:6}}>
             <span style={{fontFamily:"var(--font-sans)", fontSize:11.5, color:"var(--on-surface-muted)", fontWeight:600}}>소요 시간</span>
-            <span style={{fontFamily:"var(--font-sans)", fontSize:26, fontWeight:800, color:"var(--on-surface)", letterSpacing:"-0.02em"}}>{fmtDuration((Date.now() - new Date(R.started).getTime()) / 1000)}</span>
+            <span style={{fontFamily:"var(--font-sans)", fontSize:26, fontWeight:800, color:"var(--on-surface)", letterSpacing:"-0.02em"}}>{fmtDuration(Math.max(0, (HM_DATA.NOW.getTime() - new Date(R.started).getTime()) / 1000))}</span>
           </div>
         </HmCard>
       </div>
@@ -250,6 +258,83 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+// 작은 통계 셀 (요약 run 상세에서 사용)
+function StatCell({ label, value }: any) {
+  return (
+    <div style={{display:"flex", flexDirection:"column", gap:6}}>
+      <span style={{fontFamily:"var(--font-sans)", fontSize:11.5, color:"var(--on-surface-muted)", fontWeight:600}}>{label}</span>
+      <span style={{fontFamily:"var(--font-sans)", fontSize:20, fontWeight:800, color:"var(--on-surface)", letterSpacing:"-0.02em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{value}</span>
+    </div>
+  );
+}
+
+// RUN_DETAIL(전체 트랜스크립트) 이외의 run 을 위한 요약 상세 뷰.
+// run 을 찾지 못하면 Not Found 상태를 보여준다.
+function RunSummaryDetail({ runId, run, onBack, fullRunId }: any) {
+  if (!run) {
+    return (
+      <div style={{padding:"40px 0"}}>
+        <button className="btn btn-icon btn-sm" onClick={onBack} style={{marginBottom:16}}><Icon name="chevronLeft" size={14}/></button>
+        <Empty icon="search" title="실행을 찾을 수 없습니다" sub={`${runId} 에 해당하는 실행이 없습니다.`}
+          action={<Button size="sm" variant="secondary" onClick={onBack}>목록으로</Button>}/>
+      </div>
+    );
+  }
+  const kLabel = (s) => s === "running" ? "실행 중" : s === "awaiting" ? "승인 대기" : s === "succeeded" ? "성공" : s === "failed" ? "실패" : s === "queued" ? "대기 중" : s === "cancelled" ? "취소" : s;
+  return (
+    <>
+      {/* Header */}
+      <div style={{display:"flex", alignItems:"flex-start", gap:14, marginBottom:14}}>
+        <button className="btn btn-icon btn-sm" onClick={onBack}><Icon name="chevronLeft" size={14}/></button>
+        <div style={{flex:1, minWidth:0}}>
+          <div style={{display:"flex", alignItems:"center", gap:10}}>
+            <RavenMark which="huginn" size={18}/>
+            <h1 style={{margin:0, fontFamily:"var(--font-sans)", fontSize:24, fontWeight:800, letterSpacing:"-0.025em"}}>{run.id}</h1>
+            <StatusLabel status={run.status}>
+              <span style={{fontFamily:"var(--font-sans)", fontSize:13, fontWeight:600}}>{kLabel(run.status)}</span>
+            </StatusLabel>
+          </div>
+          <div style={{fontSize:13, color:"var(--on-surface-muted)", marginTop:6, fontFamily:"var(--font-sans)"}}>
+            <a href="#" style={{color:"var(--primary-50)", textDecoration:"none"}}>{run.app}</a>
+            <span style={{margin:"0 6px"}}>·</span>
+            <span>시작 {fmtClock(run.started)} · {fmtTimeAgo(run.started)}</span>
+          </div>
+        </div>
+        <div style={{display:"flex", gap:6}}>
+          {run.status === "running" && <>
+            <Button size="sm" variant="gray" leftIcon="clock">일시정지</Button>
+            <Button size="sm" variant="danger" leftIcon="close">중단</Button>
+          </>}
+          {run.status === "succeeded" && <Button size="sm" variant="secondary" leftIcon="refresh">다시 재생</Button>}
+        </div>
+      </div>
+
+      {/* Approval panel (only when awaiting) */}
+      {run.status === "awaiting" && <ApprovalPanel runId={run.id}/>}
+
+      {/* Top stats row */}
+      <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
+        <HmCard>
+          <div style={{display:"flex", alignItems:"center", gap:10}}>
+            <RavenMark which="huginn" size={20}/>
+            <Meter label="단계" current={run.step ?? 0} cap={run.max} format={v => v}/>
+          </div>
+        </HmCard>
+        <HmCard><StatCell label="비용" value={run.cost > 0 ? fmtMoney(run.cost) : "—"}/></HmCard>
+        <HmCard><StatCell label="소요 시간" value={run.duration > 0 ? fmtDuration(run.duration) : "—"}/></HmCard>
+        <HmCard><StatCell label="결과" value={run.output || "—"}/></HmCard>
+      </div>
+
+      {/* 전체 트랜스크립트는 데모 flagship run 에만 존재 */}
+      <HmCard>
+        <Empty icon="activity" title="상세 트랜스크립트가 없는 실행입니다"
+          sub={`타임라인 · recall된 기억 · 도구 호출 트랜스크립트는 데모 데이터에서 ${fullRunId} 실행에만 포함되어 있습니다.`}
+          action={<a href={`/runs/${fullRunId}`} style={{fontSize:13, color:"var(--primary-40)", textDecoration:"none", fontFamily:"var(--font-sans)", fontWeight:600}}>전체 트랜스크립트 예시 보기 →</a>}/>
+      </HmCard>
     </>
   );
 }

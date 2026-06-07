@@ -3,6 +3,7 @@ import React from "react";
 import { Icon } from "@/components/icons";
 import { Sparkline, IconButton } from "@/components/ui";
 import { BRAND_LOGO_PATH, BRAND_LOGO_VIEWBOX } from "@/components/logo-data";
+import { HM_DATA } from "@/lib/data";
 // Huginn & Muninn — custom components and shared utils
 
 const { useState: useS_HM, useEffect: useE_HM, useRef: useR_HM, useMemo: useM_HM } = React;
@@ -15,8 +16,11 @@ const fmtDuration = (s) => {
   const m = Math.floor(s / 60), sec = Math.floor(s % 60);
   return `${String(m).padStart(2,"0")}m ${String(sec).padStart(2,"0")}s`;
 };
+// mock 데이터의 모든 timestamp 는 HM_DATA.NOW 기준 상대값이므로,
+// 실제 벽시계(Date.now())가 아니라 HM_DATA.NOW 를 기준으로 경과시간을 계산한다.
+// (그렇지 않으면 데모 시각과 현재 시각의 차이만큼 "17d ago" 처럼 잘못 표시된다.)
 const fmtTimeAgo = (iso) => {
-  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  const d = Math.max(0, (HM_DATA.NOW.getTime() - new Date(iso).getTime()) / 1000);
   if (d < 60) return `${Math.floor(d)}s ago`;
   if (d < 3600) return `${Math.floor(d/60)}m ago`;
   if (d < 86400) return `${Math.floor(d/3600)}h ago`;

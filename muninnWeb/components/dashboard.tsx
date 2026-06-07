@@ -18,11 +18,30 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
   const wsFailed24h = wsApps.reduce((s, a) => s + a.failed24h, 0);
   const successRate = wsRuns24h > 0 ? ((wsRuns24h - wsFailed24h) / wsRuns24h * 100).toFixed(1) : "0";
 
+  // 평균 비용/실행: 현재 워크스페이스 run 들의 평균 (하드코딩 대신 실제 데이터로 계산)
+  const wsRecentRuns = D.RECENT_RUNS.filter(r => wsAppNames.has(r.app));
+  const avgCostPerRun = wsRecentRuns.length
+    ? wsRecentRuns.reduce((s, r) => s + r.cost, 0) / wsRecentRuns.length
+    : 0;
+
+  // 승인 대기: 워크스페이스 내 awaiting run. hint/link 는 실제 run 이 있을 때만 노출한다.
+  const awaitingRuns = liveRuns.filter(r => r.status === "awaiting");
+  const oldestAwaiting = awaitingRuns.reduce(
+    (acc, r) => (acc && new Date(acc.started) <= new Date(r.started) ? acc : r),
+    awaitingRuns[0]
+  );
+  const agoKo = (iso: string) => {
+    const m = Math.max(0, (D.NOW.getTime() - new Date(iso).getTime()) / 60000);
+    if (m < 60) return `${Math.floor(m)}분 전`;
+    if (m < 1440) return `${Math.floor(m / 60)}시간 전`;
+    return `${Math.floor(m / 1440)}일 전`;
+  };
+
   const kpis = [
     { label: "24시간 실행",        value: `${wsRuns24h}`,         delta: 12,   dir: "up",   hint: "어제 대비 +12" },
     { label: "성공률",             value: successRate,    unit: "%",   delta: 2.1,  dir: "up",   hint: "+2.1pp" },
-    { label: "평균 비용/실행",     value: "$0.072",               delta: 13,   dir: "down", hint: "-$0.011" },
-    { label: "승인 대기",           value: liveRuns.filter(r => r.status === "awaiting").length.toString(),                                accent: "amber", hint: "가장 오래된 건 18분 전", link: () => onOpenRun("run_61a45d8") },
+    { label: "평균 비용/실행",     value: `$${avgCostPerRun.toFixed(3)}`,               delta: 13,   dir: "down", hint: "-$0.011" },
+    { label: "승인 대기",           value: awaitingRuns.length.toString(),                                accent: "amber", hint: oldestAwaiting ? `가장 오래된 건 ${agoKo(oldestAwaiting.started)}` : "대기 중인 승인 없음", link: oldestAwaiting ? () => onOpenRun(oldestAwaiting.id) : undefined },
   ];
 
   const topFailing = wsApps
