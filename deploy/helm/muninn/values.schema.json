@@ -19,13 +19,6 @@
         "limits": { "type": "object" },
         "requests": { "type": "object" }
       }
-    },
-    "scheduling": {
-      "podAnnotations": { "type": "object" },
-      "podLabels": { "type": "object" },
-      "nodeSelector": { "type": "object" },
-      "tolerations": { "type": "array" },
-      "affinity": { "type": "object" }
     }
   },
   "properties": {

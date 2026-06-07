@@ -40,6 +40,7 @@ operator:
   metrics:
     enabled: true
     secure: true
+    # 관례: HTTPS(secure=true)=8443, HTTP(secure=false)=8080. secure 를 끄면 port 도 8080 으로 바꾸길 권장.
     port: 8443
     service:
       type: ClusterIP

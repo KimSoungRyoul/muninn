@@ -78,7 +78,7 @@ spec:
           resources:
             {{- toYaml .Values.web.resources | nindent 12 }}
           securityContext:
-            runAsUser: 1001
+            # runAsUser 는 pod securityContext(1001)에서 상속한다.
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
@@ -90,7 +90,8 @@ spec:
               mountPath: /tmp
       volumes:
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 256Mi
       {{- with .Values.web.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

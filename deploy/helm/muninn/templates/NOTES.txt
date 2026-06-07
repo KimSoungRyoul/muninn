@@ -35,11 +35,9 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
 {{- if .Values.agent.serviceAccount.create }}
 
 ▶ Agent 인증 (operator 가 만드는 Job 이 사용)
-  {{- if not .Values.agent.secrets.create }}
   자격 Secret({{ .Values.agent.secrets.name }})은 보안상 chart 가 만들지 않습니다. 런타임에 생성:
     kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.agent.secrets.name }} \
       --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
-  {{- end }}
 {{- end }}
 
 ▶ PostgreSQL
