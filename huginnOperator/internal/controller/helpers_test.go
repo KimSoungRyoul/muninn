@@ -75,7 +75,12 @@ func TestBuildJobTemplate(t *testing.T) {
 		{"MUNINN_EVENT_PAYLOAD_REF", "secret/issue-1-event"},
 		{"MUNINN_GOAL", "diagnose"},
 	} {
-		if e, ok := envByName(jt.Env, tc.name); !ok || e.Value != tc.want {
+		e, ok := envByName(jt.Env, tc.name)
+		if !ok {
+			t.Errorf("%s env 누락", tc.name)
+			continue
+		}
+		if e.Value != tc.want {
 			t.Errorf("%s = %q, want %q", tc.name, e.Value, tc.want)
 		}
 	}
