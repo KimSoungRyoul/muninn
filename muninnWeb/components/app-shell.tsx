@@ -3,6 +3,7 @@
 import React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { HmSidebar, HmHeader, HmStatusBar } from "@/components/shell";
+import { MuninnCopilot } from "@/components/muninn-copilot";
 import { useWorkspace } from "@/lib/workspace-context";
 import { navPath, sectionFromPath } from "@/lib/nav";
 
@@ -34,6 +35,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <HmHeader onNotif={() => router.push("/runs/run_61a45d8")} />
       <main className="main">{children}</main>
       <HmStatusBar wsConnected={true} queueDepth={0} />
+      {/* CopilotKit 사이드바 + readable context + frontend tools */}
+      <MuninnCopilot />
     </div>
   );
 }

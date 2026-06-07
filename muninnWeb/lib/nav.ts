@@ -24,5 +24,5 @@ export function sectionFromPath(pathname: string): string {
 }
 
 export function appPath(id: string, tab?: string): string {
-  return `/apps/${id}${tab ? `?tab=${tab}` : ""}`;
+  return `/apps/${id}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`;
 }
