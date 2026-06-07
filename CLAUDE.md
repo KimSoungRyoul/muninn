@@ -47,6 +47,16 @@ event ─▶ Muninn API (normalize + dedup) ─▶ HuginnIssue CR
 
 ## Commands
 
+**Root `Makefile`** — monorepo 전역 + 로컬 풀스택. 하위 프로젝트로 위임하는 일관 어휘(`build`·`image`·`lint`·`test`)를 노출하고, `run-local` 로 kind 에 전체를 띄운다(Podman 기본):
+```bash
+make run-local             # kind 생성 + 이미지 3종(operator/web/runtime) 빌드/적재 + metaDB(postgres) + helm install (클러스터 *안* 에 전체 기동)
+make images                # 세 이미지 로컬 빌드만
+make status / make down    # 풀스택 상태 / kind 삭제
+make help                  # 전체 타깃
+# 자격이 있으면 코파일럿/agent 까지: CLAUDE_CODE_OAUTH_TOKEN=... make run-local
+```
+`run-local` ≠ operator 의 `run-kind`: run-kind 는 operator 를 클러스터 *밖*(host `go run`)으로, run-local 은 operator 까지 helm 으로 클러스터 *안* 에 배포한다. 하위 프로젝트도 각자 `Makefile` 로 통일됨(`huginnAgentRuntime`: `image`/`selftest`, `muninnWeb`: `build`/`image`/`lint`).
+
 **huginnOperator/** (Go):
 ```bash
 make build                 # build manager binary
@@ -70,20 +80,21 @@ make test-e2e                          # isolated kind e2e (separate cluster: hu
 
 **huginnAgentRuntime/** (image — Podman, not Docker):
 ```bash
-podman build -t ghcr.io/kimsoungryoul/muninn/agent-runtime:dev .
-podman run --rm ghcr.io/kimsoungryoul/muninn/agent-runtime:dev selftest   # offline wiring check
+make image      # = podman build -t ghcr.io/kimsoungryoul/muninn/agent-runtime:dev .
+make selftest   # offline wiring check (make test 도 동일)
 # CI publishes ghcr.io/kimsoungryoul/muninn/agent-runtime via .github/workflows/agent-runtime-image.yml
 # (PR = build only; push to main/tag = multi-arch push)
 ```
 
 **muninnWeb/** (Next.js, port 3030 — **pnpm**, `packageManager` 핀):
 ```bash
-pnpm install
-pnpm dev           # http://localhost:3030
-pnpm build         # production build = the typecheck gate (tsc runs here)
-pnpm lint
-# 코파일럿(CopilotKit) 동작엔 자격 env 필요: CLAUDE_CODE_OAUTH_TOKEN 또는 ANTHROPIC_API_KEY
-# (선택) COPILOT_MODEL 로 모델 override(기본 claude-haiku-4-5-20251001)
+make install       # = pnpm install --frozen-lockfile
+make dev           # http://localhost:3030
+make build         # production build = the typecheck gate (tsc runs here). make test 도 동일.
+make lint
+make image         # = podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev .
+# ⚠️ make dev 중에는 make build 금지(.next 손상). 코파일럿 동작엔 자격 env 필요:
+#    CLAUDE_CODE_OAUTH_TOKEN 또는 ANTHROPIC_API_KEY. (선택) COPILOT_MODEL override(기본 claude-haiku-4-5-20251001)
 ```
 
 ## Conventions

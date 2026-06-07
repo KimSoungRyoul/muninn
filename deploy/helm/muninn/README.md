@@ -35,27 +35,35 @@ webhook 비활성(기본)에서는 cert-manager 없이 바로 뜬다.
 
 ### 로컬 이미지로 kind 설치 (Podman)
 
+**권장: 루트 `make run-local`** — kind 생성 + 이미지 3종 빌드/적재 + metaDB + 이 chart 설치를 한 번에 한다.
+완전수식 이미지 이름(`ghcr.io/kimsoungryoul/muninn/*`)으로 빌드해 podman 의 `localhost/` 접두 문제를 피하고,
+helm 값을 자동 배선한다(아래 수동 절차는 내부에서 일어나는 일을 풀어쓴 것).
+
 ```bash
-# 1) operator 이미지 빌드 + load
-#    주의: huginnOperator/.dockerignore 가 buildah(podman)에서 cmd/main.go 를 누락시키므로
-#    ignorefile 우회로 빌드한다(별도 수정 PR 권장).
-printf '.git\nbin\n' > /tmp/op.ignore
-podman build -t controller:latest --ignorefile /tmp/op.ignore huginnOperator
-podman save localhost/controller:latest -o /tmp/op.tar
-KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/op.tar --name <cluster>
+make run-local                      # 루트에서. (자격이 있으면 CLAUDE_CODE_OAUTH_TOKEN=... make run-local)
+```
 
-# 2) (선택) web 이미지 빌드 + load
-podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev muninnWeb
-podman save ghcr.io/kimsoungryoul/muninn/muninn-web:dev -o /tmp/web.tar
-KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/web.tar --name <cluster>
+수동으로 하려면:
 
-# 3) 설치 (podman 은 로컬 이미지를 localhost/ 로 태그하므로 repository 를 맞춘다)
+```bash
+# 1) 이미지 빌드 + load (operator/web)
+make -C huginnOperator image CONTAINER_TOOL=podman IMG=ghcr.io/kimsoungryoul/muninn/huginn-operator:dev
+make -C muninnWeb       image CONTAINER_TOOL=podman IMG=ghcr.io/kimsoungryoul/muninn/muninn-web:dev
+for img in huginn-operator muninn-web; do
+  podman save ghcr.io/kimsoungryoul/muninn/$img:dev -o /tmp/$img.tar
+  KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/$img.tar --name <cluster>
+done
+
+# 2) 설치 (완전수식 이름이라 repository override 불필요 — tag/pullPolicy 만 맞춘다)
 helm install muninn deploy/helm/muninn -n muninn --create-namespace \
-  --set operator.image.repository=localhost/controller \
-  --set operator.image.pullPolicy=IfNotPresent
+  --set operator.image.repository=ghcr.io/kimsoungryoul/muninn/huginn-operator \
+  --set operator.image.tag=dev --set operator.image.pullPolicy=IfNotPresent \
+  --set web.image.tag=dev --set web.image.pullPolicy=IfNotPresent
 ```
 
 > kind 에 load 한 로컬 이미지는 `pullPolicy: IfNotPresent`(기본)면 노드에 있을 때 재pull 하지 않는다.
+> (과거 `huginnOperator/.dockerignore` 가 buildah 에서 `cmd/main.go` 를 누락시키던 문제는 명시적 제외
+> 패턴으로 수정됨 — 이제 `podman build huginnOperator` 가 우회 없이 동작한다.)
 
 ## 자격(Secret) — 절대 커밋 금지
 

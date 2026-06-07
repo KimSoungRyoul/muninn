@@ -1,11 +1,10 @@
-# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore everything by default and re-include only needed files
-**
-
-# Re-include Go source files (but not *_test.go)
-!**/*.go
+# manager 이미지 빌드 컨텍스트(`make docker-build` / `make image`).
+#
+# 중요: "전부 ignore(**) 후 재포함(!...)" 패턴을 쓰지 말 것. buildah/podman 은 하위
+# 디렉토리의 재포함을 제대로 처리하지 못해 cmd/main.go 를 조용히 누락시키고 빌드가
+# 깨진다. 명시적 제외만 나열해 docker 와 podman 이 동일한 컨텍스트를 만들도록 한다.
+.git
+bin
+dist
+cover.out
 **/*_test.go
-
-# Re-include Go module files
-!go.mod
-!go.sum
