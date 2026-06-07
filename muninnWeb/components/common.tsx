@@ -215,8 +215,13 @@ function Meter({ label, current, cap, format = (v) => v, tone, unit }: any) {
 }
 
 // ---------- JsonViewer (mini, syntax-highlighted) ----------
+// HTML 엔티티 이스케이프 — dangerouslySetInnerHTML 주입 전 값에 든 &, <, > 를 무력화한다.
+// (JSON 구조 문자인 따옴표/콜론/숫자는 건드리지 않아 아래 하이라이트 정규식이 그대로 동작한다.)
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 function highlightJson(obj) {
-  const s = JSON.stringify(obj, null, 2);
+  const s = escapeHtml(JSON.stringify(obj, null, 2));
   return s
     .replace(/("[^"]+"):/g, '<span class="json-key">$1</span><span class="json-punct">:</span>')
     .replace(/: ("[^"]*")/g, ': <span class="json-str">$1</span>')
