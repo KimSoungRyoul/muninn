@@ -77,8 +77,10 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			run.Status.MaxTokens = issue.Spec.InheritedGuardrails.MaxTokens
 		case apierrors.IsNotFound(err):
 			// 부모 Issue 가 이미 사라짐(cascade GC 중일 수 있음) — caps 복사 불가.
-			// 재시도해도 결과가 같으므로 로그만 남기고 진행한다.
-			log.Info("부모 Issue 없음 — 상속 caps 복사 생략", "issue", run.Spec.IssueRef)
+			// MaxStep 을 sentinel(1, CRD Minimum=1)로 닫아, 매 reconcile 마다 Issue
+			// 재조회·로그가 반복되지 않게 한다(가드는 MaxStep 으로만 닫힌다; 위 주석 참고).
+			log.Info("부모 Issue 없음 — 상속 caps 미복사, MaxStep=1 로 고정", "issue", run.Spec.IssueRef)
+			run.Status.MaxStep = 1
 		default:
 			// transient API 에러: caps 미복사 상태로 Job 을 만들지 않도록 requeue 한다(§2.2).
 			return ctrl.Result{}, err
