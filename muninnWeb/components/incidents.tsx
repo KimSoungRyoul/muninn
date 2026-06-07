@@ -9,6 +9,8 @@ import * as React from "react";
 import { Icon } from "@/components/icons";
 import { HmPageHead, HmCard, StatusLabel, fmtMoney, fmtTimeAgo } from "@/components/common";
 import { Badge, Chip, Empty, Button } from "@/components/ui";
+import { useWorkspace } from "@/lib/workspace-context";
+import { HM_DATA } from "@/lib/data";
 
 const { useState, useEffect, useCallback } = React;
 
@@ -67,7 +69,15 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
 
   useEffect(() => { load(); }, [load]);
 
-  const activeCount = items.filter((i) => ["Pending", "Running", "AwaitingApproval"].includes(i.phase)).length;
+  // 다른 페이지(대시보드·앱 목록)와 동일하게 현재 워크스페이스로 스코프한다.
+  // /api/issues 는 단일 app 필터만 지원하므로, 워크스페이스의 앱 집합으로 클라이언트에서 필터.
+  const { workspaceId } = useWorkspace();
+  const wsAppNames = new Set(
+    HM_DATA.APPS.filter((a) => a.workspaceId === workspaceId).map((a) => a.name)
+  );
+  const visible = items.filter((i) => wsAppNames.has(i.app));
+
+  const activeCount = visible.filter((i) => ["Pending", "Running", "AwaitingApproval"].includes(i.phase)).length;
 
   return (
     <div className="hm-page">
@@ -86,7 +96,7 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
       {/* 요약 스트립 */}
       <div className="hm-incident-summary" style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <Badge tone="warning" dot>진행 중 {activeCount}</Badge>
-        <Badge tone="default">표시 {items.length}</Badge>
+        <Badge tone="default">표시 {visible.length}</Badge>
         <span className="dim" style={{ fontSize: 12.5, alignSelf: "center" }}>
           위임(새 장애 대응 생성)은 우측 <b>Muninn Copilot</b> 에 자연어로 요청하세요.
         </span>
@@ -96,12 +106,12 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
       {error && !loading && (
         <HmCard><div className="dim" style={{ padding: 8 }}>조회 오류: {error}</div></HmCard>
       )}
-      {!loading && !error && items.length === 0 && (
+      {!loading && !error && visible.length === 0 && (
         <Empty icon="alert" title="표시할 장애가 없습니다" sub="진행 중인 HuginnIssue 가 없거나, 클러스터에 연결되지 않았습니다." />
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {items.map((inc) => {
+        {visible.map((inc) => {
           const ph = PHASE_MAP[inc.phase] ?? { status: "queued", label: inc.phase };
           return (
             <HmCard key={inc.issue}>
