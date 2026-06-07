@@ -67,51 +67,47 @@ func TestBuildJobTemplate(t *testing.T) {
 		t.Errorf("command = %v", jt.Command)
 	}
 
-	// MUNINN_GUARDRAILS 는 maxIterations/maxCostUsd/maxTokens 모두 포함해야 한다(리뷰 수정 #1).
-	g, ok := envByName(jt.Env, "MUNINN_GUARDRAILS")
-	if !ok {
-		t.Fatal("MUNINN_GUARDRAILS env 누락")
-	}
-	want := `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000}`
-	if g.Value != want {
-		t.Errorf("MUNINN_GUARDRAILS = %q, want %q", g.Value, want)
+	// 단순 Value env 들은 표로 한 번에 검증
+	// (MUNINN_GUARDRAILS 는 maxIterations/maxCostUsd/maxTokens 모두 포함해야 함 — 리뷰 수정 #1).
+	for _, tc := range []struct{ name, want string }{
+		{"MUNINN_GUARDRAILS", `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000}`},
+		{"MUNINN_SOUL_REF", "configmap/soul-ai-router-svc"},
+		{"MUNINN_EVENT_PAYLOAD_REF", "secret/issue-1-event"},
+		{"MUNINN_GOAL", "diagnose"},
+	} {
+		e, ok := envByName(jt.Env, tc.name)
+		if !ok {
+			t.Errorf("%s env 누락", tc.name)
+			continue
+		}
+		if e.Value != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, e.Value, tc.want)
+		}
 	}
 
 	// 인증은 env(Secret) secretKeyRef 로만 주입(§5.1, §6.2).
-	ak, ok := envByName(jt.Env, "ANTHROPIC_API_KEY")
-	if !ok || ak.ValueFrom == nil || ak.ValueFrom.SecretKeyRef == nil {
-		t.Fatal("ANTHROPIC_API_KEY secretKeyRef 누락")
-	}
-	if ak.ValueFrom.SecretKeyRef.Name != agentSecretName || ak.ValueFrom.SecretKeyRef.Key != anthropicKeyName {
-		t.Errorf("ANTHROPIC_API_KEY ref = %+v", ak.ValueFrom.SecretKeyRef)
-	}
-	// API 키/OAuth 토큰 둘 중 하나면 충분 → 둘 다 optional secretKeyRef(§5.1).
-	if ak.ValueFrom.SecretKeyRef.Optional == nil || !*ak.ValueFrom.SecretKeyRef.Optional {
-		t.Error("ANTHROPIC_API_KEY secretKeyRef 는 optional 이어야 함")
-	}
-	oauth, ok := envByName(jt.Env, "CLAUDE_CODE_OAUTH_TOKEN")
-	if !ok || oauth.ValueFrom == nil || oauth.ValueFrom.SecretKeyRef == nil {
-		t.Fatal("CLAUDE_CODE_OAUTH_TOKEN secretKeyRef 누락")
-	}
-	if oauth.ValueFrom.SecretKeyRef.Name != agentSecretName || oauth.ValueFrom.SecretKeyRef.Key != oauthTokenKeyName {
-		t.Errorf("CLAUDE_CODE_OAUTH_TOKEN ref = %+v", oauth.ValueFrom.SecretKeyRef)
-	}
-	if oauth.ValueFrom.SecretKeyRef.Optional == nil || !*oauth.ValueFrom.SecretKeyRef.Optional {
-		t.Error("CLAUDE_CODE_OAUTH_TOKEN secretKeyRef 는 optional 이어야 함")
-	}
+	// API 키/OAuth 토큰 둘 중 하나면 충분 → 둘 다 optional secretKeyRef.
+	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_API_KEY", agentSecretName, anthropicKeyName)
+	assertOptionalSecretRef(t, jt.Env, "CLAUDE_CODE_OAUTH_TOKEN", agentSecretName, oauthTokenKeyName)
+
 	if gh, ok := envByName(jt.Env, "GITHUB_PAT"); !ok || gh.ValueFrom == nil || gh.ValueFrom.SecretKeyRef.Name != "gh-pat" {
 		t.Error("GITHUB_PAT secretKeyRef(gh-pat) 누락")
 	}
+}
 
-	// 조건부 ref 주입.
-	if soul, ok := envByName(jt.Env, "MUNINN_SOUL_REF"); !ok || soul.Value != "configmap/soul-ai-router-svc" {
-		t.Errorf("MUNINN_SOUL_REF = %q", soul.Value)
+// assertOptionalSecretRef 는 env 가 (secret,key) 를 가리키는 optional secretKeyRef 인지 검증한다(§5.1).
+func assertOptionalSecretRef(t *testing.T, env []corev1.EnvVar, envName, secret, key string) {
+	t.Helper()
+	e, ok := envByName(env, envName)
+	if !ok || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("%s secretKeyRef 누락", envName)
 	}
-	if ev, ok := envByName(jt.Env, "MUNINN_EVENT_PAYLOAD_REF"); !ok || ev.Value != "secret/issue-1-event" {
-		t.Errorf("MUNINN_EVENT_PAYLOAD_REF = %q", ev.Value)
+	ref := e.ValueFrom.SecretKeyRef
+	if ref.Name != secret || ref.Key != key {
+		t.Errorf("%s ref = %+v", envName, ref)
 	}
-	if goal, ok := envByName(jt.Env, "MUNINN_GOAL"); !ok || goal.Value != "diagnose" {
-		t.Errorf("MUNINN_GOAL = %q", goal.Value)
+	if ref.Optional == nil || !*ref.Optional {
+		t.Errorf("%s secretKeyRef 는 optional 이어야 함", envName)
 	}
 }
 
