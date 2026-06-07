@@ -1,0 +1,65 @@
+# 로컬 풀스택(`make run-local`)용 metaDB — stock postgres.
+# 검색은 텍스트(to_tsvector/ts_rank_cd)만 쓰므로 pgvector·확장 불필요 → 어떤 postgres 이미지든 동작.
+#
+# namespace 는 `kubectl apply -n` 가 정한다(매니페스트에 박지 않음 → NAMESPACE override 호환).
+# 연결 Secret(muninn-metadb, key=uri)은 Makefile 의 `metadb-up` 타깃이 namespace 에 맞춰 생성한다.
+# 운영 경로는 이게 아니라 CloudNativePG(deploy/quickstart/README.md)다.
+#
+# ⚠️ kind 로컬 전용: 비밀번호 평문(muninn) + emptyDir(비영속, 재시작 시 스키마는 앱이 재생성).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: muninn-metadb
+  labels:
+    app.kubernetes.io/name: muninn-metadb
+    app.kubernetes.io/part-of: muninn
+    app.kubernetes.io/component: metadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: muninn-metadb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: muninn-metadb
+        app.kubernetes.io/part-of: muninn
+        app.kubernetes.io/component: metadb
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: POSTGRES_USER, value: muninn }
+            - { name: POSTGRES_PASSWORD, value: muninn } # kind 로컬 전용(실배포는 Secret).
+            - { name: POSTGRES_DB, value: muninn }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: pg, containerPort: 5432 }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "muninn", "-d", "muninn"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          emptyDir: {} # kind QA: 비영속. 영속이 필요하면 PVC 로 교체.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: muninn-metadb
+  labels:
+    app.kubernetes.io/name: muninn-metadb
+    app.kubernetes.io/part-of: muninn
+    app.kubernetes.io/component: metadb
+spec:
+  selector:
+    app.kubernetes.io/name: muninn-metadb
+  ports:
+    - { name: pg, port: 5432, targetPort: 5432 }

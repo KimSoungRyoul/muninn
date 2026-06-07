@@ -131,6 +131,9 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
+.PHONY: image
+image: docker-build ## (일관 어휘) docker-build 별칭 — manager 이미지 빌드. 루트 Makefile 이 위임.
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
