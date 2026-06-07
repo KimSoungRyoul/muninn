@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { ok, notFound, severityGte } from "@/lib/api";
+import { ok, notFound, serverError, severityGte } from "@/lib/api";
 import { APPS, EVENTS } from "@/lib/data";
 import { delegateIncident } from "@/lib/incidents";
 import { k8sEnabled } from "@/lib/k8s";
@@ -51,7 +51,12 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
     fingerprint: `${source}:${slug}`, title,
   });
   if (!res.ok) {
-    return ok({ accepted: false, reason: res.reason, event, issueId: null, error: res.error ?? null });
+    // 위임 실패는 외부 발신자(Grafana/Alertmanager 등)가 인지·재시도할 수 있도록 비-2xx 로 응답한다.
+    // (k8s-disabled 는 위 !k8sEnabled() 분기에서 이미 200 시뮬레이션으로 처리되므로 여기 도달하지 않는다.)
+    if (res.reason === "agent-not-found") {
+      return notFound(`application '${params.app}' 에 대응하는 HuginnAgent 가 없습니다`);
+    }
+    return serverError(`위임 실패: ${res.reason}`, res.error);
   }
   return ok({
     accepted: true, reason: "new", event,

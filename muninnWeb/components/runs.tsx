@@ -154,7 +154,7 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
       </div>
 
       {/* Approval panel (only when awaiting) */}
-      {status === "awaiting" && <ApprovalPanel runId={R.id}/>}
+      {status === "awaiting" && <ApprovalPanel runId={R.id} requestedAt={R.started}/>}
 
       {/* Top stats row */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
@@ -314,7 +314,7 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId }: any) {
       </div>
 
       {/* Approval panel (only when awaiting) */}
-      {run.status === "awaiting" && <ApprovalPanel runId={run.id}/>}
+      {run.status === "awaiting" && <ApprovalPanel runId={run.id} requestedAt={run.started}/>}
 
       {/* Top stats row */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
@@ -391,13 +391,19 @@ function StepCard({ step: s, arrived }: any) {
   return null;
 }
 
-function ApprovalPanel({ runId }: any) {
+// 승인 대기 만료 정책(기본 90분). requestedAt(승인 요청=run 진입 시각) 기준 잔여시간 계산.
+const APPROVAL_TTL_MIN = 90;
+function ApprovalPanel({ runId, requestedAt }: any) {
+  const remainMin = requestedAt
+    ? Math.round(APPROVAL_TTL_MIN - Math.max(0, (HM_DATA.NOW.getTime() - new Date(requestedAt).getTime()) / 60000))
+    : null;
+  const expiresLabel = remainMin == null ? null : remainMin > 0 ? `${remainMin}분 후 만료` : "만료됨";
   return (
     <div className="hm-approval">
       <div className="hm-approval-head">
         <Icon name="shield" size={16} style={{color:"var(--warning-55)"}}/>
         <span className="ttl">승인이 필요합니다</span>
-        <span className="expires">87분 후 만료</span>
+        {expiresLabel && <span className="expires">{expiresLabel}</span>}
       </div>
       <div className="hm-approval-reasons">
         <div className="r"><span className="glyph">▲</span> dependency 변경 감지 (requirements.txt, +2 / -0)</div>
