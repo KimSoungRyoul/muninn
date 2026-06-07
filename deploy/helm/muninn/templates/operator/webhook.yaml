@@ -1,0 +1,106 @@
+{{- if and .Values.operator.enabled .Values.operator.webhook.enabled -}}
+{{- $fullname := include "muninn.operator.fullname" . -}}
+{{- $certName := printf "%s-webhook-cert" $fullname -}}
+{{- $svcName := printf "%s-webhook" $fullname -}}
+# webhook 은 cert-manager 가 caBundle 을 주입한다(cert-manager 설치 필요).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svcName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "muninn.operator.selectorLabels" . | nindent 4 }}
+  ports:
+    - port: 443
+      targetPort: webhook-server
+      protocol: TCP
+{{- if .Values.operator.webhook.certManager.enabled }}
+{{- if not .Values.operator.webhook.certManager.issuerRef }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-selfsigned-issuer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $certName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ $svcName }}.{{ .Release.Namespace }}.svc
+    - {{ $svcName }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    {{- if .Values.operator.webhook.certManager.issuerRef }}
+    {{- toYaml .Values.operator.webhook.certManager.issuerRef | nindent 4 }}
+    {{- else }}
+    kind: Issuer
+    name: {{ $fullname }}-selfsigned-issuer
+    {{- end }}
+  secretName: {{ $certName }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ $fullname }}-mutating
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+  {{- if .Values.operator.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $certName }}
+  {{- end }}
+webhooks:
+  - name: mhuginnagent-v1beta1.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ $svcName }}
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-muninn-io-v1beta1-huginnagent
+    rules:
+      - apiGroups: [muninn.io]
+        apiVersions: [v1beta1]
+        operations: [CREATE, UPDATE]
+        resources: [huginnagents]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $fullname }}-validating
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+  {{- if .Values.operator.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $certName }}
+  {{- end }}
+webhooks:
+  - name: vhuginnagent-v1beta1.kb.io
+    admissionReviewVersions: [v1]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ $svcName }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-muninn-io-v1beta1-huginnagent
+    rules:
+      - apiGroups: [muninn.io]
+        apiVersions: [v1beta1]
+        operations: [CREATE, UPDATE]
+        resources: [huginnagents]
+{{- end }}

@@ -1,0 +1,123 @@
+{{- if .Values.operator.enabled -}}
+{{- $sa := include "muninn.operator.serviceAccountName" . -}}
+# ── manager ClusterRole (operator 가 CRD/Job/PVC/SA/Secret 등을 다룬다) ──
+# 원본: huginnOperator/config/rbac/role.yaml (kubebuilder generated). 동기화 주의.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "muninn.fullname" . }}-manager-role
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [configmaps, pods, secrets]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+- apiGroups: [""]
+  resources: [persistentvolumeclaims]
+  verbs: [create, get, list, patch, watch]
+- apiGroups: [""]
+  resources: [serviceaccounts]
+  verbs: [create, get, list, watch]
+- apiGroups: [batch]
+  resources: [jobs]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [muninn.io]
+  resources: [huginnagents, huginnissues, huginnruns]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [muninn.io]
+  resources: [huginnagents/finalizers, huginnissues/finalizers, huginnruns/finalizers]
+  verbs: [update]
+- apiGroups: [muninn.io]
+  resources: [huginnagents/status, huginnissues/status, huginnruns/status]
+  verbs: [get, patch, update]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [rolebindings, roles]
+  verbs: [create, get, list, patch, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "muninn.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "muninn.fullname" . }}-manager-role
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+{{- if .Values.operator.leaderElection.enabled }}
+---
+# ── leader election (namespace-scoped) ──
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "muninn.fullname" . }}-leader-election-role
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "muninn.fullname" . }}-leader-election-rolebinding
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "muninn.fullname" . }}-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- if and .Values.operator.metrics.enabled .Values.operator.metrics.secure }}
+---
+# ── secure metrics authn/authz (controller-runtime FilterProvider 가 사용) ──
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "muninn.fullname" . }}-metrics-auth-role
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+rules:
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+- apiGroups: [authorization.k8s.io]
+  resources: [subjectaccessreviews]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "muninn.fullname" . }}-metrics-auth-rolebinding
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "muninn.fullname" . }}-metrics-auth-role
+subjects:
+- kind: ServiceAccount
+  name: {{ $sa }}
+  namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

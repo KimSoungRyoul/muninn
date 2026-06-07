@@ -1,0 +1,12 @@
+# Helm package 시 제외.
+.DS_Store
+.git/
+.gitignore
+*.tmp
+*.bak
+*.swp
+*.orig
+.idea/
+.vscode/
+*.tgz
+ci/

@@ -1,0 +1,18 @@
+{{- if .Values.web.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "muninn.web.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.web.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.web.service.type }}
+  selector:
+    {{- include "muninn.web.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.web.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

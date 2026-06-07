@@ -1,0 +1,31 @@
+{{- if .Values.externalPostgresql.enabled -}}
+{{- $pg := .Values.externalPostgresql -}}
+{{- if not $pg.host }}
+{{- fail "externalPostgresql.enabled=true 이면 externalPostgresql.host 가 필요합니다(이 chart 는 DB 를 생성하지 않습니다 — 외부 인스턴스를 가리킵니다)." }}
+{{- end }}
+# 외부 PostgreSQL 연결 정보. chart 는 DB 워크로드를 만들지 않는다(요구사항).
+# 미구현 소비자(muninn-api / muninn-memory, 설계 §8 Phase 0)가 참조할 연결 메타를 등록한다.
+# 비밀번호는 여기에 평문으로 넣지 않는다 — existingSecret 의 키로만 주입한다(CLAUDE.md).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $pg.connectionSecretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database-config
+  annotations:
+    muninn.io/managed: external-postgresql
+    {{- if $pg.existingSecret }}
+    # password 는 이 Secret 의 키에서 별도로 주입한다.
+    muninn.io/password-secret: {{ $pg.existingSecret | quote }}
+    muninn.io/password-key: {{ $pg.existingSecretPasswordKey | quote }}
+    {{- end }}
+type: Opaque
+stringData:
+  host: {{ $pg.host | quote }}
+  port: {{ $pg.port | quote }}
+  database: {{ $pg.database | quote }}
+  username: {{ $pg.username | quote }}
+  sslmode: {{ $pg.sslmode | quote }}
+{{- end }}

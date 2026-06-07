@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "Muninn Helm values",
+  "type": "object",
+  "additionalProperties": true,
+  "definitions": {
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "limits": { "type": "object" },
+        "requests": { "type": "object" }
+      }
+    }
+  },
+  "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "imagePullSecrets": { "type": "array", "items": { "type": "object" } },
+    "commonLabels": { "type": "object" },
+    "operator": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": { "$ref": "#/definitions/image" },
+        "leaderElection": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "secure": { "type": "boolean" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "service": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] }
+              }
+            },
+            "serviceMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "interval": { "type": "string" },
+                "scrapeTimeout": { "type": "string" },
+                "labels": { "type": "object" }
+              }
+            }
+          }
+        },
+        "webhook": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "certManager": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "issuerRef": { "type": "object" }
+              }
+            }
+          }
+        },
+        "resources": { "$ref": "#/definitions/resources" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" },
+        "priorityClassName": { "type": "string" },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": { "type": "boolean" },
+            "name": { "type": "string" },
+            "annotations": { "type": "object" }
+          }
+        }
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "image": { "$ref": "#/definitions/image" },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "copilot": {
+          "type": "object",
+          "properties": {
+            "model": { "type": "string" },
+            "telemetryDisabled": { "type": "boolean" }
+          }
+        },
+        "auth": {
+          "type": "object",
+          "properties": { "existingSecret": { "type": "string" } }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "className": { "type": "string" },
+            "annotations": { "type": "object" },
+            "hosts": { "type": "array" },
+            "tls": { "type": "array" }
+          }
+        },
+        "resources": { "$ref": "#/definitions/resources" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "affinity": { "type": "object" }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": { "type": "boolean" },
+            "name": { "type": "string", "minLength": 1 },
+            "annotations": { "type": "object" }
+          }
+        },
+        "image": { "$ref": "#/definitions/image" },
+        "secrets": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "crds": {
+      "type": "object",
+      "properties": {
+        "managedByHelm": { "type": "boolean" }
+      }
+    },
+    "externalPostgresql": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "port": { "type": ["integer", "string"] },
+        "database": { "type": "string" },
+        "username": { "type": "string" },
+        "sslmode": { "type": "string", "enum": ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] },
+        "existingSecret": { "type": "string" },
+        "existingSecretPasswordKey": { "type": "string" },
+        "connectionSecretName": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

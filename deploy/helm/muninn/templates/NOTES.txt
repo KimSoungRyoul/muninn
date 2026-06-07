@@ -1,0 +1,51 @@
+Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Name }}, namespace: {{ .Release.Namespace }}).
+
+{{- if .Values.operator.enabled }}
+
+▶ Huginn Operator
+  배포 확인:
+    kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "muninn.operator.fullname" . }}
+    kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=operator
+  CRD 확인:
+    kubectl get crds | grep muninn.io
+  {{- if not .Values.operator.webhook.enabled }}
+  webhook: 비활성(ENABLE_WEBHOOKS=false). 활성화하려면 cert-manager 설치 후
+    --set operator.webhook.enabled=true
+  {{- else }}
+  webhook: 활성(cert-manager 필요). caBundle 주입까지 수십 초 걸릴 수 있습니다.
+  {{- end }}
+  {{- if .Values.operator.metrics.serviceMonitor.enabled }}
+  ⚠️ ServiceMonitor 활성: Prometheus Operator(monitoring.coreos.com CRD)가 클러스터에 설치돼 있어야 합니다.
+  {{- end }}
+{{- end }}
+
+{{- if .Values.web.enabled }}
+
+▶ Muninn Web 콘솔 (프로토타입)
+  접속:
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "muninn.web.fullname" . }} {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
+    open http://localhost:{{ .Values.web.service.port }}
+  {{- if not .Values.web.auth.existingSecret }}
+  ⚠️ CopilotKit 자격 미설정. 코파일럿을 쓰려면 Secret 생성 후 --set web.auth.existingSecret=muninn-web-secrets:
+    kubectl -n {{ .Release.Namespace }} create secret generic muninn-web-secrets \
+      --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+  {{- end }}
+{{- end }}
+
+{{- if and .Values.operator.enabled .Values.agent.serviceAccount.create }}
+
+▶ Agent 인증 (operator 가 만드는 Job 이 사용)
+  자격 Secret({{ .Values.agent.secrets.name }})은 보안상 chart 가 만들지 않습니다. 런타임에 생성:
+    kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.agent.secrets.name }} \
+      --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+{{- end }}
+
+▶ PostgreSQL
+  이 chart 는 PostgreSQL 을 설치하지 않습니다(외부 의존성).
+  {{- if .Values.externalPostgresql.enabled }}
+  외부 DB 연결 정보가 Secret/{{ .Values.externalPostgresql.connectionSecretName }} 에 등록되었습니다(host={{ .Values.externalPostgresql.host }}).
+  {{- else }}
+  externalPostgresql.enabled=true 로 외부 인스턴스 연결 정보를 등록할 수 있습니다.
+  {{- end }}
+
+자세한 설정은 deploy/helm/muninn/README.md 를 참고하세요.
