@@ -8,7 +8,7 @@ import { MarkdownView, MarkdownEditor } from "@/components/markdown";
 import { HM_DATA } from "@/lib/data";
 import { defaultAgentConfig, defaultCredentials } from "@/lib/agent-config";
 
-const { useState: useS_HP } = React;
+const { useState: useS_HP, useEffect: useE_HP } = React;
 
 // ===================================================================
 // /apps — list
@@ -679,20 +679,44 @@ function MemoryCard({ m, scope, onEdit, onDelete, admin }: any) {
 // ===================================================================
 function HmMemories() {
   const D = HM_DATA;
+  // 페이지와 recall(copilot/API)이 동일 소스를 보도록 /api/memories 를 통한다.
+  // (DATABASE_URL 있으면 postgres, 없으면 API 가 mock(HM_DATA)으로 graceful fallback.)
+  const [all, setAll] = useS_HP<any[]>([]);
+  const [loading, setLoading] = useS_HP(true);
+  const [error, setError] = useS_HP<string | null>(null);
   const [scopeFilter, setScopeFilter] = useS_HP("all");
   const [appFilter, setAppFilter] = useS_HP("all");
   const [q, setQ] = useS_HP("");
 
-  let list = D.MEMORIES;
+  useE_HP(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/memories?limit=200", { cache: "no-store" });
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const data = await res.json();
+        if (alive) setAll(Array.isArray(data.items) ? data.items : []);
+      } catch (e: any) {
+        if (alive) { setError(e?.message ?? "조회 실패"); setAll([]); }
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  let list = all;
   if (scopeFilter === "global") list = list.filter(m => m.scope === "global");
   if (scopeFilter === "app")    list = list.filter(m => m.scope === "app");
   if (appFilter !== "all")      list = list.filter(m => m.appId === appFilter);
-  if (q) list = list.filter(m => m.fact.toLowerCase().includes(q.toLowerCase()) || m.tags.some(t => t.includes(q.toLowerCase())));
+  if (q) list = list.filter(m => m.fact.toLowerCase().includes(q.toLowerCase()) || m.tags.some((t: string) => t.includes(q.toLowerCase())));
 
   // group by app for app-scoped
   const globalList = list.filter(m => m.scope === "global");
-  const appBucket = {};
-  list.filter(m => m.scope === "app").forEach(m => {
+  const appBucket: any = {};
+  list.filter(m => m.scope === "app").forEach((m: any) => {
     if (!appBucket[m.appId]) appBucket[m.appId] = { name: m.appName, items: [] };
     appBucket[m.appId].items.push(m);
   });
@@ -705,10 +729,10 @@ function HmMemories() {
 
       {/* Stats strip */}
       <div className="hm-kpi-grid" style={{gridTemplateColumns:"repeat(4, 1fr)"}}>
-        <HmKpi label="전체 Memories"       value={`${D.MEMORIES.length}`}/>
-        <HmKpi label="Global"        value={`${D.MEMORIES.filter(m => m.scope === "global").length}`} hint="모든 Application 공유"/>
-        <HmKpi label="App 전용"      value={`${D.MEMORIES.filter(m => m.scope === "app").length}`}/>
-        <HmKpi label="Curated"       value={`${D.MEMORIES.filter(m => m.curated).length}`} hint="admin 직접 등록"/>
+        <HmKpi label="전체 Memories"       value={`${all.length}`}/>
+        <HmKpi label="Global"        value={`${all.filter(m => m.scope === "global").length}`} hint="모든 Application 공유"/>
+        <HmKpi label="App 전용"      value={`${all.filter(m => m.scope === "app").length}`}/>
+        <HmKpi label="Curated"       value={`${all.filter(m => m.curated).length}`} hint="admin 직접 등록"/>
       </div>
 
       {/* Search + filter */}
@@ -741,8 +765,15 @@ function HmMemories() {
 
       <div style={{height:18}}/>
 
+      {loading && (
+        <HmCard><div style={{padding:"40px 24px"}}><Empty icon="database" title="불러오는 중…" sub="Memory 를 조회하고 있어요."/></div></HmCard>
+      )}
+      {error && !loading && (
+        <HmCard><div style={{padding:"40px 24px"}}><Empty icon="alert" title="조회 오류" sub={error}/></div></HmCard>
+      )}
+
       {/* Global section */}
-      {(scopeFilter !== "app" && globalList.length > 0) && (
+      {(!loading && !error && scopeFilter !== "app" && globalList.length > 0) && (
         <div style={{marginBottom:22}}>
           <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:12}}>
             <span style={{fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:9999, background:"var(--primary-95)", color:"var(--primary-40)", letterSpacing:0}}>GLOBAL</span>
@@ -756,7 +787,7 @@ function HmMemories() {
       )}
 
       {/* Per-app sections */}
-      {scopeFilter !== "global" && Object.entries(appBucket).map(([appId, bucket]: [string, any]) => (
+      {!loading && !error && scopeFilter !== "global" && Object.entries(appBucket).map(([appId, bucket]: [string, any]) => (
         <div key={appId} style={{marginBottom:22}}>
           <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:12}}>
             <span style={{fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:9999, background:"var(--muninn-50)", color:"var(--muninn-700)", letterSpacing:0}}>APP</span>
@@ -769,7 +800,7 @@ function HmMemories() {
         </div>
       ))}
 
-      {list.length === 0 && (
+      {!loading && !error && list.length === 0 && (
         <HmCard>
           <div style={{padding:"40px 24px"}}>
             <Empty icon="database" title="조건에 맞는 Memory 가 없어요" sub="검색어나 필터를 조정해보세요."/>
