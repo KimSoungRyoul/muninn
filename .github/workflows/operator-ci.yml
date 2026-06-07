@@ -1,7 +1,7 @@
-# huginnOperator(Go operator) CI — 빌드 + 단위/envtest 테스트.
-#   - PR / main 푸시: huginnOperator/** 또는 이 워크플로 변경 시 `make test` 실행.
+# huginnOperator(Go operator) CI — 빌드 + lint + 단위/envtest 테스트.
+#   - PR / main 푸시: huginnOperator/** 또는 이 워크플로 변경 시 실행.
+#   - `make lint` 는 커스텀 golangci-lint(logcheck 플러그인 포함)를 빌드해 실행.
 #   - `make test` 는 manifests/generate/fmt/vet + envtest(etcd/kube-apiserver 자동 다운로드)를 수행.
-# lint(golangci-lint, 커스텀 logcheck 플러그인)는 사전존재 gocyclo 위반 해소 후 별도로 추가 예정.
 # 보안 강화 후속(선택): action 을 major 태그 대신 커밋 SHA 로 핀.
 name: operator-ci
 
@@ -42,6 +42,9 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+      - name: Lint
+        run: make lint
 
       - name: Test (unit + envtest)
         run: make test
