@@ -221,7 +221,8 @@ function escapeHtml(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function highlightJson(obj) {
-  const s = escapeHtml(JSON.stringify(obj, null, 2));
+  // obj 가 undefined 면 JSON.stringify 가 값 undefined 를 돌려줘 escapeHtml 이 throw 하므로 null 로 보정.
+  const s = escapeHtml(JSON.stringify(obj ?? null, null, 2));
   return s
     .replace(/("[^"]+"):/g, '<span class="json-key">$1</span><span class="json-punct">:</span>')
     .replace(/: ("[^"]*")/g, ': <span class="json-str">$1</span>')
