@@ -70,10 +70,18 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// (maxCostUsd/maxTokens 는 0 이 정당값이라 OR 가드로 쓰면 재실행됨.)
 	if run.Status.MaxStep == 0 {
 		var issue muninniov1beta1.HuginnIssue
-		if err := r.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: run.Spec.IssueRef}, &issue); err == nil {
+		switch err := r.Get(ctx, client.ObjectKey{Namespace: run.Namespace, Name: run.Spec.IssueRef}, &issue); {
+		case err == nil:
 			run.Status.MaxStep = issue.Spec.InheritedGuardrails.MaxIterations
 			run.Status.MaxCostUsd = issue.Spec.InheritedGuardrails.MaxCostUsd
 			run.Status.MaxTokens = issue.Spec.InheritedGuardrails.MaxTokens
+		case apierrors.IsNotFound(err):
+			// 부모 Issue 가 이미 사라짐(cascade GC 중일 수 있음) — caps 복사 불가.
+			// 재시도해도 결과가 같으므로 로그만 남기고 진행한다.
+			log.Info("부모 Issue 없음 — 상속 caps 복사 생략", "issue", run.Spec.IssueRef)
+		default:
+			// transient API 에러: caps 미복사 상태로 Job 을 만들지 않도록 requeue 한다(§2.2).
+			return ctrl.Result{}, err
 		}
 	}
 

@@ -51,7 +51,26 @@ var _ = Describe("HuginnIssue Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: muninniov1beta1.HuginnIssueSpec{
+						AgentRef: "test-agent",
+						Goal:     "test goal",
+						Event: muninniov1beta1.NormalizedEvent{
+							ID:          "evt-1",
+							Source:      muninniov1beta1.EventSource("manual"),
+							Severity:    muninniov1beta1.Severity("warning"),
+							Fingerprint: "fp-1",
+						},
+						InheritedGuardrails: muninniov1beta1.InheritedGuardrails{
+							MaxIterations: 2,
+							MaxCostUsd:    1,
+						},
+						Identity: muninniov1beta1.Identity{
+							K8sNamespace: "default",
+						},
+						RetryPolicy: muninniov1beta1.RetryPolicy{
+							MaxRuns: 1,
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
