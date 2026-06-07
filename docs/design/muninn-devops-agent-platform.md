@@ -578,4 +578,4 @@ approval(id, run_id, reasons jsonb, state, requested_at, expires_at, decided_by)
 
 ---
 
-*관련 파일*: [`examples/`](./examples/) — 샘플 CR YAML · [`README`](./README.md) — 인덱스 · [`review-v0.1.md`](./review-v0.1.md) — v0.1 검증 이력
+*관련 파일*: [`examples/`](./examples/) — 샘플 CR YAML · [`README`](./README.md) — 인덱스 · [`muninn-goal-conversational-delegation.md`](./muninn-goal-conversational-delegation.md) — `/goal` 구현 청사진

@@ -173,139 +173,125 @@
     </mxGraphModel>
   </diagram>
   <diagram id="muninn-current-2026-06" name="현재 구현 (2026-06)">
-    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="820" math="0" shadow="0">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="640" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
         <!-- Title -->
-        <mxCell id="title" value="Muninn DevOps Agent Platform — Architecture (현재 구현, 2026-06)" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="title" value="Muninn DevOps Agent Platform — 큰 그림 (현재 구현, 2026-06)" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="20" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="event ─▶ Muninn API(정규화·dedup) ─▶ HuginnIssue ─▶ Operator ─▶ Run(Job/Pod, claude-agent-sdk) ─▶ PR / Issue" style="text;html=1;fontSize=12;fontStyle=2;align=left;verticalAlign=middle;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="40" y="52" width="1100" height="24" as="geometry" />
         </mxCell>
 
         <!-- ===== Plane backgrounds ===== -->
-        <mxCell id="pB_src" value="Signal Sources (외부 등록 webhook)" style="rounded=1;dashed=1;fillColor=#f0f6ff;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=2;fontColor=#33527a;" vertex="1" parent="1">
-          <mxGeometry x="40" y="120" width="200" height="320" as="geometry" />
+        <mxCell id="pB_src" value="Signal Sources" style="rounded=1;dashed=1;fillColor=#f0f6ff;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=2;fontColor=#33527a;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="180" height="290" as="geometry" />
         </mxCell>
-        <mxCell id="pB_ctl" value="Control Plane — Muninn" style="rounded=1;dashed=1;fillColor=#f3fbf1;strokeColor=#82b366;verticalAlign=top;fontStyle=2;fontColor=#3a6b2e;" vertex="1" parent="1">
-          <mxGeometry x="280" y="80" width="320" height="620" as="geometry" />
+        <mxCell id="pB_ctl" value="Control Plane — Muninn (muninnWeb = API + 콘솔 + 기억)" style="rounded=1;dashed=1;fillColor=#f3fbf1;strokeColor=#82b366;verticalAlign=top;fontStyle=2;fontColor=#3a6b2e;" vertex="1" parent="1">
+          <mxGeometry x="260" y="90" width="320" height="380" as="geometry" />
         </mxCell>
-        <mxCell id="pB_op" value="Huginn Operator (kubebuilder, controller-runtime)" style="rounded=1;dashed=1;fillColor=#fff5ec;strokeColor=#d79b00;verticalAlign=top;fontStyle=2;fontColor=#995c00;" vertex="1" parent="1">
-          <mxGeometry x="640" y="80" width="340" height="300" as="geometry" />
+        <mxCell id="pB_op" value="Huginn Operator (kubebuilder)" style="rounded=1;dashed=1;fillColor=#fff5ec;strokeColor=#d79b00;verticalAlign=top;fontStyle=2;fontColor=#995c00;" vertex="1" parent="1">
+          <mxGeometry x="620" y="90" width="300" height="200" as="geometry" />
         </mxCell>
-        <mxCell id="pB_agent" value="Agent Plane — HuginnRun → K8s Job / Pod (per run, backoffLimit=0)" style="rounded=1;dashed=1;fillColor=#fffbf0;strokeColor=#d6b656;verticalAlign=top;fontStyle=2;fontColor=#8a6d00;" vertex="1" parent="1">
-          <mxGeometry x="640" y="400" width="540" height="300" as="geometry" />
-        </mxCell>
-        <mxCell id="pB_tools" value="MCP Tools (Muninn API 중개·감사)" style="rounded=1;dashed=1;fillColor=#f5eef8;strokeColor=#9673a6;verticalAlign=top;fontStyle=2;fontColor=#5e3370;" vertex="1" parent="1">
-          <mxGeometry x="1220" y="80" width="240" height="300" as="geometry" />
+        <mxCell id="pB_tools" value="MCP Tools (Muninn 중개·감사)" style="rounded=1;dashed=1;fillColor=#f5eef8;strokeColor=#9673a6;verticalAlign=top;fontStyle=2;fontColor=#5e3370;" vertex="1" parent="1">
+          <mxGeometry x="960" y="90" width="200" height="200" as="geometry" />
         </mxCell>
         <mxCell id="pB_out" value="Outputs" style="rounded=1;dashed=1;fillColor=#f5eef8;strokeColor=#9673a6;verticalAlign=top;fontStyle=2;fontColor=#5e3370;" vertex="1" parent="1">
-          <mxGeometry x="1220" y="400" width="240" height="120" as="geometry" />
+          <mxGeometry x="1200" y="90" width="170" height="120" as="geometry" />
         </mxCell>
-        <mxCell id="pB_ci" value="Build / Packaging (GitHub Actions)" style="rounded=1;dashed=1;fillColor=#f5f5f5;strokeColor=#999999;verticalAlign=top;fontStyle=2;fontColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1220" y="540" width="240" height="160" as="geometry" />
+        <mxCell id="pB_ci" value="Build (GitHub Actions)" style="rounded=1;dashed=1;fillColor=#f5f5f5;strokeColor=#999999;verticalAlign=top;fontStyle=2;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="240" width="170" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="pB_agent" value="Agent Plane — HuginnRun → K8s Job / Pod (per run, backoffLimit=0)" style="rounded=1;dashed=1;fillColor=#fffbf0;strokeColor=#d6b656;verticalAlign=top;fontStyle=2;fontColor=#8a6d00;" vertex="1" parent="1">
+          <mxGeometry x="620" y="320" width="560" height="300" as="geometry" />
         </mxCell>
 
         <!-- ===== Sources ===== -->
-        <mxCell id="n_grafana" value="Grafana&#10;(alert webhook)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="60" y="160" width="160" height="50" as="geometry" />
+        <mxCell id="n_grafana" value="Grafana (alert webhook)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="130" width="140" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="n_airflow" value="Airflow&#10;(on_failure_callback)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="60" y="230" width="160" height="50" as="geometry" />
+        <mxCell id="n_airflow" value="Airflow (on_failure)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="185" width="140" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="n_argocd_src" value="ArgoCD&#10;(notification webhook)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="60" y="300" width="160" height="50" as="geometry" />
+        <mxCell id="n_argocd_src" value="ArgoCD (notification)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="140" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="n_manual" value="Manual / API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="60" y="370" width="160" height="40" as="geometry" />
+        <mxCell id="n_manual" value="Manual / 콘솔 /goal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="295" width="140" height="40" as="geometry" />
         </mxCell>
 
         <!-- ===== Control plane ===== -->
-        <mxCell id="n_api" value="Muninn API / Gateway&#10;webhook /hooks/{name}&#10;normalize + dedup → HuginnIssue 생성&#10;step/cost 수집 · MCP 중개·감사" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="300" y="130" width="280" height="90" as="geometry" />
+        <mxCell id="n_web" value="muninnWeb 콘솔 (Next.js)&#10;Dashboard · Runs · 설정(이미지/자격) · CopilotKit /goal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="275" y="130" width="290" height="55" as="geometry" />
         </mxCell>
-        <mxCell id="n_web" value="muninnWeb (Next.js)&#10;Application detail · 『설정』 탭&#10;— agent.image + 자격(GitHub PAT / kubeconfig /&#10;ArgoCD token / Claude OAuth) 조회·수정&#10;Dashboard · Runs 실시간 스트림" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="300" y="240" width="280" height="100" as="geometry" />
+        <mxCell id="n_api" value="Muninn API&#10;정규화 · dedup → HuginnIssue 생성&#10;step/cost 수집 · MCP 중개·감사" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="275" y="205" width="290" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="n_mem" value="muninn-memory&#10;recall / store (hybrid)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="300" y="360" width="280" height="50" as="geometry" />
+        <mxCell id="n_mem" value="metaDB (postgres)&#10;기억 recall / store (텍스트 검색 FTS) · incident 이력" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="275" y="295" width="290" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="n_secrets" value="K8s Secrets&#10;agent-secrets: anthropic-api-key | claude-code-oauth-token&#10;gh-*-pat: token (source.secretRef)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
-          <mxGeometry x="300" y="430" width="280" height="80" as="geometry" />
-        </mxCell>
-        <mxCell id="n_cm" value="ConfigMaps&#10;global-prompt / team-settings / SOUL.md" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="300" y="530" width="280" height="50" as="geometry" />
-        </mxCell>
-        <mxCell id="n_pvc_app" value="PVC (앱별) pvc-claude-&lt;app&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
-          <mxGeometry x="300" y="600" width="280" height="40" as="geometry" />
+        <mxCell id="n_creds" value="K8s 자격·설정&#10;Secret(OAuth | API key / GitHub PAT) · ConfigMap(prompt/SOUL) · PVC(앱별 ~/.claude)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="275" y="365" width="290" height="80" as="geometry" />
         </mxCell>
 
         <!-- ===== Operator ===== -->
-        <mxCell id="n_crd" value="CRDs (muninn.io/v1beta1): HuginnAgent · HuginnIssue · HuginnRun" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="660" y="125" width="300" height="40" as="geometry" />
+        <mxCell id="n_crd" value="CRDs (muninn.io/v1beta1)&#10;HuginnAgent · HuginnIssue · HuginnRun" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="635" y="130" width="270" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="n_agentctl" value="HuginnAgent ctrl — PVC/SA/RBAC 보장, webhookUrl 발급" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="660" y="185" width="300" height="45" as="geometry" />
-        </mxCell>
-        <mxCell id="n_issuectl" value="HuginnIssue ctrl — attempt별 Run 생성, retry(maxRuns), 승인 집계" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="660" y="245" width="300" height="45" as="geometry" />
-        </mxCell>
-        <mxCell id="n_runctl" value="HuginnRun ctrl — Job(backoffLimit=0) 생성&#10;비-root securityContext(runAsNonRoot/fsGroup/seccomp/caps drop)&#10;OAuth 토큰 optional 주입" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="660" y="305" width="300" height="60" as="geometry" />
+        <mxCell id="n_op" value="Operator 컨트롤러&#10;HuginnIssue → HuginnRun → Job(backoffLimit=0)&#10;retry(maxRuns) · 승인 집계 · PVC/SA/RBAC 보장" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="635" y="195" width="270" height="80" as="geometry" />
         </mxCell>
 
         <!-- ===== Agent plane ===== -->
-        <mxCell id="n_job" value="K8s Job → Pod (RestartPolicy=Never, TTL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="660" y="440" width="280" height="40" as="geometry" />
+        <mxCell id="n_job" value="K8s Job → Pod (RestartPolicy=Never, TTL, 비-root)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="635" y="360" width="280" height="45" as="geometry" />
         </mxCell>
-        <mxCell id="n_img" value="agent-runtime image — ghcr.io/kimsoungryoul/muninn/agent-runtime&#10;Node 24 · 비-root(node uid 1000)&#10;claude code CLI + claude-agent-sdk(Python)&#10;kubectl · helm · argocd · gh · yq · git · jq&#10;ENTRYPOINT: claude_skill.sh → runner.py (SDK query 루프)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="660" y="495" width="500" height="120" as="geometry" />
+        <mxCell id="n_img" value="agent-runtime image (ghcr.io/.../agent-runtime)&#10;비-root(node uid 1000) · claude CLI + claude-agent-sdk(Python)&#10;kubectl · helm · argocd · gh · git · jq&#10;ENTRYPOINT: claude_skill.sh → runner.py (SDK 루프)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="635" y="420" width="520" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="n_env" value="env 주입(Secret): MUNINN_GOAL / MUNINN_GUARDRAILS(maxIterations·maxCostUsd·maxTokens) /&#10;ANTHROPIC_API_KEY | CLAUDE_CODE_OAUTH_TOKEN / GITHUB_PAT / MUNINN_*_ENDPOINT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="660" y="630" width="500" height="55" as="geometry" />
-        </mxCell>
-        <mxCell id="n_pvc_mount" value="mount ~/.claude → /home/node/.claude" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="960" y="440" width="200" height="40" as="geometry" />
+        <mxCell id="n_inject" value="주입: env(Secret) MUNINN_GOAL·GUARDRAILS / OAUTH|API_KEY · GITHUB_PAT · MUNINN_*_ENDPOINT&#10;mount ~/.claude → /home/node/.claude (앱별 PVC)" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="635" y="530" width="520" height="55" as="geometry" />
         </mxCell>
 
         <!-- ===== MCP tools ===== -->
-        <mxCell id="n_tools" value="mcp__loki__* (read)&#10;mcp__tempo__* (read)&#10;mcp__mimir__* (read)&#10;mcp__github__* (PR draft)&#10;mcp__argocd__* (read)&#10;mcp__airflow__* (read)&#10;mcp__harbor__* (scan)&#10;mcp__muninn__* (recall/store)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="1235" y="125" width="210" height="240" as="geometry" />
+        <mxCell id="n_tools" value="obs read: loki · tempo · mimir&#10;github (PR draft)&#10;argocd · airflow · harbor (read/scan)&#10;muninn (recall / store)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="975" y="130" width="170" height="130" as="geometry" />
         </mxCell>
 
         <!-- ===== Outputs ===== -->
-        <mxCell id="n_pr" value="GitHub Pull Request (draft)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-          <mxGeometry x="1235" y="440" width="210" height="30" as="geometry" />
+        <mxCell id="n_pr" value="GitHub Pull Request (draft)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1215" y="130" width="140" height="35" as="geometry" />
         </mxCell>
-        <mxCell id="n_issue" value="GitHub Issue" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-          <mxGeometry x="1235" y="480" width="210" height="30" as="geometry" />
+        <mxCell id="n_issue" value="GitHub Issue" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1215" y="175" width="140" height="30" as="geometry" />
         </mxCell>
 
         <!-- ===== CI ===== -->
-        <mxCell id="n_gha" value=".github/workflows/agent-runtime-image.yml&#10;GitHub Actions → ghcr.io (GitHub Packages)&#10;multi-arch(amd64/arm64) build · push&#10;PR=build only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;align=left;spacingLeft=8;" vertex="1" parent="1">
-          <mxGeometry x="1235" y="580" width="210" height="105" as="geometry" />
+        <mxCell id="n_gha" value="GitHub Actions&#10;agent-runtime-image.yml → ghcr.io&#10;multi-arch · PR=build only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1215" y="280" width="140" height="70" as="geometry" />
         </mxCell>
 
         <!-- ===== Edges ===== -->
-        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="n_grafana" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e1" value="event (webhook)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_grafana" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="n_airflow" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="n_argocd_src" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="n_manual" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e5" value="create HuginnIssue (k8s API)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_api" target="n_crd"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e6" value="조회/수정 (PATCH)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;" edge="1" parent="1" source="n_web" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e7" value="watch → reconcile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_crd" target="n_runctl"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e8" value="creates Job" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_runctl" target="n_job"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="n_manual" target="n_web"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_web_api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="n_web" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="HuginnIssue 생성 (k8s API)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_api" target="n_crd"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="watch → reconcile" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_crd" target="n_op"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="creates Job" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_op" target="n_job"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e9" value="runs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_job" target="n_img"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e10" value="mount" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="n_pvc_mount" target="n_img"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="n_env" target="n_img"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e12" value="source" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="n_secrets" target="n_env"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e13" value="PVC bind" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="n_pvc_app" target="n_pvc_mount"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e14" value="MCP 호출 + step/cost 보고" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;" edge="1" parent="1" source="n_img" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_inject" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;" edge="1" parent="1" source="n_inject" target="n_img"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_creds" value="자격·설정·PVC 주입" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="n_creds" target="n_inject"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" value="step/cost 보고 · MCP 호출" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;" edge="1" parent="1" source="n_img" target="n_api"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e15" value="중개·감사" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_api" target="n_tools"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e16" value="output" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_img" target="n_pr"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" value="PR / Issue" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_img" target="n_pr"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="n_img" target="n_issue"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e18" value="provides image (pull)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="n_gha" target="n_img"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e19" value="recall/store" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;" edge="1" parent="1" source="n_api" target="n_mem"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e18" value="이미지 제공 (pull)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="n_gha" target="n_img"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e19" value="recall / store" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;" edge="1" parent="1" source="n_api" target="n_mem"><mxGeometry relative="1" as="geometry" /></mxCell>
       </root>
     </mxGraphModel>
   </diagram>
