@@ -1,7 +1,11 @@
+// CopilotKit v2 스타일을 먼저 import — Tailwind v4 preflight 는 @layer base 라
+// unlayered 인 muninn 의 tokens/styles/hm-theme 가 충돌 시 우선한다(blast radius 최소화).
+import "@copilotkit/react-core/v2/styles.css";
 import "./tokens.css";
 import "./styles.css";
 import "./hm-theme.css";
 import type { Metadata } from "next";
+import { CopilotRoot } from "@/components/copilot-root";
 import { WorkspaceProvider } from "@/lib/workspace-context";
 import { AppShell } from "@/components/app-shell";
 
@@ -25,9 +29,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <WorkspaceProvider>
-          <AppShell>{children}</AppShell>
-        </WorkspaceProvider>
+        <CopilotRoot>
+          <WorkspaceProvider>
+            <AppShell>{children}</AppShell>
+          </WorkspaceProvider>
+        </CopilotRoot>
       </body>
     </html>
   );

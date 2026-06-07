@@ -1,0 +1,103 @@
+# kind E2E QA 매니페스트 — muninnWeb(CopilotKit 콘솔)이 kind 에서 동작하는지 검증한다.
+#
+# 사용 순서(QA, Podman):
+#   1) kind 클러스터 생성(Podman provider):
+#        KIND_EXPERIMENTAL_PROVIDER=podman kind create cluster --name muninn-web
+#   2) 이미지 빌드 + kind 에 load:
+#        podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev .
+#        podman save ghcr.io/kimsoungryoul/muninn/muninn-web:dev -o /tmp/web.tar
+#        KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/web.tar --name muninn-web
+#   3) 인증 Secret 을 런타임에 생성(커밋 금지! — 루트 CLAUDE.md "Auth is env(Secret)-only"):
+#        kubectl -n ns-muninn-web create secret generic muninn-web-secrets \
+#          --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+#      (또는 API 키: --from-literal=anthropic-api-key="$ANTHROPIC_API_KEY")
+#   4) 본 매니페스트 apply → Deployment 가 이미지로 콘솔 + CopilotKit 런타임 실행
+#   5) 검증:
+#        kubectl -n ns-muninn-web port-forward svc/muninn-web 3030:3030
+#        curl localhost:3030/api/copilotkit/selftest    # {"ok":true,...} = OAuth→Anthropic 동작
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-muninn-web
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: muninn-web
+  namespace: ns-muninn-web
+  labels:
+    app: muninn-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: muninn-web
+  template:
+    metadata:
+      labels:
+        app: muninn-web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: web
+          image: ghcr.io/kimsoungryoul/muninn/muninn-web:dev
+          imagePullPolicy: IfNotPresent # kind 에 load 된 로컬 이미지 사용
+          ports:
+            - containerPort: 3030
+          env:
+            # 자격은 Secret 으로만 주입(둘 중 하나 필수). optional=true — 없으면 selftest 가 503 보고.
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: muninn-web-secrets
+                  key: claude-code-oauth-token
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: muninn-web-secrets
+                  key: anthropic-api-key
+                  optional: true
+            # 콘솔 코파일럿 모델(구독 OAuth 의 rate limit 경합이 적은 Haiku 4.5 기본).
+            - name: COPILOT_MODEL
+              value: "claude-haiku-4-5-20251001"
+            - name: COPILOTKIT_TELEMETRY_DISABLED
+              value: "true"
+          # probe 는 가벼운 `/`(정적 셸 렌더, 과금 없음)를 친다.
+          # /api/copilotkit/selftest 는 매 호출 Anthropic 왕복(토큰 과금 + rate limit) 이므로
+          # periodic probe 로 쓰지 않는다 — OAuth/모델 점검은 배포 후 수동 1회로 한다.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3030
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3030
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: muninn-web
+  namespace: ns-muninn-web
+spec:
+  selector:
+    app: muninn-web
+  ports:
+    - name: http
+      port: 3030
+      targetPort: 3030
