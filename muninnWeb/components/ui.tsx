@@ -116,7 +116,12 @@ function Tag({ children, removable, onRemove }: any) {
           tabIndex={0}
           aria-label="제거"
           onClick={onRemove}
-          onKeyDown={e => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onRemove?.())}
+          onKeyDown={e => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onRemove?.();
+            }
+          }}
         ><Icon name="close" size={12} /></span>
       )}
     </span>
