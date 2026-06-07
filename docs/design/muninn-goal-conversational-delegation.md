@@ -3,7 +3,7 @@
 > **상태**: Design v1.0 · 2026-06-07 · 구현 청사진(implementation blueprint)
 > **관계**: 메인 스펙 [muninn-devops-agent-platform.md](./muninn-devops-agent-platform.md)(§2·§4·§7)와
 > [operator-design.md](./operator-design.md)(§2.2 status 소유권)의 **대화형(manual) 트리거 경로**를
-> 1급으로 구체화한다. CopilotKit 통합 경로는 [muninnWeb/docs/copilotkit-request-flow.md] 참조.
+> 1급으로 구체화한다. CopilotKit 통합 경로는 [muninnWeb/docs/copilotkit-request-flow.md](../../muninnWeb/docs/copilotkit-request-flow.md) 참조.
 
 ## 0. 목표 (`/goal`)
 

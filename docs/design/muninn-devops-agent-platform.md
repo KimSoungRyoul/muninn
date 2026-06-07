@@ -460,7 +460,9 @@ flowchart LR
 
 ---
 
-## 8. 데이터 모델 (PostgreSQL + pgvector)
+## 8. 데이터 모델 (PostgreSQL + pgvector — 목표 설계)
+
+> **구현 현황(MVP)**: 현재 muninnWeb 구현은 `embedding vector(1536)` 컬럼과 `ivfflat` 인덱스를 **제외**하고 텍스트 검색(FTS)만 쓴다(§7.4). 아래 스키마의 벡터 컬럼/인덱스는 의미 검색이 정당화될 때 재도입하는 목표 설계다. → `muninn-goal-conversational-delegation.md` §7.
 
 ```sql
 -- 멀티테넌시
@@ -578,4 +580,4 @@ approval(id, run_id, reasons jsonb, state, requested_at, expires_at, decided_by)
 
 ---
 
-*관련 파일*: [`examples/`](./examples/) — 샘플 CR YAML · [`README`](./README.md) — 인덱스 · [`review-v0.1.md`](./review-v0.1.md) — v0.1 검증 이력
+*관련 파일*: [`examples/`](./examples/) — 샘플 CR YAML · [`README`](./README.md) — 인덱스 · [`muninn-goal-conversational-delegation.md`](./muninn-goal-conversational-delegation.md) — `/goal` 구현 청사진
