@@ -32,7 +32,7 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
   {{- end }}
 {{- end }}
 
-{{- if .Values.agent.serviceAccount.create }}
+{{- if and .Values.operator.enabled .Values.agent.serviceAccount.create }}
 
 ▶ Agent 인증 (operator 가 만드는 Job 이 사용)
   자격 Secret({{ .Values.agent.secrets.name }})은 보안상 chart 가 만들지 않습니다. 런타임에 생성:
