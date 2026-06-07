@@ -151,8 +151,8 @@ const ACTIVE_PHASES = new Set(["Pending", "Running", "AwaitingApproval"]);
 export async function queryIncidents(opts: { status?: "active" | "all"; app?: string } = {}): Promise<IncidentVM[]> {
   const wantActive = (opts.status ?? "active") === "active";
 
-  if (!k8s.k8sEnabled()) {
-    // mock: EVENTS + runs 조인
+  // mock: EVENTS + runs 조인 (k8s 비활성 또는 k8s 조회 실패 시 graceful fallback)
+  const mock = (): IncidentVM[] => {
     const runById = new Map<string, any>();
     for (const r of [...LIVE_RUNS, ...RECENT_RUNS]) if (!runById.has(r.id)) runById.set(r.id, r);
     return EVENTS.filter((e) => !opts.app || e.app === opts.app)
@@ -171,48 +171,68 @@ export async function queryIncidents(opts: { status?: "active" | "all"; app?: st
         };
       })
       .filter((i) => !wantActive || ACTIVE_PHASES.has(i.phase));
-  }
+  };
 
-  const [issues, runs] = await Promise.all([k8s.listHuginnIssues(ns()), k8s.listHuginnRuns(ns())]);
-  const runsByIssue = new Map<string, any[]>();
-  for (const r of runs) {
-    const key = r?.spec?.issueRef ?? "";
-    (runsByIssue.get(key) ?? runsByIssue.set(key, []).get(key)!).push(r);
+  // k8sEnabled() 는 in-cluster 에서 SA 토큰 미마운트(automountServiceAccountToken=false)여도
+  // KUBERNETES_SERVICE_HOST 만으로 true 가 될 수 있다. 그 경우 실제 호출은 자격/TLS 미비로
+  // throw 하므로, 여기서 잡아 mock 으로 떨어뜨려 500 대신 graceful degrade 한다.
+  if (!k8s.k8sEnabled()) return mock();
+
+  try {
+    const [issues, runs] = await Promise.all([k8s.listHuginnIssues(ns()), k8s.listHuginnRuns(ns())]);
+    const runsByIssue = new Map<string, any[]>();
+    for (const r of runs) {
+      const key = r?.spec?.issueRef ?? "";
+      (runsByIssue.get(key) ?? runsByIssue.set(key, []).get(key)!).push(r);
+    }
+    return issues
+      .filter((i: any) => !opts.app || i?.spec?.agentRef === opts.app)
+      .map<IncidentVM>((i: any) => {
+        const name = i?.metadata?.name ?? "";
+        const st = i?.status ?? {};
+        const ev = i?.spec?.event ?? {};
+        return {
+          issue: name,
+          app: i?.spec?.agentRef ?? "",
+          source: ev.source ?? "manual",
+          severity: ev.severity ?? "warning",
+          title: ev.title ?? i?.spec?.goal ?? "",
+          goal: i?.spec?.goal ?? "",
+          phase: st.phase ?? "Pending",
+          dedup: num(st.dedupCount),
+          issuingUser: i?.spec?.issuingUser ?? null,
+          runs: (runsByIssue.get(name) ?? []).map(runView),
+        };
+      })
+      .filter((i) => !wantActive || ACTIVE_PHASES.has(i.phase));
+  } catch (err) {
+    console.warn("[muninn] queryIncidents: k8s 조회 실패 — mock 으로 fallback", err);
+    return mock();
   }
-  return issues
-    .filter((i: any) => !opts.app || i?.spec?.agentRef === opts.app)
-    .map<IncidentVM>((i: any) => {
-      const name = i?.metadata?.name ?? "";
-      const st = i?.status ?? {};
-      const ev = i?.spec?.event ?? {};
-      return {
-        issue: name,
-        app: i?.spec?.agentRef ?? "",
-        source: ev.source ?? "manual",
-        severity: ev.severity ?? "warning",
-        title: ev.title ?? i?.spec?.goal ?? "",
-        goal: i?.spec?.goal ?? "",
-        phase: st.phase ?? "Pending",
-        dedup: num(st.dedupCount),
-        issuingUser: i?.spec?.issuingUser ?? null,
-        runs: (runsByIssue.get(name) ?? []).map(runView),
-      };
-    })
-    .filter((i) => !wantActive || ACTIVE_PHASES.has(i.phase));
 }
 
 export async function listRunsVM(opts: { status?: RunStatus; app?: string } = {}): Promise<RunVM[]> {
-  let runs: RunVM[];
-  if (!k8s.k8sEnabled()) {
+  const mock = (): RunVM[] => {
     const byId = new Map<string, any>();
     for (const r of [...LIVE_RUNS, ...RECENT_RUNS]) if (!byId.has(r.id)) byId.set(r.id, r);
-    runs = [...byId.values()].map((r: any) => ({
+    return [...byId.values()].map((r: any) => ({
       id: r.id, app: r.app, status: r.status, phase: r.status, step: r.step, max: r.max,
       cost: r.cost, output: r.output, issue: null, namespace: ns(),
       approval: r.status === "awaiting" ? "Pending" : null, startedAt: r.started,
     }));
+  };
+
+  let runs: RunVM[];
+  if (!k8s.k8sEnabled()) {
+    runs = mock();
   } else {
-    runs = (await k8s.listHuginnRuns(ns())).map(runView);
+    // queryIncidents 와 동일: k8sEnabled 가 true 라도 실제 호출이 실패할 수 있어 mock 으로 fallback.
+    try {
+      runs = (await k8s.listHuginnRuns(ns())).map(runView);
+    } catch (err) {
+      console.warn("[muninn] listRunsVM: k8s 조회 실패 — mock 으로 fallback", err);
+      runs = mock();
+    }
   }
   if (opts.status) runs = runs.filter((r) => r.status === opts.status);
   if (opts.app) runs = runs.filter((r) => r.app === opts.app);
