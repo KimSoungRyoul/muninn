@@ -76,12 +76,14 @@ podman run --rm ghcr.io/kimsoungryoul/muninn/agent-runtime:dev selftest   # offl
 # (PR = build only; push to main/tag = multi-arch push)
 ```
 
-**muninnWeb/** (Next.js, port 3030):
+**muninnWeb/** (Next.js, port 3030 — **pnpm**, `packageManager` 핀):
 ```bash
-npm install
-npm run dev        # http://localhost:3030
-npm run build      # production build = the typecheck gate (tsc runs here)
-npm run lint
+pnpm install
+pnpm dev           # http://localhost:3030
+pnpm build         # production build = the typecheck gate (tsc runs here)
+pnpm lint
+# 코파일럿(CopilotKit) 동작엔 자격 env 필요: CLAUDE_CODE_OAUTH_TOKEN 또는 ANTHROPIC_API_KEY
+# (선택) COPILOT_MODEL 로 모델 override(기본 claude-haiku-4-5-20251001)
 ```
 
 ## Conventions

@@ -103,10 +103,14 @@ muninn 자격은 env(Secret)-only 이고 `CLAUDE_CODE_OAUTH_TOKEN`(구독 OAuth)
 ## 4) 검증 (로컬 + kind)
 
 ```bash
-# 타입체크 게이트 + 번들
-cd muninnWeb && npm run build
+# muninnWeb 는 pnpm 사용(package.json 의 packageManager 핀)
+# 로컬 dev: 코파일럿 동작엔 자격 env 필요
+cd muninnWeb && CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_OAUTH_TOKEN pnpm dev   # http://localhost:3030
 
-# 로컬: standalone 서버로 OAuth→Anthropic 왕복 확인
+# 타입체크 게이트 + 번들
+pnpm build
+
+# 또는 standalone 서버로 OAuth→Anthropic 왕복 확인
 CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_OAUTH_TOKEN node .next/standalone/server.js &  # PORT=3030
 curl localhost:3030/api/copilotkit/selftest          # {"ok":true,"credential":"oauth",...}
 curl localhost:3030/api/copilotkit -X POST -H 'content-type: application/json' \
