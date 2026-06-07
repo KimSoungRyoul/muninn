@@ -1,0 +1,193 @@
+# kind E2E — Muninn /goal 전체 루프(대화형 위임·기억) 검증 매니페스트.
+#
+# 토폴로지(한 namespace=ns-huginn 에 공존):
+#   muninn-web(Muninn API + 콘솔/코파일럿) ── creates ──▶ HuginnIssue/HuginnRun CR
+#        ▲  └ postgres 메모리(DATABASE_URL) — 텍스트 검색만(pgvector 불필요)
+#        │
+#   operator(make run-kind, 클러스터 밖) ── HuginnIssue→HuginnRun→Job→Pod(agent-runtime)
+#        agent-runtime ── 보고/메모리 ──▶ http://muninn-web.ns-huginn.svc:3030/api/...
+#
+# 사용 순서(Podman):
+#   0) operator 쪽에서 CRD 설치 + 클러스터 생성(huginnOperator/):
+#        make run-kind CONTAINER_TOOL=podman \
+#          MUNINN_API_ENDPOINT=http://muninn-web.ns-huginn.svc:3030 \
+#          MUNINN_MEMORY_ENDPOINT=http://muninn-web.ns-huginn.svc:3030
+#      (operator 는 클러스터 밖에서 돌고, 위 env 로 agent 가 보고할 muninn-web 주소를 Job 에 주입한다.)
+#   1) 이미지 빌드 + load(web, agent-runtime):
+#        podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev ../muninnWeb
+#        podman build -t ghcr.io/kimsoungryoul/muninn/agent-runtime:dev ../huginnAgentRuntime
+#        for t in muninn-web agent-runtime; do
+#          podman save ghcr.io/kimsoungryoul/muninn/$t:dev -o /tmp/$t.tar
+#          KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/$t.tar --name <kind-cluster>
+#        done
+#   2) 자격 Secret 런타임 생성(커밋 금지! — 루트 CLAUDE.md "Auth is env(Secret)-only"):
+#        kubectl -n ns-huginn create secret generic muninn-web-secrets \
+#          --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+#        kubectl -n ns-huginn create secret generic agent-secrets \
+#          --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+#   3) 본 매니페스트 apply → postgres + muninn-web(SA/RBAC) 기동.
+#   4) HuginnAgent(Application) 등록(예: ../huginnAgentRuntime/examples 의 CR 을 ns-huginn 에 apply).
+#   5) 검증:
+#        kubectl -n ns-huginn port-forward svc/muninn-web 3030:3030
+#        # 코파일럿에 "어떤 App 에 장애 나고 대처 진행중?" → query_incidents(실 CR 조회)
+#        # "ai-router-svc 외부 timeout 의심, 확인하고 fallback PR 만들어 검토받아" → recall→delegate→run→report→store
+#        kubectl -n ns-huginn get huginnissue,huginnrun,job,pod
+#        kubectl -n ns-huginn exec deploy/postgres -- psql -U muninn -d muninn -c 'select id,fact from memory order by created_at desc limit 5;'
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-huginn
+---
+# ---- postgres (Muninn 메모리 metaDB) — 텍스트 검색 전용, pgvector 불필요 ----
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: ns-huginn
+  labels: { app: postgres }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16 # 텍스트 검색(to_tsvector/ts_rank_cd)만 쓰므로 pgvector 불필요 — stock 이미지.
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: POSTGRES_USER, value: muninn }
+            - { name: POSTGRES_PASSWORD, value: muninn } # kind 로컬 전용(실배포는 Secret).
+            - { name: POSTGRES_DB, value: muninn }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "muninn", "-d", "muninn"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+      volumes:
+        - name: data
+          emptyDir: {} # kind QA: 비영속(재시작 시 스키마는 앱이 재생성). 영속이 필요하면 PVC 로 교체.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: ns-huginn
+spec:
+  selector: { app: postgres }
+  ports:
+    - { name: pg, port: 5432, targetPort: 5432 }
+---
+# ---- muninn-web ServiceAccount + RBAC (HuginnIssue 생성 / HuginnRun 조회·승인 패치) ----
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: muninn-web
+  namespace: ns-huginn
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: muninn-web
+  namespace: ns-huginn
+rules:
+  # 위임: HuginnIssue 생성/조회. 조회: HuginnAgent. (update 미사용 — MergePatch 만 → patch 로 충분)
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnissues"]
+    verbs: ["create", "get", "list", "watch", "patch"]
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnissues/status"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnagents"]
+    verbs: ["get", "list", "watch"]
+  # 보고/승인: HuginnRun + status 패치(Agent→API / API 소유 필드만 merge-patch).
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnruns"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnruns/status"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: muninn-web
+  namespace: ns-huginn
+subjects:
+  - kind: ServiceAccount
+    name: muninn-web
+    namespace: ns-huginn
+roleRef:
+  kind: Role
+  name: muninn-web
+  apiGroup: rbac.authorization.k8s.io
+---
+# ---- muninn-web (Muninn API + 콘솔/코파일럿) ----
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: muninn-web
+  namespace: ns-huginn
+  labels: { app: muninn-web }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: muninn-web }
+  template:
+    metadata:
+      labels: { app: muninn-web }
+    spec:
+      serviceAccountName: muninn-web # in-cluster RBAC 로 huginn* CR 접근
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: web
+          image: ghcr.io/kimsoungryoul/muninn/muninn-web:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3030
+          env:
+            # 자격(둘 중 하나 필수) — Secret 으로만.
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: muninn-web-secrets, key: claude-code-oauth-token, optional: true } }
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: muninn-web-secrets, key: anthropic-api-key, optional: true } }
+            - { name: COPILOT_MODEL, value: "claude-haiku-4-5-20251001" }
+            - { name: COPILOTKIT_TELEMETRY_DISABLED, value: "true" }
+            # CR 이 사는 namespace(lib/k8s.ts DEFAULT_NAMESPACE 와 일치).
+            - { name: MUNINN_NAMESPACE, value: ns-huginn }
+            # 메모리 metaDB(postgres). 스키마(테이블/FTS 인덱스)는 앱이 ensureSchema 로 생성.
+            - { name: DATABASE_URL, value: "postgres://muninn:muninn@postgres.ns-huginn.svc:5432/muninn" }
+          readinessProbe:
+            httpGet: { path: /, port: 3030 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /, port: 3030 }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: muninn-web
+  namespace: ns-huginn
+spec:
+  selector: { app: muninn-web }
+  ports:
+    - { name: http, port: 3030, targetPort: 3030 }

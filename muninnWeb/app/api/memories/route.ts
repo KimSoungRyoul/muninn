@@ -1,25 +1,56 @@
+// /api/memories — Muninn 메모리(metaDB) 게이트웨이.
+//   GET  : 조회/검색(?q= 키워드(텍스트), ?scope=, ?app=, ?limit=)
+//   POST : 저장(agent-runtime 의 MUNINN_MEMORY_ENDPOINT 종료-기억화, 또는 콘솔/코파일럿)
+//
+// DATABASE_URL 미설정 시 mock(HM_DATA)으로 graceful fallback(마이그레이션 중).
+
 import { NextRequest } from "next/server";
-import { ok } from "@/lib/api";
+import { ok, created, badRequest } from "@/lib/api";
+import { dbEnabled, listMemories, store } from "@/lib/db";
 import { MEMORIES } from "@/lib/data";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
-  const scope = sp.get("scope") ?? "all"; // all | global | app
-  const appId = sp.get("app");
-  const q = sp.get("q");
-  const method = sp.get("method") ?? "hybrid"; // hybrid | bm25 | vector
+  const scope = sp.get("scope") ?? undefined; // global | app
+  const appId = sp.get("app") ?? undefined;
+  const q = sp.get("q") ?? undefined;
+  const limit = sp.get("limit") ? Number(sp.get("limit")) : undefined;
 
-  let list: any = MEMORIES;
-  if (scope === "global") list = list.filter((m: any) => m.scope === "global");
-  else if (scope === "app") list = list.filter((m: any) => m.scope === "app");
-
-  if (appId) list = list.filter((m: any) => m.appId === appId);
-
-  if (q) {
-    list = list.filter(
-      (m: any) => m.fact.includes(q) || m.tags.some((t: string) => t.includes(q))
-    );
+  if (!dbEnabled()) {
+    // mock fallback
+    let list: any = MEMORIES;
+    if (scope === "global" || scope === "app") list = list.filter((m: any) => m.scope === scope);
+    if (appId) list = list.filter((m: any) => m.appId === appId);
+    if (q) list = list.filter((m: any) => m.fact.includes(q) || m.tags.some((t: string) => t.includes(q)));
+    return ok({ method: "mock", count: list.length, items: list });
   }
 
-  return ok({ method, count: list.length, items: list });
+  const items = await listMemories({ scope, appId, query: q, limit });
+  return ok({ method: q ? "keyword" : "recency", count: items.length, items });
+}
+
+export async function POST(req: NextRequest) {
+  if (!dbEnabled()) return badRequest("memory(postgres) 비활성 — DATABASE_URL 미설정");
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return badRequest("invalid JSON body");
+  }
+  if (!body?.fact || typeof body.fact !== "string") return badRequest("fact(string) 필수");
+
+  const row = await store({
+    fact: body.fact,
+    scope: body.scope,
+    appId: body.app ?? body.appId ?? null,
+    appName: body.appName ?? null,
+    tags: Array.isArray(body.tags) ? body.tags : undefined,
+    sourceRunId: body.sourceRunId ?? body.runName ?? null,
+    curated: Boolean(body.curated),
+    changedBy: body.changedBy ?? "agent",
+  });
+  return created({ stored: row });
 }

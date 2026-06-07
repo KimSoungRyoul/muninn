@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -209,8 +211,30 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 	}
 }
 
+// runScopedEnv 는 Run 확정 시점에만 알 수 있는 식별/모드 env 다(agent-runtime 의 보고·dry-run PR 용).
+// buildJobTemplate(Issue 단위)에서는 Run 이름을 모르므로, Job 생성 시점에 여기서 덧붙인다.
+// agent-runtime(runner.py)은 MUNINN_RUN_NAME 으로 자신의 Run 을 알고 MUNINN_API_ENDPOINT 에 보고한다.
+func runScopedEnv(run *muninniov1beta1.HuginnRun) []corev1.EnvVar {
+	prMode := os.Getenv("MUNINN_PR_MODE")
+	if prMode == "" {
+		prMode = "dry-run" // MVP: 실제 gh pr create 대신 diff/요약만 생성(설계 §8). 실 PR 은 후속.
+	}
+	return []corev1.EnvVar{
+		{Name: "MUNINN_RUN_NAME", Value: run.Name},
+		{Name: "MUNINN_ISSUE_NAME", Value: run.Spec.IssueRef},
+		{Name: "MUNINN_AGENT_NAME", Value: run.Labels[LabelAgent]}, // 앱(HuginnAgent) — 메모리 scope
+		{Name: "MUNINN_NAMESPACE", Value: run.Namespace},
+		{Name: "MUNINN_ATTEMPT", Value: fmt.Sprintf("%d", run.Spec.Attempt)},
+		{Name: "MUNINN_PR_MODE", Value: prMode},
+	}
+}
+
 func (r *HuginnRunReconciler) createJob(ctx context.Context, run *muninniov1beta1.HuginnRun) error {
 	podSpec := expandPodSpec(run.Spec.JobTemplate)
+	// Run 단위 식별/모드 env 주입(보고·dry-run). 컨테이너는 항상 1개(expandPodSpec).
+	if len(podSpec.Containers) > 0 {
+		podSpec.Containers[0].Env = append(podSpec.Containers[0].Env, runScopedEnv(run)...)
+	}
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.Name,

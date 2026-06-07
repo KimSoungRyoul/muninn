@@ -113,6 +113,20 @@ HuginnRunReconciler
 | Job (→Pod) | **HuginnRunReconciler** (Owns) | jobTemplate.podSpec 기반 |
 | event Secret `{issue}-event` | **Muninn API** (CR 생성 시 함께) | Operator 는 참조만 |
 
+### 2.5 에이전트 env 주입 — Issue 단위 + Run 단위
+
+에이전트 컨테이너 env 는 **두 시점**에서 채워진다(보고가 특정 Run 을 가리킬 수 있어야 하므로):
+
+- **Issue 단위**(`buildJobTemplate`, Issue→Run 생성 시): `MUNINN_GOAL`, `MUNINN_GUARDRAILS`(JSON),
+  `MUNINN_MEMORY_ENDPOINT`/`MUNINN_API_ENDPOINT`(= muninnWeb, operator env 로 설정), 자격(Secret), SOUL/payload 참조.
+- **Run 단위**(`runScopedEnv`, Job 생성 시 — Run 이름이 확정되는 시점): `MUNINN_RUN_NAME`, `MUNINN_ISSUE_NAME`,
+  `MUNINN_AGENT_NAME`(= app, 메모리 scope), `MUNINN_NAMESPACE`, `MUNINN_ATTEMPT`, `MUNINN_PR_MODE`(기본 `dry-run`).
+
+에이전트(runner.py)는 이 env 로 **회상→보고→기억화**를 수행한다(보고 계약은 `muninn-goal-conversational-delegation.md` §8):
+`POST {MUNINN_MEMORY_ENDPOINT}/api/memories/recall`(위임 직전 회상) → `POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report`
+(step/cost/tokens/output·outcome — Agent→API 소유 필드만; §2.2) → `POST {MUNINN_MEMORY_ENDPOINT}/api/memories`(결과 기억화).
+`MUNINN_PR_MODE=dry-run` 이면 실제 `gh pr create` 대신 **PR 계획(title/요약/diff)** 을 output 으로 보고한다(실 PR 은 후속).
+
 ---
 
 ## 3. Finalizer (§11-7 구체화)

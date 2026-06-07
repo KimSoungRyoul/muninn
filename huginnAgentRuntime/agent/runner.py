@@ -43,14 +43,92 @@ def _guardrails() -> dict:
         return {}
 
 
-def _system_prompt() -> str:
+def _pr_mode() -> str:
+    # dry-run(기본): 실제 gh pr create 대신 PR 계획(title/요약/diff)을 최종 출력으로 생성(설계 §8).
+    return os.getenv("MUNINN_PR_MODE", "dry-run").strip() or "dry-run"
+
+
+def _system_prompt(pr_mode: str = "") -> str:
     # 글로벌/팀/SOUL 프롬프트는 ConfigMap 참조(MUNINN_*_REF)로 전달되며 마운트 후 합성된다(§5.1).
     # MVP 런너는 goal 중심의 최소 system prompt 를 구성한다.
-    return (
+    base = (
         "당신은 Huginn DevOps 에이전트입니다. 주어진 운영 이벤트(goal)를 진단하고, "
         "허용된 도구만 사용하며, 출력 정책에 따라 결과(PR/Issue)를 만듭니다. "
         "안전 한도(guardrails)를 절대 넘지 마세요."
     )
+    if (pr_mode or _pr_mode()) == "dry-run":
+        base += (
+            "\n\n[DRY-RUN 모드] 실제로 `gh pr create` 등으로 PR/Issue 를 만들지 마세요. "
+            "대신 진단 근거와 함께 제안하는 변경을 **PR 계획**으로 마지막 메시지에 정리하세요: "
+            "1) 제목 한 줄, 2) 변경 요약, 3) 통합 diff(```diff fenced```). "
+            "이 계획이 곧 결과(output)로 보고됩니다."
+        )
+    return base
+
+
+# ---- Muninn API 보고/메모리(설계 §8) — 표준 라이브러리만 사용(추가 의존성 없음) ----
+import urllib.error  # noqa: E402
+import urllib.request  # noqa: E402
+
+
+def _env(name: str) -> str:
+    return (os.getenv(name) or "").strip()
+
+
+def _http_json(method: str, url: str, body: dict | None = None, timeout: float = 10.0) -> dict | None:
+    """JSON 요청 후 응답(dict)을 반환. 실패해도 에이전트 루프를 막지 않도록 None 반환."""
+    if not url:
+        return None
+    data = json.dumps(body or {}, ensure_ascii=False).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("content-type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8") or "{}"
+            return json.loads(raw)
+    except (urllib.error.URLError, ValueError, OSError) as exc:
+        log(f"WARN: HTTP {method} {url} 실패: {exc}")
+        return None
+
+
+def _report(patch: dict) -> dict | None:
+    """진행 보고 → POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report (Agent→API 소유 필드)."""
+    api = _env("MUNINN_API_ENDPOINT")
+    run = _env("MUNINN_RUN_NAME")
+    if not api or not run:
+        return None
+    issue = _env("MUNINN_ISSUE_NAME")
+    if issue and "issueName" not in patch:
+        patch = {**patch, "issueName": issue}
+    return _http_json("POST", f"{api.rstrip('/')}/api/runs/{run}/report", patch)
+
+
+def _recall(query: str, k: int = 6) -> list:
+    """위임 직전 회상 → POST {MUNINN_MEMORY_ENDPOINT}/api/memories/recall."""
+    mem = _env("MUNINN_MEMORY_ENDPOINT")
+    if not mem or not query:
+        return []
+    app = _env("MUNINN_AGENT_NAME")
+    body = {"query": query, "k": k, **({"app": app} if app else {})}
+    res = _http_json("POST", f"{mem.rstrip('/')}/api/memories/recall", body)
+    items = (res or {}).get("items") or []
+    return items if isinstance(items, list) else []
+
+
+def _store_memory(fact: str, tags: list | None = None) -> dict | None:
+    """결과 기억화 → POST {MUNINN_MEMORY_ENDPOINT}/api/memories."""
+    mem = _env("MUNINN_MEMORY_ENDPOINT")
+    if not mem or not fact:
+        return None
+    app = _env("MUNINN_AGENT_NAME")
+    body = {
+        "fact": fact,
+        "tags": tags or [],
+        "sourceRunId": _env("MUNINN_RUN_NAME") or None,
+        "changedBy": "agent",
+        **({"app": app, "appName": app, "scope": "app"} if app else {"scope": "global"}),
+    }
+    return _http_json("POST", f"{mem.rstrip('/')}/api/memories", body)
 
 
 def build_options(max_turns: int, max_budget_usd: float | None = None):
@@ -146,25 +224,47 @@ async def run_live() -> int:
     )
 
     goal = os.environ["MUNINN_GOAL"]
+    pr_mode = _pr_mode()
     g = _guardrails()
     max_turns = int(g.get("maxIterations", 12) or 12)
     max_cost = g.get("maxCostUsd")
     max_budget = float(max_cost) if max_cost else None  # 0/None=무제한
     options = build_options(max_turns=max_turns, max_budget_usd=max_budget)
 
-    log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, goal={goal[:120]!r}")
+    # 1) 회상(recall) — 위임 직전, Muninn 메모리에서 관련 과거 사건/해결을 가져와 컨텍스트로 주입(설계 §3.1).
+    recalled = _recall(goal, k=6)
+    recalled_ids = [m.get("id") for m in recalled if isinstance(m, dict) and m.get("id")]
+    prompt = goal
+    if recalled:
+        facts = "\n".join(f"- {m.get('fact', '')}" for m in recalled[:6])
+        prompt = f"{goal}\n\n[회상된 Muninn 메모리(참고)]\n{facts}"
+        log(f"recall: {len(recalled)}건 회상 → 컨텍스트 주입")
+    # 회상 결과를 status 에 기록(Agent→API 소유). phase 는 operator 가 소유하므로 건드리지 않는다.
+    _report({
+        "step": 0,
+        "recalledMemoryIds": [{"id": m.get("id"), "score": str(m.get("score"))} for m in recalled if isinstance(m, dict) and m.get("id")],
+    })
+
+    log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, pr_mode={pr_mode}, goal={goal[:120]!r}")
     cost = 0.0
     tokens = 0
     turns = 0
+    step = 0
+    last_text = ""  # dry-run PR 계획 = 마지막 assistant 텍스트
     is_error = False
     subtype = ""
-    async for message in query(prompt=goal, options=options):
+    async for message in query(prompt=prompt, options=options):
         if isinstance(message, AssistantMessage):
+            step += 1
             for block in message.content:
                 if isinstance(block, TextBlock):
                     log(f"assistant: {block.text}")
+                    if block.text.strip():
+                        last_text = block.text
                 elif isinstance(block, ToolUseBlock):
                     log(f"tool_use: {block.name} {json.dumps(block.input, ensure_ascii=False)[:200]}")
+            # 진행 보고(스텝 단위) — step/cost/tokens(Agent→API 소유). 베스트에포트.
+            _report({"step": step, "cost": f"{cost:.4f}", "tokens": tokens})
         elif isinstance(message, ResultMessage):
             cost = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
             turns = int(getattr(message, "num_turns", 0) or 0)
@@ -176,10 +276,30 @@ async def run_live() -> int:
                 tokens = int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0))
 
     ok = not is_error
-    log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}, subtype={subtype!r}, is_error={is_error}")
+    # 4) 결과 보고 + outcome(dry-run = PR 계획 요약). output 은 Agent→API 소유, outcome 은 Issue status.
+    output = last_text.strip()
+    title_line = next((ln.strip("# ").strip() for ln in output.splitlines() if ln.strip()), "")
+    outcome = (f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80]) if ok and output else ""
+    _report({
+        "step": step,
+        "cost": f"{cost:.4f}",
+        "tokens": tokens,
+        "output": output[:8000],
+        "outcome": outcome,
+        "final": True,
+        "failed": is_error,
+    })
+
+    # 5) 기억화 — 성공 시 결과를 재사용 가능한 메모리로 저장(요약은 Muninn API/코파일럿이 distill 할 수도 있음).
+    if ok and output:
+        fact = output if len(output) <= 600 else output[:600] + " …"
+        _store_memory(fact, tags=(["dry-run", "pr-plan"] if pr_mode == "dry-run" else ["result"]))
+
+    log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}, subtype={subtype!r}, is_error={is_error}, outcome={outcome!r}")
     print(json.dumps(
         {"mode": "live", "ok": ok, "turns": turns, "cost_usd": cost, "tokens": tokens,
-         "subtype": subtype, "is_error": is_error},
+         "subtype": subtype, "is_error": is_error, "outcome": outcome,
+         "recalled": recalled_ids, "pr_mode": pr_mode},
         ensure_ascii=False,
     ))
     return 0 if ok else 1

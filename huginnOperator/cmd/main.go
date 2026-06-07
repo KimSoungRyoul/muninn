@@ -189,6 +189,10 @@ func main() {
 	if err := (&controller.HuginnIssueReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// agent-runtime 이 보고/메모리에 쓸 Muninn API(=muninnWeb) 엔드포인트. 비우면 기본 svc 주소.
+		// kind/배포에서 operator Deployment env 로 muninn-web 서비스 주소를 주입한다.
+		MemoryEndpoint: os.Getenv("MUNINN_MEMORY_ENDPOINT"),
+		APIEndpoint:    os.Getenv("MUNINN_API_ENDPOINT"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnIssue")
 		os.Exit(1)

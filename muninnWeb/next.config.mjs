@@ -4,6 +4,12 @@ const nextConfig = {
   reactStrictMode: false,
   // 컨테이너(kind) 배포용 — .next/standalone 자체 실행 서버 생성.
   output: "standalone",
+  experimental: {
+    // DB 드라이버(pg)·K8s 클라이언트는 동적 require(pg-native optional, kubeconfig 등)를 쓰므로
+    // Next 의 서버 번들에서 제외하고 런타임 require 로 둔다. (외부 임베딩/onnxruntime 은 제거됨 —
+    // 검색은 postgres 텍스트 검색 전용.)
+    serverComponentsExternalPackages: ["pg", "@kubernetes/client-node"],
+  },
 };
 
 export default nextConfig;

@@ -23,8 +23,10 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      # 콘솔은 Kubernetes API 를 호출하지 않는다 → SA 토큰 마운트 비활성(최소권한).
-      automountServiceAccountToken: false
+      # muninn-web 는 Muninn API 다 — HuginnIssue 생성·HuginnRun 보고/승인 패치로 K8s API 를 호출한다.
+      # 따라서 SA + 토큰 마운트가 필요(web/rbac.yaml 의 Role 로 huginn* 한정 권한).
+      serviceAccountName: {{ include "muninn.web.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.web.serviceAccount.create }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -62,6 +64,17 @@ spec:
               value: {{ .Values.web.copilot.model | quote }}
             - name: COPILOTKIT_TELEMETRY_DISABLED
               value: {{ .Values.web.copilot.telemetryDisabled | quote }}
+            # CR 이 사는 namespace(lib/k8s.ts DEFAULT_NAMESPACE). 기본=릴리스 namespace.
+            - name: MUNINN_NAMESPACE
+              value: {{ .Values.web.namespaceOverride | default .Release.Namespace | quote }}
+            {{- if .Values.metaDb.enabled }}
+            # 메모리 metaDB 연결 — CNPG(또는 외부 DB)가 만든 Secret 의 uri 키를 DATABASE_URL 로 주입.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "metaDb.enabled=true 면 metaDb.existingSecret 가 필요합니다(CNPG <cluster>-app 등)." .Values.metaDb.existingSecret }}
+                  key: {{ .Values.metaDb.uriKey | quote }}
+            {{- end }}
           # probe 는 가벼운 `/`(정적 셸; 과금 없음)를 친다. selftest 는 Anthropic 왕복이라 제외.
           readinessProbe:
             httpGet:

@@ -1,0 +1,61 @@
+{{- if .Values.web.enabled -}}
+{{- if .Values.web.serviceAccount.create -}}
+# muninn-web 는 Muninn API 다 — HuginnIssue 생성(위임)·HuginnRun 조회/보고/승인 패치를 위해
+# K8s API 에 접근한다(설계 muninn-goal-conversational-delegation.md §2/§5). 자기 namespace 한정 Role.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "muninn.web.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.web.labels" . | nindent 4 }}
+{{- with .Values.web.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- if .Values.web.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "muninn.web.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.web.labels" . | nindent 4 }}
+rules:
+  # 위임: HuginnIssue 생성/조회. 조회: HuginnAgent. (update 미사용 — MergePatch 만 → patch 로 충분, 최소권한)
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnissues"]
+    verbs: ["create", "get", "list", "watch", "patch"]
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnissues/status"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnagents"]
+    verbs: ["get", "list", "watch"]
+  # 보고/승인: HuginnRun + status 패치(Agent→API / API 소유 필드만 merge-patch).
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnruns"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["muninn.io"]
+    resources: ["huginnruns/status"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "muninn.web.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.web.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "muninn.web.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "muninn.web.serviceAccountName" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}
+{{- end }}

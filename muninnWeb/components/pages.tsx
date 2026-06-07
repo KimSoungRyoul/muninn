@@ -680,7 +680,6 @@ function HmMemories() {
   const [scopeFilter, setScopeFilter] = useS_HP("all");
   const [appFilter, setAppFilter] = useS_HP("all");
   const [q, setQ] = useS_HP("");
-  const [method, setMethod] = useS_HP("hybrid");
 
   let list = D.MEMORIES;
   if (scopeFilter === "global") list = list.filter(m => m.scope === "global");
@@ -719,14 +718,6 @@ function HmMemories() {
               <Icon name="search" size={15}/>
               <input className="input" placeholder="Memory 본문 또는 태그로 검색..." value={q} onChange={e => setQ(e.target.value)} style={{fontSize:14, height:40}}/>
             </div>
-          </div>
-          <div>
-            <label style={{display:"block", marginBottom:6, fontSize:12, color:"var(--on-surface-muted)", fontWeight:600}}>Method</label>
-            <Tabs pill value={method} onChange={setMethod} tabs={[
-              {label:"hybrid", value:"hybrid"},
-              {label:"bm25",   value:"bm25"},
-              {label:"vector", value:"vector"},
-            ]}/>
           </div>
           <div>
             <label style={{display:"block", marginBottom:6, fontSize:12, color:"var(--on-surface-muted)", fontWeight:600}}>Scope</label>

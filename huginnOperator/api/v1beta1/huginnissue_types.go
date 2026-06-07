@@ -86,6 +86,18 @@ type HuginnIssueSpec struct {
 	// goal: event 단위 불변 컨텍스트(§8.6)
 	Goal string `json:"goal"`
 
+	// issuingUser: manual(대화형/CopilotKit) 트리거로 이슈를 개시한 운영자(감사용).
+	// webhook(grafana/airflow/argocd) 출처면 비운다.
+	// +optional
+	IssuingUser string `json:"issuingUser,omitempty"`
+	// userPrompt: manual 트리거의 원본 운영자 프롬프트(감사·재실행). webhook 이면 비운다.
+	// +optional
+	UserPrompt string `json:"userPrompt,omitempty"`
+	// recalledMemoryIds: 위임 직전 Muninn API 가 회상한 기억 id(감사 추적 + 에이전트 seed).
+	// 설계 §3.1/§7 — 회상한 근거 기억을 이슈에 동봉한다.
+	// +optional
+	RecalledMemoryIds []string `json:"recalledMemoryIds,omitempty"`
+
 	// inheritedGuardrails: HuginnAgent.spec.guardrails 에서 복사(§3.2)
 	InheritedGuardrails InheritedGuardrails `json:"inheritedGuardrails"`
 	// inheritedBindings: HuginnAgent.spec.bindings 스냅샷

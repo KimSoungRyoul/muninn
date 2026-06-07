@@ -6,6 +6,8 @@
 
 - **[muninn-devops-agent-platform.md](./muninn-devops-agent-platform.md)** — 메인 설계서
   (아키텍처 4평면, Issue 생성 경로, CRD 3종+상태 머신, 이벤트→이슈→런 흐름, 에이전트 런타임/SDK 통합, 보안·거버넌스, 기억 시스템, 데이터 모델/집계, 로드맵, Open Questions)
+- **[muninn-goal-conversational-delegation.md](./muninn-goal-conversational-delegation.md)** — `/goal` 구현 청사진
+  (대화형 위임 1급화: muninnWeb=Muninn API, recall→delegate→run→report→approve→store→summarize 시퀀스, CR 계약/manual 필드, Muninn API 라우트, 메모리 모델(postgres+pgvector·로컬 임베딩·하이브리드 RRF), agentRuntime 보고 계약, kind 토폴로지/검증)
 - **[operator-design.md](./operator-design.md)** — Operator 구현 설계(검토·구체화)
   (kubebuilder 선택 정당화, controller↔리소스 watch 토폴로지, 재시도 모델/status 소유권/취소 전파 모순 해소, admission webhook 범위, RBAC, Job→phase 매핑) — 실제 구현은 [`huginnOperator/`](../../huginnOperator/)
 - **[review-v0.1.md](./review-v0.1.md)** — v0.1→v0.2 검증 이력(반영/불확실/기각)
