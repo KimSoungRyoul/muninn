@@ -12,7 +12,12 @@
 //   frontend tools   : https://docs.copilotkit.ai/built-in-agent/frontend-tools
 //   readable context : https://docs.copilotkit.ai/built-in-agent/agent-app-context
 
-import { CopilotSidebar, useAgentContext, useFrontendTool } from "@copilotkit/react-core/v2";
+import {
+  CopilotSidebar,
+  useAgentContext,
+  useConfigureSuggestions,
+  useFrontendTool,
+} from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -86,6 +91,17 @@ export function MuninnCopilot() {
   useAgentContext({
     description: "진행 중/대기 중 실행(HuginnRun). status=awaiting 는 승인 대기.",
     value: LIVE_RUNS.map((r) => ({ id: r.id, app: r.app, status: r.status, step: r.step, max: r.max, cost: r.cost })),
+  });
+
+  // ---- 추천 질문 pill (빈 대화 상태에서 노출) ----
+  useConfigureSuggestions({
+    available: "before-first-message",
+    suggestions: [
+      { title: "승인 대기 run", message: "승인 대기 중인 run 을 표로 보여줘" },
+      { title: "실패 원인 분석", message: "ai-router-svc 의 최근 실패 원인을 recall 된 메모리와 실행 단계로 분석해줘" },
+      { title: "이번 달 비용", message: "이번 달 비용 현황과 실패 빈도 상위 앱을 알려줘" },
+      { title: "메모리 검색", message: "OOM 관련 메모리를 검색해줘" },
+    ],
   });
 
   // ---- 조회 도구 ----
@@ -279,10 +295,11 @@ export function MuninnCopilot() {
 
   return (
     <CopilotSidebar
+      width={420}
       labels={{
         modalHeaderTitle: "Muninn Copilot",
-        welcomeMessageText:
-          "안녕하세요 — Muninn 콘솔 코파일럿입니다. 실행 상태/실패율, 메모리 검색, 승인 대기 처리, 페이지 이동을 도와드립니다. 예: \"승인 대기 중인 run 보여줘\", \"ai-router-svc 최근 실패 원인 분석해줘\".",
+        // 짧은 환영문 — 긴 문장은 heading 으로 렌더돼 넘침. 사용 예시는 추천 pill 로 안내.
+        welcomeMessageText: "안녕하세요 👋 무엇을 도와드릴까요?",
         chatInputPlaceholder: "Muninn 콘솔에 대해 물어보세요…",
       }}
     />

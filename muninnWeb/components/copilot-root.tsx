@@ -9,5 +9,10 @@
 import { CopilotKit } from "@copilotkit/react-core/v2";
 
 export function CopilotRoot({ children }: { children: React.ReactNode }) {
-  return <CopilotKit runtimeUrl="/api/copilotkit">{children}</CopilotKit>;
+  return (
+    // enableInspector=false — 개발용 "Web Inspector" 버튼 + 상단 프로모 배너 제거(콘솔 UI 정돈).
+    <CopilotKit runtimeUrl="/api/copilotkit" enableInspector={false}>
+      {children}
+    </CopilotKit>
+  );
 }
