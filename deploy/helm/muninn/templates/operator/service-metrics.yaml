@@ -1,0 +1,46 @@
+{{- if and .Values.operator.enabled .Values.operator.metrics.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "muninn.operator.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.operator.metrics.service.type }}
+  selector:
+    {{- include "muninn.operator.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: {{ if .Values.operator.metrics.secure }}https{{ else }}http{{ end }}
+      port: {{ .Values.operator.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}
+{{- if and .Values.operator.enabled .Values.operator.metrics.enabled .Values.operator.metrics.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "muninn.operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "muninn.operator.labels" . | nindent 4 }}
+    {{- with .Values.operator.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "muninn.operator.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: {{ if .Values.operator.metrics.secure }}https{{ else }}http{{ end }}
+      path: /metrics
+      interval: {{ .Values.operator.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.operator.metrics.serviceMonitor.scrapeTimeout }}
+      {{- if .Values.operator.metrics.secure }}
+      scheme: https
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true
+      {{- end }}
+{{- end }}

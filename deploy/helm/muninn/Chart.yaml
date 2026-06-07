@@ -1,0 +1,31 @@
+apiVersion: v2
+name: muninn
+description: |
+  Muninn DevOps Agent Platform — event-driven Kubernetes platform where infra
+  alerts trigger a Claude agent that diagnoses problems and opens a PR/Issue.
+  This chart installs the Huginn operator (CRD control plane), the optional
+  Muninn web console, and the agent runtime's ServiceAccount/Secret wiring.
+  PostgreSQL is intentionally NOT bundled — point the chart at an external
+  instance via `externalPostgresql.*`.
+type: application
+# Chart 버전 (SemVer). 차트 변경 시 올린다.
+version: 0.1.0
+# 배포되는 앱 버전 (operator/web 이미지 기준). CI 발행 태그와 맞춘다.
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - muninn
+  - huginn
+  - operator
+  - claude
+  - devops-agent
+  - aiops
+home: https://github.com/KimSoungRyoul/muninn
+sources:
+  - https://github.com/KimSoungRyoul/muninn
+maintainers:
+  - name: KimSoungRyoul
+    url: https://github.com/KimSoungRyoul
+annotations:
+  # PostgreSQL 은 외부 의존성 — chart 가 생성하지 않는다.
+  muninn.io/external-dependencies: "postgresql, redis (optional, not bundled)"
