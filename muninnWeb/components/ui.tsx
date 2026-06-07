@@ -17,10 +17,11 @@ function Button({ variant = "primary", size, leftIcon, rightIcon, children, ...r
     </button>
   );
 }
-function IconButton({ icon, size = "md", tooltip, ...rest }: any) {
+function IconButton({ icon, size = "md", tooltip, "aria-label": ariaLabel, ...rest }: any) {
   const sz = size === "sm" ? 16 : size === "lg" ? 20 : 18;
+  // 아이콘 전용 버튼은 접근 가능한 이름이 필요하다 — aria-label 우선, 없으면 tooltip 으로 보강.
   const btn = (
-    <button className={`btn btn-icon ${size !== "md" ? `btn-${size}` : ""}`} {...rest}>
+    <button className={`btn btn-icon ${size !== "md" ? `btn-${size}` : ""}`} aria-label={ariaLabel ?? tooltip} {...rest}>
       <Icon name={icon} size={sz} />
     </button>
   );
@@ -108,7 +109,16 @@ function Tag({ children, removable, onRemove }: any) {
   return (
     <span className={`tag ${removable ? "tag-removable" : ""}`}>
       {children}
-      {removable && <span className="x" onClick={onRemove}><Icon name="close" size={12} /></span>}
+      {removable && (
+        <span
+          className="x"
+          role="button"
+          tabIndex={0}
+          aria-label="제거"
+          onClick={onRemove}
+          onKeyDown={e => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onRemove?.())}
+        ><Icon name="close" size={12} /></span>
+      )}
     </span>
   );
 }
@@ -117,7 +127,7 @@ function Tag({ children, removable, onRemove }: any) {
 function Avatar({ name, size = "md", src, color }: any) {
   const initials = name ? name.split(" ").map(s => s[0]).slice(0, 2).join("").toUpperCase() : "?";
   const cls = `avatar ${size !== "md" ? `avatar-${size}` : ""}`;
-  if (src) return <span className={cls}><img src={src} style={{width:"100%",height:"100%",objectFit:"cover"}} alt="" /></span>;
+  if (src) return <span className={cls}><img src={src} style={{width:"100%",height:"100%",objectFit:"cover"}} alt={name || ""} /></span>;
   return <span className={cls} style={color ? {background: color, color: "#fff"} : null}>{initials}</span>;
 }
 function AvatarStack({ users, max = 4 }: any) {
@@ -198,13 +208,13 @@ function Pagination({ page, total, onChange }: any) {
   const end = Math.min(total, start + 4);
   for (let i = start; i <= end; i++) pages.push(i);
   return (
-    <div className="pagination">
-      <button className="pg-btn" disabled={page === 1} onClick={() => onChange(page - 1)}><Icon name="chevronLeft" size={16}/></button>
-      {start > 1 && <><button className="pg-btn" onClick={() => onChange(1)}>1</button><span className="pg-btn" style={{cursor:"default"}}>…</span></>}
-      {pages.map(p => <button key={p} className={`pg-btn ${p === page ? "is-active" : ""}`} onClick={() => onChange(p)}>{p}</button>)}
-      {end < total && <><span className="pg-btn" style={{cursor:"default"}}>…</span><button className="pg-btn" onClick={() => onChange(total)}>{total}</button></>}
-      <button className="pg-btn" disabled={page === total} onClick={() => onChange(page + 1)}><Icon name="chevronRight" size={16}/></button>
-    </div>
+    <nav className="pagination" aria-label="페이지네이션">
+      <button className="pg-btn" disabled={page === 1} onClick={() => onChange(page - 1)} aria-label="이전 페이지"><Icon name="chevronLeft" size={16}/></button>
+      {start > 1 && <><button className="pg-btn" onClick={() => onChange(1)} aria-label="1 페이지">1</button><span className="pg-btn" style={{cursor:"default"}} aria-hidden="true">…</span></>}
+      {pages.map(p => <button key={p} className={`pg-btn ${p === page ? "is-active" : ""}`} onClick={() => onChange(p)} aria-label={`${p} 페이지`} aria-current={p === page ? "page" : undefined}>{p}</button>)}
+      {end < total && <><span className="pg-btn" style={{cursor:"default"}} aria-hidden="true">…</span><button className="pg-btn" onClick={() => onChange(total)} aria-label={`${total} 페이지`}>{total}</button></>}
+      <button className="pg-btn" disabled={page === total} onClick={() => onChange(page + 1)} aria-label="다음 페이지"><Icon name="chevronRight" size={16}/></button>
+    </nav>
   );
 }
 
@@ -300,9 +310,9 @@ function Calendar({ value, onChange }: any) {
   return (
     <div className="cal">
       <div className="cal-head">
-        <IconButton icon="chevronLeft" size="sm" onClick={() => setView(new Date(y, m - 1, 1))} />
+        <IconButton icon="chevronLeft" size="sm" aria-label="이전 달" onClick={() => setView(new Date(y, m - 1, 1))} />
         <span className="mo">{monthName}</span>
-        <IconButton icon="chevronRight" size="sm" onClick={() => setView(new Date(y, m + 1, 1))} />
+        <IconButton icon="chevronRight" size="sm" aria-label="다음 달" onClick={() => setView(new Date(y, m + 1, 1))} />
       </div>
       <div className="cal-grid">
         {["S","M","T","W","T","F","S"].map((d, i) => <span key={i} className="dn">{d}</span>)}

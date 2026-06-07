@@ -111,7 +111,7 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
           <div className="nm">alice</div>
           <div className="em">platform-sre</div>
         </div>
-        <IconButton icon="moreV" size="sm"/>
+        <IconButton icon="moreV" size="sm" aria-label="사용자 메뉴"/>
       </div>
     </aside>
   );
@@ -130,7 +130,7 @@ function HmHeader({ onCommand, onNotif, pendingApprovals = 3, todayCost = 4.12 }
         <span className="lbl">오늘 비용</span>
         <span className="val">${todayCost.toFixed(2)}</span>
       </span>
-      <button className="btn btn-icon" style={{position:"relative"}} onClick={onNotif} aria-label={`${pendingApprovals} pending approvals`}>
+      <button className="btn btn-icon" style={{position:"relative"}} onClick={onNotif} aria-label={`승인 대기 ${pendingApprovals}건`}>
         <Icon name="bell" size={18}/>
         {pendingApprovals > 0 && (
           <span style={{position:"absolute",top:4,right:5,minWidth:16,height:16,padding:"0 4px",borderRadius:8,background:"var(--warning-50)",color:"#fff",fontSize:10,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"var(--font-sans)"}}>
