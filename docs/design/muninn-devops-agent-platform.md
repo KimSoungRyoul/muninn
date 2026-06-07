@@ -17,16 +17,23 @@
 | **Huginn** (사고, *thought*) | **실행 평면 (Agent Plane)** | 이벤트를 받아 Claude Code 기반 에이전트를 실행한다. 로그·트레이스·메트릭을 조사하고, 코드를 읽고, PR/Issue 를 만든다. |
 | **Muninn** (기억, *memory*) | **기억 평면 (Memory Plane) + 콘솔** | 과거 사건에서 distill 한 지식(memory)을 저장/회상(recall)한다. 운영자가 보는 UI/API/metaDB 전체를 포함한다. |
 
-핵심 한 줄: **"Grafana alert(webhook) → Huginn 이 조사하고 고친다 → Muninn 이 기억한다."**
+핵심 한 줄: **"이벤트(webhook) 또는 운영자 대화(Muninn CopilotKit) → Huginn 이 조사하고 고친다 → Muninn 이 기억하고 제안한다."**
+
+트리거는 **두 경로**이며 둘 다 1급이다(상세: [muninn-goal-conversational-delegation.md](./muninn-goal-conversational-delegation.md)):
 
 ```
-Grafana alert ─▶ Muninn API(Gateway) ─▶ (정규화·dedup) ─▶ K8s API ─▶ HuginnIssue CR
-                                                              │  (Operator 가 watch/reconcile)
-                              Claude Agent SDK loop ◀── HuginnRun(Pod/Job) ──┘
-                              recall(Muninn) · loki · tempo · github
-                                                            ▼
-                                              PR / Issue  +  Muninn 에 기억 저장
+[Webhook] Grafana/Airflow/ArgoCD ─┐
+[Manual]  운영자 ─ CopilotKit ─────┤─▶ Muninn API(=muninnWeb) ─▶ (정규화·dedup·recall) ─▶ K8s API ─▶ HuginnIssue CR
+   "외부 timeout 의심, 확인하고 PR"  │                                          │  (Operator 가 watch/reconcile)
+                                 Claude Agent SDK loop ◀── HuginnRun(Pod/Job) ──┘
+                                 recall(Muninn) · loki · tempo · github
+                                                           ▼
+                                 PR / Issue  +  Muninn 에 기억 저장·요약·이력
 ```
+
+> **Muninn API = muninnWeb.** 게이트웨이(이벤트/대화 수신, K8s CR 생성, 에이전트 보고 수신/status
+> PATCH, 메모리 recall/store 중개)는 별도 서비스가 아니라 muninnWeb Next.js 앱의 `app/api/**` 가 겸한다
+> (`@kubernetes/client-node` + `pg`). 운영자 대화형 진입은 CopilotKit ChatWidget 이다.
 
 ---
 
@@ -436,6 +443,10 @@ flowchart LR
 ```
 
 ### 7.4 임베딩 전략
+> **구현 현황(MVP)**: 현재 muninnWeb 구현은 임베딩/pgvector 를 제외하고 **postgres 텍스트 검색**
+> (`to_tsvector`/`ts_rank_cd`)만 쓴다 — 외부 임베딩 키·onnxruntime·pgvector 의존을 회피해 어떤
+> postgres(CNPG stock 이미지 포함)에서도 동작. 본 절의 벡터/하이브리드 전략은 의미(시맨틱) 검색이
+> 정당화될 때 재도입하는 **목표 설계**다. → `muninn-goal-conversational-delegation.md` §7.
 - **모델/차원(pluggable)**: 기본 후보 — Voyage AI(1024-dim, 다국어) 또는 OpenAI `text-embedding-3-large`(Matryoshka 로 1536-dim 축소). 스키마 예시는 `vector(1536)` 이나 **설정 가능**하며, 모델 변경 시 전체 re-embed 필요(Open Question).
 - **수명주기**: 생성 시 fact+embedding 동시 생성. **fact 수정 시 `update_embedding` 으로 재생성** + `updated_at` 갱신. 재생성 실패 시 alert + admin 대시보드 "임베딩 갱신 필요" 배지.
 

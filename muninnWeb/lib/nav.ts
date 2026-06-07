@@ -6,6 +6,8 @@ export function navPath(name: string): string {
       return "/";
     case "apps":
       return "/apps";
+    case "incidents":
+      return "/incidents";
     case "platform-tools":
       return "/settings/platform-tools";
     case "memories":
@@ -17,6 +19,7 @@ export function navPath(name: string): string {
 
 // 사이드바 active 섹션 판정 (프로토타입 activeSection 로직과 동일)
 export function sectionFromPath(pathname: string): string {
+  if (pathname.startsWith("/incidents")) return "incidents";
   if (pathname.startsWith("/apps") || pathname.startsWith("/runs")) return "apps";
   if (pathname.startsWith("/settings/platform-tools")) return "platform-tools";
   if (pathname.startsWith("/settings/memories")) return "memories";

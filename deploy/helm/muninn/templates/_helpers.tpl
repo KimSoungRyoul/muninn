@@ -93,6 +93,14 @@ app.kubernetes.io/component: web
 app.kubernetes.io/component: web
 {{- end -}}
 
+{{- define "muninn.web.serviceAccountName" -}}
+{{- if .Values.web.serviceAccount.create -}}
+{{- default (printf "%s-web" (include "muninn.fullname" .)) .Values.web.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.web.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}
+
 {{/*
 이미지 ref 조립: repository:tag (tag 비면 chart appVersion).
 */}}

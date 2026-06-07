@@ -67,6 +67,14 @@ spec:
             - name: ENABLE_WEBHOOKS
               value: "false"
             {{- end }}
+            {{- if .Values.web.enabled }}
+            # agent Job 이 보고/메모리에 쓸 Muninn API(=muninn-web) 엔드포인트. operator 가
+            # HuginnIssue→Run 생성 시 Job env(MUNINN_API_ENDPOINT/MEMORY_ENDPOINT)로 전달한다.
+            - name: MUNINN_API_ENDPOINT
+              value: "http://{{ include "muninn.web.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.web.service.port }}"
+            - name: MUNINN_MEMORY_ENDPOINT
+              value: "http://{{ include "muninn.web.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.web.service.port }}"
+            {{- end }}
           ports:
             {{- if .Values.operator.metrics.enabled }}
             - name: metrics

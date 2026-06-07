@@ -31,6 +31,8 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 # standalone 서버 + 정적 자산(standalone 은 .next/static 을 포함하지 않으므로 별도 복사).
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Drizzle 마이그레이션(lib/db.ensureSchema 가 부팅 시 적용). standalone 트레이싱에 안 잡히므로 별도 복사.
+COPY --from=builder /app/drizzle ./drizzle
 USER nextjs
 EXPOSE 3030
 CMD ["node", "server.js"]

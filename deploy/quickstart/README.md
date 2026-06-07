@@ -1,0 +1,71 @@
+# Muninn Quickstart — CloudNativePG metaDB + Helm
+
+Muninn 플랫폼을 kind/클러스터에 빠르게 올리는 경로. **metaDB(PostgreSQL+pgvector)는 Helm chart 가
+번들하지 않는다** — 운영(HA·백업·업그레이드)을 [CloudNativePG(CNPG)](https://cloudnative-pg.io/)
+operator 에 위임하고, chart 는 그 연결 Secret 만 가리킨다. chart 가 가벼워지고 DB 수명주기가 분리된다.
+
+```
+CNPG operator(외부 설치) ─▶ Cluster CR(muninn-metadb) ─▶ Pod(postgres)
+                                     └▶ Secret muninn-metadb-app (uri/host/user/password)
+                                                  │
+Helm(muninn) ─▶ muninn-web(Muninn API) ── DATABASE_URL ◀┘  +  HuginnAgent/Issue/Run CR(operator)
+```
+
+> 검색은 **postgres 텍스트 검색**(to_tsvector/ts_rank_cd)만 쓴다 — pgvector·확장 불필요. 어떤
+> CNPG operand 이미지든 그대로 동작한다. (의미/시맨틱 검색은 후속에서 정당화될 때 재도입.)
+
+## 1) CNPG operator 설치 (클러스터 1회)
+
+```bash
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.25/releases/cnpg-1.25.0.yaml
+kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager
+```
+
+## 2) metaDB Cluster 생성
+
+```bash
+kubectl create namespace muninn 2>/dev/null || true
+kubectl -n muninn apply -f deploy/quickstart/metadb-cnpg.yaml
+kubectl -n muninn wait --for=condition=Ready cluster/muninn-metadb --timeout=300s
+# CNPG 가 만든 연결 Secret(키: uri/host/port/user/password/dbname)
+kubectl -n muninn get secret muninn-metadb-app -o jsonpath='{.data.uri}' | base64 -d; echo
+```
+
+## 3) 자격 Secret 생성 (커밋 금지 — env(Secret)-only)
+
+```bash
+kubectl -n muninn create secret generic muninn-web-secrets \
+  --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+# agent Job 도 동일 자격이 필요하면 agent-secrets 도 생성(operator 가 주입).
+kubectl -n muninn create secret generic agent-secrets \
+  --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+```
+
+## 4) Helm 설치 (web 을 CNPG Secret 에 배선)
+
+```bash
+helm upgrade --install muninn deploy/helm/muninn -n muninn \
+  --set metaDb.enabled=true \
+  --set metaDb.existingSecret=muninn-metadb-app \
+  --set web.auth.existingSecret=muninn-web-secrets
+```
+
+`metaDb.enabled=true` 면 chart 가 muninn-web 에 `DATABASE_URL`(= CNPG Secret 의 `uri`)을 주입하고,
+muninn-web 이 K8s API(HuginnIssue 생성·HuginnRun 보고)를 호출하도록 **ServiceAccount + RBAC** 를 만든다.
+operator 에는 `MUNINN_API_ENDPOINT`/`MUNINN_MEMORY_ENDPOINT`(= muninn-web Service)가 주입돼, agent Job 이
+muninn-web 으로 보고/메모리 저장을 한다.
+
+## 대안 — 경량(kind QA, operator 불필요)
+
+CNPG 없이 단일 postgres 로 빠르게 보려면 `muninnWeb/examples/kind-goal-e2e.yaml`(bare `pgvector/pgvector`
+Deployment + SA/RBAC). 운영/quickstart 의 권장 경로는 위 CNPG 방식이다.
+
+## 검증
+
+```bash
+kubectl -n muninn port-forward svc/muninn-web 3030:3030
+# 코파일럿: "어떤 App 에 장애 나고 대처 진행중?" / "...timeout 의심, 확인하고 fallback PR 만들어 검토받아"
+kubectl -n muninn get cluster,huginnissue,huginnrun,job,pod
+kubectl -n muninn exec -it muninn-metadb-1 -- psql -U muninn -d muninn -c 'select id,fact from memory limit 5;'
+```

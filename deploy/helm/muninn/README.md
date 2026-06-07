@@ -7,12 +7,15 @@ Muninn DevOps Agent Platform 을 Kubernetes 에 배포하는 Helm chart.
 | 컴포넌트 | 종류 | 기본 | 설명 |
 |---|---|---|---|
 | **Huginn Operator** | Deployment + CRD + RBAC | on | `HuginnAgent`/`HuginnIssue`/`HuginnRun` 컨트롤 플레인. 이벤트로 agent Job 을 만든다. |
-| **Muninn Web** | Deployment + Service | on | CopilotKit 콘솔(프로토타입; mock 데이터). |
+| **Muninn Web** | Deployment + Service + SA/RBAC | on | CopilotKit 콘솔 + **Muninn API**(HuginnIssue 생성·HuginnRun 보고/승인). huginn* CR 한정 Role. |
 | **Agent SA/Secret** | ServiceAccount (+ 옵션 Secret) | SA on / Secret off | operator 가 만드는 Job pod 이 쓰는 `huginn-agent` SA 와 인증 배선. |
 | **agent-runtime** | (배포 안 함) | — | operator 가 런타임에 Job 으로 실행한다. 이미지는 `HuginnAgent.spec.agent.image`. |
 
-> **PostgreSQL 은 이 chart 가 설치하지 않는다.** 설계(§8)의 metaDB/pgvector 는 외부 인스턴스를 쓴다.
-> `externalPostgresql.*` 로 연결 정보만 등록한다. (소비자 `muninn-api`/`muninn-memory` 는 Phase 0 로드맵 — 아직 미구현.)
+> **PostgreSQL 은 이 chart 가 설치하지 않는다.** metaDB 는 외부 인스턴스를 쓴다 — 권장 경로는
+> CloudNativePG(CNPG)로 provision 후 그 연결 Secret 을 `metaDb.existingSecret` 으로 가리키는 것이다
+> (`deploy/quickstart/README.md`). `metaDb.enabled=true` 면 **muninn-web(= Muninn API)** 에
+> `DATABASE_URL`(Secret 의 `uriKey`)이 주입된다. 검색은 텍스트(to_tsvector/ts_rank_cd)만 쓰므로
+> **pgvector·확장은 불필요**하다. (`externalPostgresql.*` 는 미구현 소비자용 legacy 메타 Secret.)
 
 ## 사전 요구
 

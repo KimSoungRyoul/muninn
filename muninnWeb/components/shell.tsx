@@ -69,6 +69,7 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
   const groups = [
     { items: [
       { id: "dashboard",    label: "Dashboard",    icon: "dashboard" },
+      { id: "incidents",    label: "Incidents",    icon: "alert" },
       { id: "apps",         label: "Applications", icon: "layers" },
     ]},
     { title: "Settings", admin: true, items: [

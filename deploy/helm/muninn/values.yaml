@@ -113,6 +113,18 @@ web:
   auth:
     existingSecret: ""
 
+  # muninn-web 는 Muninn API 다 — HuginnIssue 생성·HuginnRun 보고/승인 패치로 K8s API 를 호출한다.
+  # 따라서 ServiceAccount + Role(huginn* 한정) 이 필요하다(web/rbac.yaml). 끄면 K8s 연동이 비활성된다.
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  rbac:
+    create: true
+
+  # CR 이 사는 namespace(MUNINN_NAMESPACE). 비우면 릴리스 namespace 를 쓴다.
+  namespaceOverride: ""
+
   ingress:
     enabled: false
     className: ""
@@ -173,9 +185,21 @@ crds:
   managedByHelm: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 외부 PostgreSQL — chart 가 DB 를 생성하지 않는다(요구사항). 외부 인스턴스를 가리킨다.
-# muninn-api / muninn-memory(설계 §8, Phase 0 로드맵, 미구현)가 소비할 연결 정보를
-# Secret 으로 등록한다. enabled=false 면 아무 것도 만들지 않는다.
+# metaDB — muninn-web(Muninn API)가 쓰는 메모리 DB(postgres) 연결.
+# chart 는 DB 를 만들지 않는다 — 권장 경로는 CloudNativePG(CNPG)로 외부 provision 후
+# 그 연결 Secret(<cluster>-app, 키 uri)을 가리키는 것이다(deploy/quickstart/README.md).
+# enabled=true 면 web Deployment 에 DATABASE_URL(= Secret 의 uriKey)을 주입한다.
+# 검색은 텍스트(to_tsvector/ts_rank_cd)만 쓰므로 pgvector·확장은 불필요하다.
+# ─────────────────────────────────────────────────────────────────────────────
+metaDb:
+  enabled: false
+  # CNPG app secret 등 전체 connection string(postgres://...)을 담은 Secret/키.
+  existingSecret: "" # 예: muninn-metadb-app
+  uriKey: uri
+
+# ─────────────────────────────────────────────────────────────────────────────
+# (legacy) 외부 PostgreSQL 연결 메타 Secret — 미구현 소비자(muninn-api/muninn-memory)용.
+# muninn-web 의 DB 연결은 위 metaDb 를 쓴다. enabled=false 면 아무 것도 만들지 않는다.
 # ─────────────────────────────────────────────────────────────────────────────
 externalPostgresql:
   enabled: false

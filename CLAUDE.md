@@ -43,7 +43,7 @@ event ─▶ Muninn API (normalize + dedup) ─▶ HuginnIssue CR
 
 **Auth is env(Secret)-only.** The operator injects `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` from the `agent-secrets` Secret (both `optional` — runtime requires at least one), and `GITHUB_PAT` from the app's `source.secretRef` Secret (key `token`, a *separate* Secret). Never put credentials in images, manifests, or the web mock. The `SELFTEST` sentinel (`ANTHROPIC_API_KEY=SELFTEST` or `MUNINN_SELFTEST=1`) runs the runtime offline for pipeline QA without a real key.
 
-**muninnWeb is a prototype/mock.** Pages render client-side from `lib/data.ts` (`HM_DATA`); the `app/api/**` route handlers are non-persistent mocks. Treat it as a UI prototype, not a live backend.
+**muninnWeb = Muninn API (gateway + memory + console).** Per `docs/design/muninn-goal-conversational-delegation.md`, muninnWeb's `app/api/**` is the real Muninn API: it creates/patches HuginnIssue/HuginnRun CRs (`@kubernetes/client-node`, `lib/k8s.ts`), stores/recalls memory in **external postgres via Drizzle ORM** (`lib/db.ts`, schema `lib/schema.ts`; **text search** `to_tsvector`/`ts_rank_cd` — no embeddings/pgvector, so any postgres/CNPG image works; DB external via `DATABASE_URL`, recommended provision = CloudNativePG, `deploy/quickstart`), and receives agent reports. The CopilotKit copilot is the operator's conversational orchestrator (recall → delegate → poll → store/summarize) via **server tools** (`defineTool`), with navigation as frontend tools. (Migration in progress — some legacy pages/routes still render from `lib/data.ts` (`HM_DATA`) until each is wired to K8s/DB.)
 
 ## Commands
 

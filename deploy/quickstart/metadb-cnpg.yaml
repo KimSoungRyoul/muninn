@@ -1,0 +1,56 @@
+# Muninn metaDB — CloudNativePG(CNPG) 기반 PostgreSQL.
+#
+# Muninn Helm chart 는 DB 를 번들하지 않는다(외부 의존성). kind/quickstart 에서는 무거운
+# 자체 postgres 대신 **CNPG operator 를 외부 설치**하고, 이 Cluster CR 로 metaDB 를 띄운다.
+# CNPG 가 운영(HA·백업·롤링업그레이드·연결 secret 생성)을 맡으므로 chart 는 가벼워진다.
+#
+# 검색은 postgres 텍스트 검색(to_tsvector/ts_rank_cd)만 쓴다 — **pgvector·확장 불필요**.
+# 따라서 어떤 operand 이미지(기본 CNPG 이미지)든 그대로 동작한다(이미지 제약 없음).
+#
+# ── 설치 순서 ────────────────────────────────────────────────────────────────
+# 1) CNPG operator 설치(클러스터 1회):
+#      kubectl apply --server-side -f \
+#        https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.25/releases/cnpg-1.25.0.yaml
+#      kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager
+# 2) 네임스페이스 + 이 매니페스트 apply:
+#      kubectl create namespace muninn 2>/dev/null || true
+#      kubectl -n muninn apply -f deploy/quickstart/metadb-cnpg.yaml
+#      kubectl -n muninn wait --for=condition=Ready cluster/muninn-metadb --timeout=300s
+# 3) CNPG 가 생성한 연결 Secret 확인(이름 = <cluster>-app, 키: uri/host/port/user/password/dbname):
+#      kubectl -n muninn get secret muninn-metadb-app -o jsonpath='{.data.uri}' | base64 -d; echo
+# 4) Helm 으로 muninn 설치 시 이 Secret 을 가리키게 한다(values):
+#      helm upgrade --install muninn deploy/helm/muninn -n muninn \
+#        --set metaDb.enabled=true \
+#        --set metaDb.existingSecret=muninn-metadb-app \
+#        --set web.auth.existingSecret=muninn-web-secrets
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: muninn-metadb
+  labels:
+    app.kubernetes.io/part-of: muninn
+spec:
+  instances: 1 # quickstart=1. 운영 HA 는 3 권장.
+  # operand 이미지 미지정 → CNPG 기본 PostgreSQL 이미지. 텍스트 검색만 쓰므로 확장 불필요.
+
+  storage:
+    size: 1Gi # quickstart. 운영은 용량/스토리지클래스 조정.
+    # storageClass: standard   # kind 기본 SC(local-path) 사용 시 생략 가능.
+
+  # 부트스트랩: muninn 앱 DB/유저 생성. 스키마(테이블/FTS 인덱스)는 muninn-web 이 ensureSchema 로 생성.
+  bootstrap:
+    initdb:
+      database: muninn
+      owner: muninn
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # CNPG 는 <metadata.name>-app Secret 을 자동 생성한다(키: uri/host/port/user/password/dbname).
+  # muninn-web 의 DATABASE_URL 은 이 Secret 의 `uri` 를 그대로 쓴다(Helm metaDb.existingSecret).

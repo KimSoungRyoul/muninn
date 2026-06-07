@@ -15,6 +15,12 @@ export function notFound(message = "Not found") {
 export function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
+export function serverError(message: string, detail?: unknown) {
+  return NextResponse.json(
+    { error: message, detail: detail instanceof Error ? detail.message : detail },
+    { status: 500 },
+  );
+}
 
 // ---- API 응답 타입 ----
 

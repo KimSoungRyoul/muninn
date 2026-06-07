@@ -40,12 +40,13 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
       --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
 {{- end }}
 
-▶ PostgreSQL
-  이 chart 는 PostgreSQL 을 설치하지 않습니다(외부 의존성).
-  {{- if .Values.externalPostgresql.enabled }}
-  외부 DB 연결 정보가 Secret/{{ .Values.externalPostgresql.connectionSecretName }} 에 등록되었습니다(host={{ .Values.externalPostgresql.host }}).
+▶ metaDB (PostgreSQL)
+  이 chart 는 PostgreSQL 을 설치하지 않습니다(외부 의존성). 권장: CloudNativePG(CNPG) provision.
+  {{- if .Values.metaDb.enabled }}
+  muninn-web 에 DATABASE_URL 이 Secret/{{ .Values.metaDb.existingSecret }} (key={{ .Values.metaDb.uriKey }}) 에서 주입됩니다.
   {{- else }}
-  externalPostgresql.enabled=true 로 외부 인스턴스 연결 정보를 등록할 수 있습니다.
+  metaDb.enabled=true + metaDb.existingSecret 로 muninn-web 의 메모리 DB 를 연결하세요.
+  CNPG quickstart: deploy/quickstart/README.md (검색은 텍스트 전용 — pgvector 불필요).
   {{- end }}
 
 자세한 설정은 deploy/helm/muninn/README.md 를 참고하세요.

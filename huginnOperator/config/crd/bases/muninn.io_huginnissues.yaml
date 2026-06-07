@@ -272,6 +272,18 @@ spec:
                 - maxCostUsd
                 - maxIterations
                 type: object
+              issuingUser:
+                description: |-
+                  issuingUser: manual(대화형/CopilotKit) 트리거로 이슈를 개시한 운영자(감사용).
+                  webhook(grafana/airflow/argocd) 출처면 비운다.
+                type: string
+              recalledMemoryIds:
+                description: |-
+                  recalledMemoryIds: 위임 직전 Muninn API 가 회상한 기억 id(감사 추적 + 에이전트 seed).
+                  설계 §3.1/§7 — 회상한 근거 기억을 이슈에 동봉한다.
+                items:
+                  type: string
+                type: array
               retryPolicy:
                 description: 'retryPolicy: 재시도 상한/백오프'
                 properties:
@@ -299,6 +311,10 @@ spec:
                 description: 'suspend: true 면 Operator 가 활성 Run 들을 취소시킨다(operator-design
                   §2.3)'
                 type: boolean
+              userPrompt:
+                description: 'userPrompt: manual 트리거의 원본 운영자 프롬프트(감사·재실행). webhook
+                  이면 비운다.'
+                type: string
             required:
             - agentRef
             - event

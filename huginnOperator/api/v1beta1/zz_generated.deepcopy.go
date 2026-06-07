@@ -347,6 +347,11 @@ func (in *HuginnIssueList) DeepCopyObject() runtime.Object {
 func (in *HuginnIssueSpec) DeepCopyInto(out *HuginnIssueSpec) {
 	*out = *in
 	in.Event.DeepCopyInto(&out.Event)
+	if in.RecalledMemoryIds != nil {
+		in, out := &in.RecalledMemoryIds, &out.RecalledMemoryIds
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	out.InheritedGuardrails = in.InheritedGuardrails
 	if in.InheritedBindings != nil {
 		in, out := &in.InheritedBindings, &out.InheritedBindings
