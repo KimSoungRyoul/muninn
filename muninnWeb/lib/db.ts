@@ -146,30 +146,33 @@ export interface StoreInput {
   changedBy?: string;
 }
 
-/** 기억 저장(insert) + 이력 기록. */
+/** 기억 저장(insert) + 이력 기록. memory·memory_history 는 원자적으로 함께 기록(트랜잭션). */
 export async function store(input: StoreInput): Promise<MemoryRow> {
   await ensureSchema();
   const id = `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const [row] = await db()
-    .insert(memory)
-    .values({
-      id,
-      scope: input.scope ?? (input.appId ? "app" : "global"),
-      appId: input.appId ?? null,
-      appName: input.appName ?? null,
-      fact: input.fact,
-      tags: input.tags ?? [],
-      score: 0.6,
-      curated: input.curated ?? false,
-      sourceRunId: input.sourceRunId ?? null,
-    })
-    .returning();
-  await db().insert(memoryHistory).values({
-    memoryId: id,
-    prevFact: null,
-    newFact: input.fact,
-    changedBy: input.changedBy ?? "agent",
-    reason: "store",
+  const row = await db().transaction(async (tx) => {
+    const [r] = await tx
+      .insert(memory)
+      .values({
+        id,
+        scope: input.scope ?? (input.appId ? "app" : "global"),
+        appId: input.appId ?? null,
+        appName: input.appName ?? null,
+        fact: input.fact,
+        tags: input.tags ?? [],
+        score: 0.6,
+        curated: input.curated ?? false,
+        sourceRunId: input.sourceRunId ?? null,
+      })
+      .returning();
+    await tx.insert(memoryHistory).values({
+      memoryId: id,
+      prevFact: null,
+      newFact: input.fact,
+      changedBy: input.changedBy ?? "agent",
+      reason: "store",
+    });
+    return r;
   });
   return mapRow(row);
 }

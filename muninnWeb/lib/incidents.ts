@@ -59,6 +59,26 @@ export interface IncidentVM {
 const ns = () => k8s.DEFAULT_NAMESPACE;
 const num = (v: unknown): number => (v == null ? 0 : Number(v) || 0);
 
+/**
+ * 보고 입력의 recalledMemoryIds 를 status.recalledMemoryIds(RecalledMemory[]) 로 정규화.
+ * id 가 없는 항목은 버린다(빈/undefined id 가 status 에 들어가지 않게).
+ */
+export function normalizeRecalledMemoryIds(raw: unknown): Array<{ id: string; score?: string; reason?: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((m: any) => {
+      const id = typeof m === "string" ? m : m?.id;
+      if (!id || typeof id !== "string") return null;
+      const obj = typeof m === "object" && m ? m : {};
+      return {
+        id,
+        ...(obj.score != null ? { score: String(obj.score) } : {}),
+        ...(obj.reason ? { reason: String(obj.reason) } : {}),
+      };
+    })
+    .filter((x): x is { id: string; score?: string; reason?: string } => x != null);
+}
+
 function runView(cr: any): RunVM {
   const st = cr?.status ?? {};
   const labels = cr?.metadata?.labels ?? {};

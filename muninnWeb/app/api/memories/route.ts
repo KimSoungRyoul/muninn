@@ -5,7 +5,7 @@
 // DATABASE_URL 미설정 시 mock(HM_DATA)으로 graceful fallback(마이그레이션 중).
 
 import { NextRequest } from "next/server";
-import { ok, created, badRequest } from "@/lib/api";
+import { ok, created, badRequest, serverError } from "@/lib/api";
 import { dbEnabled, listMemories, store } from "@/lib/db";
 import { MEMORIES } from "@/lib/data";
 
@@ -28,8 +28,12 @@ export async function GET(req: NextRequest) {
     return ok({ method: "mock", count: list.length, items: list });
   }
 
-  const items = await listMemories({ scope, appId, query: q, limit });
-  return ok({ method: q ? "keyword" : "recency", count: items.length, items });
+  try {
+    const items = await listMemories({ scope, appId, query: q, limit });
+    return ok({ method: q ? "keyword" : "recency", count: items.length, items });
+  } catch (e) {
+    return serverError("memory 조회 실패", e);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -42,15 +46,19 @@ export async function POST(req: NextRequest) {
   }
   if (!body?.fact || typeof body.fact !== "string") return badRequest("fact(string) 필수");
 
-  const row = await store({
-    fact: body.fact,
-    scope: body.scope,
-    appId: body.app ?? body.appId ?? null,
-    appName: body.appName ?? null,
-    tags: Array.isArray(body.tags) ? body.tags : undefined,
-    sourceRunId: body.sourceRunId ?? body.runName ?? null,
-    curated: Boolean(body.curated),
-    changedBy: body.changedBy ?? "agent",
-  });
-  return created({ stored: row });
+  try {
+    const row = await store({
+      fact: body.fact,
+      scope: body.scope,
+      appId: body.app ?? body.appId ?? null,
+      appName: body.appName ?? null,
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
+      sourceRunId: body.sourceRunId ?? body.runName ?? null,
+      curated: Boolean(body.curated),
+      changedBy: body.changedBy ?? "agent",
+    });
+    return created({ stored: row });
+  } catch (e) {
+    return serverError("memory 저장 실패", e);
+  }
 }

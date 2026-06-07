@@ -7,7 +7,7 @@
 // 의도적으로 제거해 어떤 postgres(또는 CNPG stock 이미지)에서도 동작하게 한다. 의미(시맨틱)
 // 검색은 후속에서 정당화될 때 다시 얹는다.
 
-import { pgTable, text, real, boolean, timestamp, bigserial, index } from "drizzle-orm/pg-core";
+import { pgTable, text, real, boolean, timestamp, bigserial, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const memory = pgTable(
@@ -45,22 +45,27 @@ export const memoryHistory = pgTable("memory_history", {
   changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const incidentLog = pgTable("incident_log", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
-  issueName: text("issue_name"),
-  runName: text("run_name"),
-  appId: text("app_id"),
-  appName: text("app_name"),
-  issuingUser: text("issuing_user"),
-  userPrompt: text("user_prompt"),
-  goal: text("goal"),
-  recalledMemoryIds: text("recalled_memory_ids").array(), // 위임 근거 기억 id(감사 추적)
-  status: text("status"),
-  outcome: text("outcome"),
-  summary: text("summary"),
-  cost: real("cost"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const incidentLog = pgTable(
+  "incident_log",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    issueName: text("issue_name"),
+    runName: text("run_name"),
+    appId: text("app_id"),
+    appName: text("app_name"),
+    issuingUser: text("issuing_user"),
+    userPrompt: text("user_prompt"),
+    goal: text("goal"),
+    recalledMemoryIds: text("recalled_memory_ids").array(), // 위임 근거 기억 id(감사 추적)
+    status: text("status"),
+    outcome: text("outcome"),
+    summary: text("summary"),
+    cost: real("cost"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // 이슈당 사건 이력 1건 보장 → updateIncidentByIssue 가 정확히 1행만 갱신(부분 유니크).
+  (t) => [uniqueIndex("incident_log_issue_uq").on(t.issueName).where(sql`issue_name is not null`)],
+);
 
 export type MemoryRowDb = typeof memory.$inferSelect;

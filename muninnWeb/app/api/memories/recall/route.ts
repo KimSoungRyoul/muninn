@@ -3,7 +3,7 @@
 // agent-runtime 은 MUNINN_MEMORY_ENDPOINT 로 위임 직전 회상에 쓴다(설계 §3.1/§7.1).
 
 import { NextRequest } from "next/server";
-import { ok, badRequest } from "@/lib/api";
+import { ok, badRequest, serverError } from "@/lib/api";
 import { dbEnabled, recall } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -17,6 +17,10 @@ export async function POST(req: NextRequest) {
   } catch {
     return badRequest("invalid JSON body");
   }
-  const rows = await recall(body?.query, { scope: body?.scope, appId: body?.app ?? body?.appId, k: body?.k });
-  return ok({ count: rows.length, items: rows });
+  try {
+    const rows = await recall(body?.query, { scope: body?.scope, appId: body?.app ?? body?.appId, k: body?.k });
+    return ok({ count: rows.length, items: rows });
+  } catch (e) {
+    return serverError("memory recall 실패", e);
+  }
 }

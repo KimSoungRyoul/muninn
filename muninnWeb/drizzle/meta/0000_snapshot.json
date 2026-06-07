@@ -1,5 +1,5 @@
 {
-  "id": "b0285668-6d85-42ce-83ba-c3034ba95807",
+  "id": "f44d1c88-5156-4d81-8c11-236395326aa6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -101,7 +101,24 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "incident_log_issue_uq": {
+          "name": "incident_log_issue_uq",
+          "columns": [
+            {
+              "expression": "issue_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "issue_name is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

@@ -40,6 +40,7 @@ CREATE TABLE "memory_history" (
 	"changed_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX "incident_log_issue_uq" ON "incident_log" USING btree ("issue_name") WHERE issue_name is not null;--> statement-breakpoint
 CREATE INDEX "memory_fact_fts" ON "memory" USING gin (to_tsvector('simple', "fact"));--> statement-breakpoint
 CREATE INDEX "memory_tags_idx" ON "memory" USING gin ("tags");--> statement-breakpoint
 CREATE INDEX "memory_app_idx" ON "memory" USING btree ("app_id");

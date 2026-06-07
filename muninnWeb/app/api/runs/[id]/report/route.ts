@@ -11,7 +11,7 @@
 import { NextRequest } from "next/server";
 import { ok, badRequest } from "@/lib/api";
 import { patchRunStatus, patchIssueStatus, k8sEnabled, DEFAULT_NAMESPACE } from "@/lib/k8s";
-import { getRunStatus } from "@/lib/incidents";
+import { getRunStatus, normalizeRecalledMemoryIds } from "@/lib/incidents";
 import { dbEnabled, updateIncident, updateIncidentByIssue } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -26,17 +26,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return badRequest("invalid JSON body");
   }
 
+  // issueName 은 항상 string 으로만 다룬다(outcome/awaiting/incident 종결의 단일 기준).
+  const issueName = typeof body.issueName === "string" && body.issueName ? body.issueName : null;
+
   // Agent→API 소유 필드만 모은다(나머지는 무시 — operator 소유 침범 금지).
   const status: Record<string, unknown> = {};
   if (body.step != null) status.step = Number(body.step);
   if (body.cost != null) status.cost = String(body.cost); // decimal USD 문자열(CRD float 회피)
   if (body.tokens != null) status.tokens = Number(body.tokens);
   if (typeof body.output === "string") status.output = body.output;
-  if (Array.isArray(body.recalledMemoryIds)) {
-    status.recalledMemoryIds = body.recalledMemoryIds.map((m: any) =>
-      typeof m === "string" ? { id: m } : { id: m.id, ...(m.score != null ? { score: String(m.score) } : {}), ...(m.reason ? { reason: m.reason } : {}) },
-    );
-  }
+  const recalled = normalizeRecalledMemoryIds(body.recalledMemoryIds);
+  if (recalled.length) status.recalledMemoryIds = recalled;
   // API 소유: 승인 요청 전이.
   if (body.requestApproval) {
     status.phase = "AwaitingApproval";
@@ -55,9 +55,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await patchRunStatus(DEFAULT_NAMESPACE, runName, status);
 
   // outcome: 완료 시 "PR #842" / dry-run "DRY-RUN PR: ..."(Agent→API 소유, Issue status).
-  if (typeof body.outcome === "string" && body.issueName) {
+  if (typeof body.outcome === "string" && issueName) {
     try {
-      await patchIssueStatus(DEFAULT_NAMESPACE, String(body.issueName), { outcome: body.outcome });
+      await patchIssueStatus(DEFAULT_NAMESPACE, issueName, { outcome: body.outcome });
     } catch {
       // outcome 집계 실패는 보고를 막지 않는다.
     }
@@ -65,8 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   // 사건 이력(metaDB) 동기화 — 비용/요약/결과/단계 기록. 회수 폐루프(설계 §7.3):
   // 에이전트는 incidentId 를 모르지만 issueName(MUNINN_ISSUE_NAME)은 아므로, issueName 으로 종결한다.
-  const issueNameForIncident = typeof body.issueName === "string" ? body.issueName : null;
-  if (dbEnabled() && (body.incidentId != null || issueNameForIncident)) {
+  if (dbEnabled() && (body.incidentId != null || issueName)) {
     const incidentStatus = body.final ? (body.failed ? "failed" : "succeeded")
       : body.requestApproval ? "awaiting-approval" : "running";
     const patch = {
@@ -78,16 +77,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     };
     try {
       if (body.incidentId != null) await updateIncident(Number(body.incidentId), patch);
-      else if (issueNameForIncident) await updateIncidentByIssue(issueNameForIncident, patch);
+      else if (issueName) await updateIncidentByIssue(issueName, patch);
     } catch {
       // 이력 갱신 실패는 보고 자체를 막지 않는다.
     }
   }
 
   // Issue 가 AwaitingApproval 을 집계하도록(선택) — Issue status 도 API 소유 전이.
-  if (body.requestApproval && body.issueName) {
+  if (body.requestApproval && issueName) {
     try {
-      await patchIssueStatus(DEFAULT_NAMESPACE, String(body.issueName), { phase: "AwaitingApproval" });
+      await patchIssueStatus(DEFAULT_NAMESPACE, issueName, { phase: "AwaitingApproval" });
     } catch {
       // 집계 실패는 무시(operator 가 Run 들로 재집계).
     }

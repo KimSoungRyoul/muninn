@@ -226,9 +226,13 @@ async def run_live() -> int:
     goal = os.environ["MUNINN_GOAL"]
     pr_mode = _pr_mode()
     g = _guardrails()
+    # 주입됐으나 파싱 실패(빈 dict)면 보수적 안전 한도 — 무제한 예산으로 폭주 방지.
+    if os.getenv("MUNINN_GUARDRAILS", "") and not g:
+        log("WARN: MUNINN_GUARDRAILS 파싱 실패 → 보수적 기본 한도(maxIterations=6, maxCostUsd=2) 적용")
+        g = {"maxIterations": 6, "maxCostUsd": 2}
     max_turns = int(g.get("maxIterations", 12) or 12)
     max_cost = g.get("maxCostUsd")
-    max_budget = float(max_cost) if max_cost else None  # 0/None=무제한
+    max_budget = float(max_cost) if max_cost else None  # 0/None=무제한(가드레일이 명시한 경우)
     options = build_options(max_turns=max_turns, max_budget_usd=max_budget)
 
     # 1) 회상(recall) — 위임 직전, Muninn 메모리에서 관련 과거 사건/해결을 가져와 컨텍스트로 주입(설계 §3.1).
@@ -240,9 +244,17 @@ async def run_live() -> int:
         prompt = f"{goal}\n\n[회상된 Muninn 메모리(참고)]\n{facts}"
         log(f"recall: {len(recalled)}건 회상 → 컨텍스트 주입")
     # 회상 결과를 status 에 기록(Agent→API 소유). phase 는 operator 가 소유하므로 건드리지 않는다.
+    # score 가 None 이면 "None" 문자열이 들어가지 않게 생략한다.
+    recalled_payload = []
+    for m in recalled:
+        if isinstance(m, dict) and m.get("id"):
+            item = {"id": m["id"]}
+            if m.get("score") is not None:
+                item["score"] = str(m["score"])
+            recalled_payload.append(item)
     _report({
         "step": 0,
-        "recalledMemoryIds": [{"id": m.get("id"), "score": str(m.get("score"))} for m in recalled if isinstance(m, dict) and m.get("id")],
+        "recalledMemoryIds": recalled_payload,
     })
 
     log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, pr_mode={pr_mode}, goal={goal[:120]!r}")
