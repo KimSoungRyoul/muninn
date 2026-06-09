@@ -1,10 +1,8 @@
 # CLAUDE.md
 
-이 저장소에서 작업하는 Claude Code 를 위한 가이드. (전체 소개 + Quick Start 는 `README.md` 참고. 이 파일은 gotcha/계약 계층이다.)
+전체 소개 + Quick Start 는 `README.md`. 이 파일은 gotcha/계약 계층이다.
 
 ## 개요
-
-Muninn DevOps Agent Platform — 인프라 알람(Grafana/Airflow/ArgoCD)이 Claude 에이전트를 트리거하면, 에이전트가 문제를 진단하고 PR/Issue 를 연다. 두 마리 "까마귀": **Huginn**(Agent Plane — 이벤트마다 에이전트 실행)과 **Muninn**(memory + control + console).
 
 독립적으로 빌드되는 세 컴포넌트 + 권위 있는 스펙(spec)으로 구성된 모노레포:
 
@@ -19,16 +17,7 @@ Muninn DevOps Agent Platform — 인프라 알람(Grafana/Airflow/ArgoCD)이 Cla
 
 ## 아키텍처 (파일을 가로지르는 부분)
 
-**CRD 계층 & 제어 흐름** (`muninn.io/v1beta1`):
-
-```
-event ─▶ Muninn API (normalize + dedup) ─▶ HuginnIssue CR
-   ─▶ HuginnIssue controller creates HuginnRun (attempt N)
-   ─▶ HuginnRun controller creates K8s Job → Pod (agent-runtime image)
-   ─▶ Pod runs claude_skill.sh → claude-agent-sdk loop ─▶ PR / GitHub Issue
-```
-
-`HuginnAgent` = 관리 대상 앱 하나. `HuginnIssue` = 이벤트 하나. `HuginnRun` = 실행 하나. 오퍼레이터는 Job 만 생성하고, 에이전트 프로세스와 Muninn API 가 진행 상황을 `HuginnRun.status` 로 보고한다. Kind 는 `HuginnAgent` / `HuginnIssue` / `HuginnRun` (이벤트 CR 은 Claude SDK 의 "session" 과 충돌을 피하려고 `HuginnSession` 이 **아니라** `HuginnIssue` 다. 다이어그램의 `huggin`/`hugginSession` 은 **Huginn** 으로 정규화됨).
+**CR 네이밍 (`muninn.io/v1beta1`).** Kind 는 `HuginnAgent`(관리 대상 앱) / `HuginnIssue`(이벤트) / `HuginnRun`(실행). 이벤트 CR 은 Claude SDK 의 "session" 과 충돌을 피하려고 `HuginnSession` 이 **아니라** `HuginnIssue` 다. 다이어그램의 `huggin`/`hugginSession` 은 **Huginn** 으로 정규화됨.
 
 **Status 필드 소유권 (`HuginnRunStatus`) — 위반 금지** (`operator-design.md §2.2`). 세 writer 로 나뉜다:
 - **Operator**: `phase` / `startedAt` / `finishedAt` / `durationSeconds` / `jobName` / caps / `conditions`
@@ -49,36 +38,26 @@ event ─▶ Muninn API (normalize + dedup) ─▶ HuginnIssue CR
 
 ## 명령어
 
-**루트 `Makefile`** — 모노레포 전역 + 로컬 풀스택. 하위로 위임하는 일관 어휘(`build`·`image`·`lint`·`test`) + `run-local`(Podman 기본):
-```bash
-make run-local             # kind 생성 + 이미지 3종 빌드/적재 + metaDB(postgres) + helm install (클러스터 *안* 전체 기동)
-make images / status / down
-make help
-# 코파일럿/agent 까지: CLAUDE_CODE_OAUTH_TOKEN=... make run-local
-```
-`run-local` ≠ operator 의 `run-kind`: run-local 은 operator 까지 helm 으로 클러스터 *안* 배포, run-kind 는 operator 를 host `go run` 으로 클러스터 *밖* 실행.
+**루트 `Makefile`** — `make run-local` / `images` / `status` / `down` / `help`. 코파일럿/agent 까지 가려면 `CLAUDE_CODE_OAUTH_TOKEN=... make run-local`. `run-local` ≠ operator 의 `run-kind`: run-local 은 operator 까지 helm 으로 클러스터 *안* 배포, run-kind 는 operator 를 host `go run` 으로 클러스터 *밖* 실행.
 
-**huginnOperator/** (Go) — 표준 kubebuilder 타깃은 `make help` 로. 비자명한 부분:
+**huginnOperator/** (Go) — 표준 kubebuilder 타깃은 `make help`. 비자명한 부분:
 ```bash
 make manifests generate    # api/*_types.go 나 +kubebuilder 마커 수정 후 필수
-make run                   # 로컬에선 ENABLE_WEBHOOKS=false 설정 (webhook 은 인증서 필요)
+make run                   # 로컬에선 ENABLE_WEBHOOKS=false
 go test ./internal/controller/ -run TestBuildJobTemplate -count=1   # 순수 단위 테스트, envtest 불필요
-# kind 로컬 e2e (operator 는 host 에서 실행):
-make run-kind CONTAINER_TOOL=podman    # kind + CRD + agent-runtime 이미지 적재 + operator 실행
+make run-kind CONTAINER_TOOL=podman    # kind + CRD + agent-runtime 이미지 적재 + operator(host 에서) 실행
 #   그다음 다른 셸에서 — 인증 Secret + 예제 CR 적용 (ns ns-huginn-e2e):
 kubectl -n ns-huginn-e2e create secret generic agent-secrets --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
 kubectl apply -f ../huginnAgentRuntime/examples/kind-e2e.yaml
-make test-e2e              # 격리된 e2e (클러스터 huginnoperator-test-e2e); CONTAINER_TOOL 안 씀
-# ⚠️ operator Makefile 은 CONTAINER_TOOL=docker 가 기본 — 빌드 타깃(run-kind)엔 CONTAINER_TOOL=podman 명시
+make test-e2e              # 격리된 e2e (별도 클러스터 huginnoperator-test-e2e; CONTAINER_TOOL 무시)
 ```
 
-**huginnAgentRuntime/** (이미지): `make image`(빌드), `make selftest` / `make test`(오프라인 배선 점검). CI 는 `.github/workflows/agent-runtime-image.yml` 로 publish(PR = 빌드만, main/tag = multi-arch push).
+**huginnAgentRuntime/** (이미지): `make image`(빌드), `make selftest` / `make test`(오프라인 tool+SDK 배선 점검). CI 는 `.github/workflows/agent-runtime-image.yml` 로 publish(PR=빌드만, main/tag=multi-arch push).
 
-**muninnWeb/** (Next.js, 포트 3030): `make install`(pnpm, frozen lockfile), `make dev`, `make lint`, `make image`. `make build` / `make test` = `next build` = tsc 타입체크 게이트. ⚠️ `make dev` 중에 `make build` 금지(`.next` 손상). 코파일럿엔 `CLAUDE_CODE_OAUTH_TOKEN` 또는 `ANTHROPIC_API_KEY` 필요. 선택적 `COPILOT_MODEL`(기본 `claude-haiku-4-5-20251001`), 라우트 `/api/copilotkit`.
+**muninnWeb/** (Next.js, 포트 3030): ⚠️ `make dev` 중에 `make build` 금지(`.next` 손상). 코파일럿엔 `CLAUDE_CODE_OAUTH_TOKEN` 또는 `ANTHROPIC_API_KEY` 필요. 선택적 `COPILOT_MODEL`(기본 `claude-haiku-4-5-20251001`), 라우트 `/api/copilotkit`.
 
 ## 규약
 
-- **Docker 아닌 Podman** — kind 는 `KIND_EXPERIMENTAL_PROVIDER=podman` 사용. root/web/runtime Makefile 은 podman 이 기본이지만 **operator 타깃은 `docker` 가 기본**이므로 `CONTAINER_TOOL=podman` 을 넘겨라.
+- **operator 타깃은 `CONTAINER_TOOL=docker` 가 기본** — root/web/runtime Makefile 은 podman 이 기본이므로 operator 타깃엔 `CONTAINER_TOOL=podman` 을 명시하라.
 - **이미지 레지스트리**는 메인테이너의 GHCR 네임스페이스(`ghcr.io/kimsoungryoul/muninn/*`)로 publish 한다. 중립 placeholder(`acme` 등)는 CR·mock 데이터의 예제 org/repo/host 이름에만 쓴다.
-- **kubebuilder 생성 파일은 손대지 마라**(`config/crd/bases/*`, `config/rbac/role.yaml`, `**/zz_generated.*`, `PROJECT`) — `make manifests generate` 로 재생성하고 직접 편집 금지. 전체 kubebuilder 메커니즘은 `huginnOperator/AGENTS.md` 참고.
-- 아키텍처 다이어그램 원본: `muninn아키텍처.drawio`(두 페이지: 원 설계 + "현재 구현"). `muninnAgentPlatform_architecture.png` 는 렌더된 스냅샷.
+- **kubebuilder 생성 파일은 손대지 마라**(`config/crd/bases/*`, `config/rbac/role.yaml`, `**/zz_generated.*`, `PROJECT`) — `make manifests generate` 로 재생성. 전체 kubebuilder 메커니즘은 `huginnOperator/AGENTS.md` 참고.
