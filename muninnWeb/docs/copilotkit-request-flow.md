@@ -26,7 +26,9 @@ Claude(Anthropic API)까지 가고 응답이 돌아오는지 설명한다. **mun
 │ ① BROWSER (localhost:3030, <CopilotSidebar>)                         │
 │    프롬프트 + 같이 동봉되는 것:                                       │
 │      • useAgentContext(...) → 현재 워크스페이스/앱/런/대시보드 상태   │
-│      • useFrontendTool(...) → 도구 "정의"만 (list_runs, approve_run…) │
+│      • useFrontendTool(...) → 네비게이션 도구 "정의"만               │
+│           (open_app, open_run, go_to, switch_workspace)              │
+│        ※ 데이터/상태 도구는 여기 없다 — 전부 server tool(②).         │
 └───────────────┬─────────────────────────────────────────────────────┘
                 │  POST /api/copilotkit   (Accept: text/event-stream)
                 │  {
@@ -38,9 +40,10 @@ Claude(Anthropic API)까지 가고 응답이 돌아오는지 설명한다. **mun
 ┌─────────────────────────────────────────────────────────────────────┐
 │ ② NEXT.js 서버 라우트  app/api/copilotkit/route.ts  (Node 런타임)    │
 │    copilotRuntimeNextJSAppRouterEndpoint                              │
-│      → CopilotRuntime → BuiltInAgent(classic)                         │
-│          · system prompt + context + tools 를 합쳐 프롬프트 빌드      │
+│      → CopilotRuntime → BuiltInAgent(classic, tools=muninnServerTools)│
+│          · system prompt + context + (server+frontend) tools 합쳐 빌드│
 │          · Vercel AI SDK  streamText({ model: anthropic("haiku-4-5")})│
+│          · server tool 실행도 여기 서버에서(K8s CR·postgres 접근)     │
 │                                                                       │
 │    @ai-sdk/anthropic provider → "oauthFetch" 가 헤더를 교체:          │
 │          ✗ x-api-key                         (제거)                   │
@@ -57,12 +60,18 @@ Claude(Anthropic API)까지 가고 응답이 돌아오는지 설명한다. **mun
                 ▼  text/event-stream (SSE) 로 브라우저에 push
         RUN_STARTED → TEXT_MESSAGE_* → TOOL_CALL_START/ARGS/END → RUN_FINISHED
                 │
-                │  ④ tool_use 가 오면 → 도구는 "브라우저에서" 실행
+                │  ④ tool_use 가 오면 → 도구 종류에 따라 실행 위치가 갈린다:
                 ▼
-        useFrontendTool("list_runs") 핸들러 (클라이언트에서 실행)
-          └─ HM_DATA(lib/data) 조회 → 결과 문자열 반환
-                │
-                │  ⑤ 결과를 messages 에 덧붙여 ①~③ 다시 1바퀴
+   ┌──────────────────────────────┬──────────────────────────────────────┐
+   │ server tool (데이터/상태)     │ frontend tool (네비게이션)            │
+   │ list_runs·recall_memory·      │ open_app·open_run·go_to·             │
+   │ delegate_incident 등 11종      │ switch_workspace                      │
+   │ → ② 서버에서 실행             │ → 브라우저에서 실행(useRouter 라우팅) │
+   │   (lib/copilot-tools.ts;       │   (components/muninn-copilot.tsx)     │
+   │    lib/incidents.ts·db.ts 경유 │                                       │
+   │    실 K8s CR·postgres 조회)    │                                       │
+   └──────────────────────────────┴──────────────────────────────────────┘
+                │  ⑤ 도구 결과를 messages 에 덧붙여 ①~③ 다시 1바퀴
                 ▼
         Claude 가 도구 결과를 받아 최종 답변(한국어 표) 생성 → SSE 로 렌더
 ```
@@ -70,24 +79,30 @@ Claude(Anthropic API)까지 가고 응답이 돌아오는지 설명한다. **mun
 ## 꼭 기억할 2가지
 
 ```
-  (1) 도구 실행은 "브라우저"에서          (2) OAuth 토큰은 서버 밖으로 안 나감
-  ───────────────────────────           ─────────────────────────────────
-  서버는 Claude의 "list_runs 부르고       브라우저 → /api/copilotkit 만 호출.
-  싶다"(tool_use)만 받아 브라우저로        Bearer 토큰 주입은 ②의 서버측
-  넘기고, 실제 데이터 조회(HM_DATA)는      oauthFetch 안에서만 발생.
-  클라이언트 핸들러가 함.                  → 토큰이 클라이언트로 전달되지 않음.
-  그래서 한 번 더 왕복(①~③)이 생김.
+  (1) 데이터/상태 도구는 "서버"에서        (2) OAuth 토큰은 서버 밖으로 안 나감
+  ───────────────────────────────         ─────────────────────────────────
+  K8s CR·postgres 를 만지는 도구(11종)는   브라우저 → /api/copilotkit 만 호출.
+  전부 server tool(defineTool)로 ② 서버    Bearer 토큰 주입은 ②의 서버측
+  에서 실행된다(실데이터). 브라우저에는    oauthFetch 안에서만 발생.
+  네비게이션 frontend tool 4종만 남는다.   → 토큰이 클라이언트로 전달되지 않음.
+  → K8s 자격·DB 는 서버 경계 안에만 있다.
 ```
+
+> **승인/거절은 코파일럿이 하지 않는다.** `approve_run`/`reject_run` 은 server tool 에서 의도적으로
+> 제거됐다(자율 승인 게이트, 메인 스펙 §6.6). 운영자 승인은 콘솔 전용 라우트
+> (`/api/runs/[id]/approve|reject`) + 콘솔 UI 로만 가능하며, 코파일럿은 `open_run` 으로 안내만 한다.
 
 ## 각 단계 ↔ 소스 파일 매핑
 
 | 단계 | 무엇 | 파일 |
 |------|------|------|
-| ① 사이드바 + context + 도구 정의 | `<CopilotSidebar>`, `useAgentContext`, `useFrontendTool` | `components/muninn-copilot.tsx` |
+| ① 사이드바 + context + 네비게이션 도구 | `<CopilotSidebar>`, `useAgentContext`, `useFrontendTool`(open_app/open_run/go_to/switch_workspace) | `components/muninn-copilot.tsx` |
 | ① provider | `<CopilotKit runtimeUrl=...>` | `components/copilot-root.tsx` |
-| ② 런타임 엔드포인트 | `CopilotRuntime` + `BuiltInAgent(classic)` + `streamText` | `app/api/copilotkit/route.ts` |
+| ② 런타임 엔드포인트 | `CopilotRuntime` + `BuiltInAgent(classic, tools=muninnServerTools)` + `streamText` | `app/api/copilotkit/route.ts` |
+| ② server tools(데이터/상태 11종) | `defineTool` recall/store/summarize/list/query/delegate/get_*(승인/거절은 제외) | `lib/copilot-tools.ts` |
+| ② server tool 데이터 접근 | K8s CR·postgres 조회/패치 | `lib/incidents.ts`, `lib/db.ts`, `lib/k8s.ts` |
 | ② OAuth 주입 | `createAnthropic({ fetch: oauthFetch })` | `lib/copilot-anthropic.ts` |
-| ② system prompt | 코파일럿 기본 지침 | `lib/copilot-system.ts` |
+| ② system prompt | 코파일럿 기본 지침(승인은 콘솔 전용 명시) | `lib/copilot-system.ts` |
 | (진단) | OAuth→Anthropic 왕복 점검 GET | `app/api/copilotkit/selftest/route.ts` |
 
 ## 단일 라우트 프로토콜 (테스트용)

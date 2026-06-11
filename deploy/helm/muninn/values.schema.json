@@ -137,6 +137,15 @@
           "properties": { "create": { "type": "boolean" } }
         },
         "namespaceOverride": { "type": "string" },
+        "workspace": { "type": "string" },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "issuer": { "type": "string" },
+            "audience": { "type": "string" },
+            "jwksUri": { "type": "string" }
+          }
+        },
         "ingress": {
           "type": "object",
           "properties": {

@@ -143,6 +143,24 @@ web:
   # CR 이 사는 namespace(MUNINN_NAMESPACE). 비우면 릴리스 namespace 를 쓴다.
   namespaceOverride: ""
 
+  # 멀티테넌시(CONTRACT §2): 워크스페이스 = K8s 네임스페이스. 요청 컨텍스트(헤더
+  # x-muninn-workspace / ?workspace= / body.workspace)에서 workspace 를 결정하고,
+  # 없으면 이 값(MUNINN_WORKSPACE)으로 폴백한다(lib/workspace.ts·lib/db.ts). 메모리
+  # recall/store/list 가 이 workspace 로 필터된다. 비우면 릴리스 namespace 를 쓴다.
+  workspace: ""
+
+  # OIDC(CONTRACT §1) — 사람용 콘솔 경로(운영자 승인/거절/위임)의 JWT 검증(lib/auth.ts).
+  # issuer 가 설정되면 활성화되어 Bearer JWT 를 JWKS 로 검증(issuer/audience/exp)한다.
+  # 에이전트→API 경로는 계속 정적 토큰(apiToken)을 쓴다 — JWT 실패 시 정적 토큰으로 폴백.
+  # 셋 다 비우면 OIDC 비활성(정적 토큰만; 그것도 없으면 dev 모드 경고).
+  oidc:
+    # OIDC issuer URL (예: https://login.example.com/realms/muninn). 비우면 OIDC off.
+    issuer: ""
+    # 토큰 aud 클레임 검증 값. 비우면 audience 검증 생략.
+    audience: ""
+    # JWKS 엔드포인트. 비우면 issuer 의 /.well-known/jwks.json 으로 자동 디스커버리.
+    jwksUri: ""
+
   ingress:
     enabled: false
     className: ""
@@ -197,6 +215,18 @@ agent:
   #     --from-literal=muninn-api-token="$(openssl rand -hex 32)"
   secrets:
     name: agent-secrets
+
+  # ─── 멀티테넌시 / 승인 루프 — 참고(operator 가 Job env 로 주입; helm 직접 배선 아님) ───
+  # MUNINN_WORKSPACE(멀티테넌시 경계, CONTRACT §2): 워크스페이스 = K8s 네임스페이스. operator 가
+  #   muninn.io/workspace 라벨(agent→issue→run 전파)을, 누락 시 run.Namespace 를 폴백으로 Job 에
+  #   주입한다(huginnrun_controller.go runScopedEnv). helm 은 이 값을 직접 제어하지 않는다.
+  #
+  # 승인 루프(HITL, CONTRACT §3) — runner.py 가 읽는 env. PR/위험작업 직전 승인을 받고 폴링한다:
+  #   MUNINN_REQUIRE_APPROVAL=1     승인 게이트 활성(미설정 시 guardrails.requireApproval 폴백, 기본 off)
+  #   MUNINN_APPROVAL_POLL_SECONDS  approval.state 폴링 간격(기본 10초)
+  #   MUNINN_APPROVAL_TIMEOUT       대기 한도 초; 초과 시 Expired 로 정상 중단(기본 1800초)
+  # 현재 operator 는 이 셋을 helm values 에서 받아 Job 에 전달하는 경로가 없다(operator 프로세스
+  # env 또는 CR guardrails 로 제어). 별도 전달 경로가 생기면 여기 values 로 노출한다.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CRD 설치 — Helm 의 crds/ 디렉토리로 관리된다.

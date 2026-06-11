@@ -69,6 +69,25 @@ spec:
             # CR 이 사는 namespace(lib/k8s.ts DEFAULT_NAMESPACE). 기본=릴리스 namespace.
             - name: MUNINN_NAMESPACE
               value: {{ .Values.web.namespaceOverride | default .Release.Namespace | quote }}
+            # 멀티테넌시(CONTRACT §2): 워크스페이스=네임스페이스. 요청에 헤더 x-muninn-workspace/
+            # ?workspace= 가 없을 때의 폴백(lib/workspace.ts·lib/db.ts). 기본=릴리스 namespace.
+            - name: MUNINN_WORKSPACE
+              value: {{ .Values.web.workspace | default .Release.Namespace | quote }}
+            {{- if .Values.web.oidc.issuer }}
+            # OIDC(CONTRACT §1): 사람용 콘솔 경로(운영자 승인/거절/위임)는 운영자 SSO JWT 를
+            # JWKS 로 검증한다(lib/auth.ts). issuer 가 설정되면 활성 — JWKS_URI 미설정 시
+            # issuer 의 .well-known/jwks.json 으로 디스커버리. audience 는 토큰 aud 검증용.
+            - name: MUNINN_OIDC_ISSUER
+              value: {{ .Values.web.oidc.issuer | quote }}
+            {{- if .Values.web.oidc.audience }}
+            - name: MUNINN_OIDC_AUDIENCE
+              value: {{ .Values.web.oidc.audience | quote }}
+            {{- end }}
+            {{- if .Values.web.oidc.jwksUri }}
+            - name: MUNINN_OIDC_JWKS_URI
+              value: {{ .Values.web.oidc.jwksUri | quote }}
+            {{- end }}
+            {{- end }}
             # Muninn API 인증 토큰(lib/auth.ts). agent(runner.py)·operator 와 동일 토큰이어야 한다.
             # 기본은 agent-secrets 의 muninn-api-token 키(operator 가 agent Job 에 주입하는 것과 동일).
             # 키가 없으면 optional=true 라 빈 값 → web 은 dev 모드(인증 비활성+경고)로 동작한다.

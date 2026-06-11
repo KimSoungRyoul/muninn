@@ -1,8 +1,10 @@
-# huginnOperator(Go operator) CI — 빌드 + lint + 단위/envtest 테스트 + 생성물 동기화 가드.
+# huginnOperator(Go operator) CI — 빌드 + lint + 단위/envtest 테스트 + 생성물 동기화 가드 + 취약점 스캔.
 #   - PR / main 푸시: huginnOperator/** , deploy/helm/** , 또는 이 워크플로 변경 시 실행.
 #   - `make lint` 는 커스텀 golangci-lint(logcheck 플러그인 포함)를 빌드해 실행.
+#     custom-gcl 빌드는 go.mod 의 go 버전(현재 1.26)을 요구하므로 setup-go 는 go-version-file 로 정확히 맞춘다.
 #   - `make test` 는 manifests/generate/fmt/vet + envtest(etcd/kube-apiserver 자동 다운로드)를 수행.
-# 보안 강화 후속: uses 를 커밋 SHA 로 핀(현재 major 태그). github-actions Dependabot 이 SHA 핀 갱신을 자동화한다.
+#   - govulncheck: 실호출(reachable) HIGH 취약점 발견 시 실패(기본 동작). deps 최신화로 노출 차단.
+# uses 는 커밋 SHA 로 핀(태그 주석 병기). github-actions Dependabot 이 SHA 핀 갱신을 자동화한다.
 name: operator-ci
 
 on:
@@ -34,10 +36,12 @@ jobs:
         working-directory: huginnOperator
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
+      # go-version-file 로 go.mod(go 1.26)를 그대로 따른다 — custom-gcl(make lint)이 "go1.25 < 1.26" 으로
+      # 실패하지 않도록 toolchain 을 go.mod 와 정확히 일치시킨다.
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: huginnOperator/go.mod
           cache-dependency-path: huginnOperator/go.sum
@@ -47,6 +51,13 @@ jobs:
 
       - name: Lint
         run: make lint
+
+      # govulncheck: 호출 그래프 기반으로 실제 도달 가능한(reachable) 취약점만 실패시킨다(기본 동작).
+      #   설치 취약점이 있어도 호출되지 않으면 통과 → 스푸리어스 red 최소화. continue-on-error 두지 않음(신뢰성).
+      - name: Vulnerability scan (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
       - name: Test (unit + envtest)
         run: make test
@@ -63,10 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
 
       - name: Helm lint
         run: helm lint deploy/helm/muninn

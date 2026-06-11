@@ -30,6 +30,13 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
     kubectl -n {{ .Release.Namespace }} create secret generic muninn-web-secrets \
       --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
   {{- end }}
+  워크스페이스(멀티테넌시 §2) = MUNINN_WORKSPACE = {{ .Values.web.workspace | default .Release.Namespace }} (요청 헤더 x-muninn-workspace 로 override).
+  {{- if .Values.web.oidc.issuer }}
+  ✅ OIDC 활성(issuer={{ .Values.web.oidc.issuer }}): 운영자 콘솔 경로(승인/거절/위임)는 SSO JWT 를 JWKS 로 검증합니다.
+  {{- else }}
+  운영자 콘솔 SSO 를 쓰려면 OIDC 를 활성화하세요(미설정 시 정적 토큰만 사용):
+    --set web.oidc.issuer=https://<idp>/realms/muninn --set web.oidc.audience=muninn-web
+  {{- end }}
 {{- end }}
 
 {{- if and .Values.operator.enabled .Values.agent.serviceAccount.create }}

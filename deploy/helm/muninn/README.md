@@ -111,7 +111,11 @@ CRD 는 Helm 의 `crds/` 디렉토리로 관리된다(원본: `huginnOperator/co
 | `web.enabled` | `true` | 콘솔 설치 |
 | `web.image.repository/tag` | `ghcr.io/kimsoungryoul/muninn/muninn-web`/`dev` | 콘솔 이미지 |
 | `web.auth.existingSecret` | `""` | CopilotKit 자격 Secret 이름 |
-| `web.apiToken.existingSecret/key` | `""`(→agent.secrets.name)/`muninn-api-token` | Muninn API Bearer 토큰 소스(상태변경 라우트 인증) |
+| `web.apiToken.existingSecret/key` | `""`(→agent.secrets.name)/`muninn-api-token` | Muninn API Bearer 토큰 소스(에이전트→API 정적 토큰 인증) |
+| `web.workspace` | `""`(→릴리스 ns) | `MUNINN_WORKSPACE` 폴백 — 멀티테넌시 워크스페이스=네임스페이스(§2). 헤더 `x-muninn-workspace` 로 override |
+| `web.oidc.issuer` | `""` | OIDC 활성화 트리거 — 운영자 콘솔(승인/거절/위임) JWT 검증(§1). 비우면 OIDC off |
+| `web.oidc.audience` | `""` | 토큰 `aud` 검증 값(비우면 생략) |
+| `web.oidc.jwksUri` | `""` | JWKS 엔드포인트(비우면 issuer 의 `/.well-known/jwks.json` 자동 디스커버리) |
 | `web.serviceAccount.automount` | `true` | SA 토큰 마운트(K8s 연동 필수 — create 와 분리) |
 | `web.ingress.enabled` | `false` | 콘솔 Ingress |
 | `metaDb.enabled` | `false` | true 면 web 에 DATABASE_URL 주입(메모리 영속) |
