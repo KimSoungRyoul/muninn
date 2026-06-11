@@ -58,12 +58,17 @@ spec:
           metadata:
             type: object
           spec:
-            description: HuginnIssueSpec defines the desired state of HuginnIssue.
+            description: |-
+              HuginnIssueSpec defines the desired state of HuginnIssue.
+              생성 후 불변(이벤트 1건 = Issue 1개; 재시도는 새 attempt Run): agentRef/event/inheritedGuardrails 는 CEL 로 immutable.
             properties:
               agentRef:
                 description: 'agentRef: 부모 HuginnAgent 의 metadata.name(도메인상 "Application").'
                 minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: agentRef is immutable
+                  rule: self == oldSelf
               event:
                 description: 'event: 정규화된 이벤트 페이로드(§4.3)'
                 properties:
@@ -107,6 +112,9 @@ spec:
                 - severity
                 - source
                 type: object
+                x-kubernetes-validations:
+                - message: event is immutable
+                  rule: self == oldSelf
               goal:
                 description: 'goal: event 단위 불변 컨텍스트(§8.6)'
                 type: string
@@ -210,7 +218,6 @@ spec:
                           instance:
                             type: string
                         required:
-                        - backend
                         - instance
                         type: object
                       tempo:
@@ -252,7 +259,7 @@ spec:
                 type: object
               inheritedGuardrails:
                 description: 'inheritedGuardrails: HuginnAgent.spec.guardrails 에서
-                  복사(§3.2)'
+                  복사(§3.2). 생성 후 불변(Run 이 caps 로 1회 복사).'
                 properties:
                   maxCostUsd:
                     format: int32
@@ -272,6 +279,9 @@ spec:
                 - maxCostUsd
                 - maxIterations
                 type: object
+                x-kubernetes-validations:
+                - message: inheritedGuardrails is immutable
+                  rule: self == oldSelf
               issuingUser:
                 description: |-
                   issuingUser: manual(대화형/CopilotKit) 트리거로 이슈를 개시한 운영자(감사용).
@@ -301,7 +311,9 @@ spec:
                     description: |-
                       maxRuns: 세션이 만들 수 있는 Run 총개수 상한(operator-design §2.1).
                       Job backoffLimit 이 아니라 attempt 별 HuginnRun 생성 상한이다.
+                      Maximum=10: backoff 지수(1<<attempt) overflow/폭주 방지(huginnissue_controller.backoffReady 가드와 짝).
                     format: int32
+                    maximum: 10
                     minimum: 1
                     type: integer
                 required:
@@ -328,10 +340,18 @@ spec:
               approval:
                 description: 'approval: AwaitingApproval 시 승인 메타 집계(§6.4)'
                 properties:
+                  decidedAt:
+                    description: 'decidedAt: 승인/거절 결정 시각(ISO8601). Muninn API(approve/reject
+                      route)가 기록(§6.4).'
+                    format: date-time
+                    type: string
                   decidedBy:
                     type: string
                   expiresAt:
                     format: date-time
+                    type: string
+                  reason:
+                    description: 'reason: 거절 사유(reject 시). Muninn API 가 기록(§6.4).'
                     type: string
                   reasons:
                     items:

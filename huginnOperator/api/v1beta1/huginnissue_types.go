@@ -66,8 +66,10 @@ type BackoffPolicy string
 type RetryPolicy struct {
 	// maxRuns: 세션이 만들 수 있는 Run 총개수 상한(operator-design §2.1).
 	// Job backoffLimit 이 아니라 attempt 별 HuginnRun 생성 상한이다.
+	// Maximum=10: backoff 지수(1<<attempt) overflow/폭주 방지(huginnissue_controller.backoffReady 가드와 짝).
 	// +kubebuilder:default=3
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10
 	MaxRuns int32 `json:"maxRuns"`
 	// +kubebuilder:default=exponential
 	// +optional
@@ -75,12 +77,15 @@ type RetryPolicy struct {
 }
 
 // HuginnIssueSpec defines the desired state of HuginnIssue.
+// 생성 후 불변(이벤트 1건 = Issue 1개; 재시도는 새 attempt Run): agentRef/event/inheritedGuardrails 는 CEL 로 immutable.
 type HuginnIssueSpec struct {
 	// agentRef: 부모 HuginnAgent 의 metadata.name(도메인상 "Application").
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="agentRef is immutable"
 	AgentRef string `json:"agentRef"`
 
 	// event: 정규화된 이벤트 페이로드(§4.3)
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="event is immutable"
 	Event NormalizedEvent `json:"event"`
 
 	// goal: event 단위 불변 컨텍스트(§8.6)
@@ -98,7 +103,8 @@ type HuginnIssueSpec struct {
 	// +optional
 	RecalledMemoryIds []string `json:"recalledMemoryIds,omitempty"`
 
-	// inheritedGuardrails: HuginnAgent.spec.guardrails 에서 복사(§3.2)
+	// inheritedGuardrails: HuginnAgent.spec.guardrails 에서 복사(§3.2). 생성 후 불변(Run 이 caps 로 1회 복사).
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="inheritedGuardrails is immutable"
 	InheritedGuardrails InheritedGuardrails `json:"inheritedGuardrails"`
 	// inheritedBindings: HuginnAgent.spec.bindings 스냅샷
 	// +optional

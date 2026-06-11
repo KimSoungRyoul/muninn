@@ -27,11 +27,16 @@ Muninn DevOps Agent Platform 을 Kubernetes 에 배포하는 Helm chart.
 ## 빠른 설치
 
 ```bash
-# operator 가 Job 에 주입하는 기본 endpoint 가 `muninn` namespace 를 가정한다.
 helm install muninn deploy/helm/muninn -n muninn --create-namespace
 ```
 
 webhook 비활성(기본)에서는 cert-manager 없이 바로 뜬다.
+
+> ⚠️ operator/web 이미지는 **CI 미발행**이다 — 기본 이미지 값 그대로면 `ImagePullBackOff` 가 난다.
+> 로컬 빌드 후 `kind load` + `--set *.image.*` override 가 필요하다(아래 "로컬 이미지로 kind 설치" 또는
+> 루트 `make run-local`). agent Job 의 보고/메모리 endpoint(MUNINN_API_ENDPOINT/MEMORY_ENDPOINT)는
+> `web.enabled=true` 일 때 chart 가 이 릴리스의 muninn-web Service 로 배선한다(namespace 무관). `web.enabled=false`
+> 면 operator 가 코드 fallback 을 쓰므로 보고가 동작하지 않는다.
 
 ### 로컬 이미지로 kind 설치 (Podman)
 
@@ -106,9 +111,14 @@ CRD 는 Helm 의 `crds/` 디렉토리로 관리된다(원본: `huginnOperator/co
 | `web.enabled` | `true` | 콘솔 설치 |
 | `web.image.repository/tag` | `ghcr.io/kimsoungryoul/muninn/muninn-web`/`dev` | 콘솔 이미지 |
 | `web.auth.existingSecret` | `""` | CopilotKit 자격 Secret 이름 |
+| `web.apiToken.existingSecret/key` | `""`(→agent.secrets.name)/`muninn-api-token` | Muninn API Bearer 토큰 소스(상태변경 라우트 인증) |
+| `web.serviceAccount.automount` | `true` | SA 토큰 마운트(K8s 연동 필수 — create 와 분리) |
 | `web.ingress.enabled` | `false` | 콘솔 Ingress |
-| `agent.serviceAccount.create/name` | `true`/`huginn-agent` | Job SA (operator.enabled 시) |
-| `externalPostgresql.enabled` | `false` | 외부 DB 연결 Secret 등록 |
+| `metaDb.enabled` | `false` | true 면 web 에 DATABASE_URL 주입(메모리 영속) |
+| `metaDb.existingSecret/uriKey` | `""`/`uri` | connection string Secret/키(CNPG `<cluster>-app`) |
+| `agent.serviceAccount.create/name` | `true`/`huginn-agent` | Job SA. **name 은 operator 하드코딩 고정 계약**(변경 시 fail-fast) |
+| `agent.secrets.name` | `agent-secrets` | **operator 하드코딩 고정 계약**(변경 시 fail-fast) |
+| `externalPostgresql.enabled` | `false` | (legacy) 외부 DB 연결 Secret 등록 — 미구현 소비자용 |
 | `externalPostgresql.host` | `""` | DB 호스트(enabled 시 필수) |
 | `externalPostgresql.existingSecret` | `""` | 비밀번호 Secret(권장) |
 

@@ -2,7 +2,8 @@
 // k8s 연결 시 status.approval 을 merge-patch, 아니면 mock 응답(콘솔 프로토타입 유지).
 
 import { NextRequest } from "next/server";
-import { ok } from "@/lib/api";
+import { ok, conflict } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { approveRun } from "@/lib/incidents";
 import { k8sEnabled } from "@/lib/k8s";
 
@@ -10,6 +11,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   let decidedBy = "operator";
   try {
     const body = await req.json();
@@ -21,5 +24,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return ok({ runId: params.id, decision: "approved", status: "running", decidedAt: new Date().toISOString(), persisted: false });
   }
   const res = await approveRun(params.id, decidedBy);
-  return ok({ runId: params.id, decision: "approved", persisted: res.ok, decidedAt: new Date().toISOString() });
+  if (!res.ok) {
+    // 종료/이미 결정/만료된 Run 재결정은 409 — 클라이언트가 stale 상태로 결정했음을 알린다.
+    if (res.reason === "invalid-state" || res.reason === "expired") {
+      return conflict("승인할 수 없는 상태입니다", { runId: params.id, reason: res.reason, phase: res.phase, approvalState: res.approvalState });
+    }
+    if (res.reason === "not-found") {
+      return conflict("실행을 찾을 수 없습니다", { runId: params.id, reason: res.reason });
+    }
+    return conflict("승인 처리 실패", { runId: params.id, reason: res.reason });
+  }
+  return ok({ runId: params.id, decision: "approved", persisted: true, decidedAt: new Date().toISOString() });
 }

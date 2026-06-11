@@ -31,9 +31,12 @@ function HmRunsList({ onOpenRun }: any) {
   return (
     <>
       <HmPageHead title="실행 내역" sub="모든 agent 실행 · 행을 클릭하면 상세 보기">
-        <Tabs pill value="24h" onChange={() => {}} tabs={[
-          {label:"1시간", value:"1h"},{label:"24시간", value:"24h"},{label:"7일", value:"7d"},{label:"전체", value:"all"}
-        ]}/>
+        {/* 기간 필터는 아직 미배선(데모) — 비활성으로 표기해 동작하는 척하지 않는다. */}
+        <span title="기간 필터 미구현(데모)" style={{opacity:0.5, pointerEvents:"none"}}>
+          <Tabs pill value="24h" onChange={() => {}} tabs={[
+            {label:"1시간", value:"1h"},{label:"24시간", value:"24h"},{label:"7일", value:"7d"},{label:"전체", value:"all"}
+          ]}/>
+        </span>
       </HmPageHead>
 
       <HmCard flush>
@@ -53,8 +56,9 @@ function HmRunsList({ onOpenRun }: any) {
             </span>
           ))}
           <span style={{flex:1}}></span>
-          <Button size="sm" variant="ghost" leftIcon="filter">필터</Button>
-          <Button size="sm" variant="ghost" leftIcon="download">내보내기</Button>
+          {/* 필터/내보내기는 미배선 — disabled + 툴팁으로 미구현 표기(동작하는 척 금지). */}
+          <Button size="sm" variant="ghost" leftIcon="filter" disabled title="미구현">필터</Button>
+          <Button size="sm" variant="ghost" leftIcon="download" disabled title="미구현">내보내기</Button>
         </div>
         <table className="hm-table">
           <thead>
@@ -95,7 +99,7 @@ function HmRunsList({ onOpenRun }: any) {
 }
 
 // ===== Run Detail — flagship =====
-function HmRunDetail({ runId, onBack, awaitingMode }: any) {
+function HmRunDetail({ runId, onBack, awaitingMode, runVm, onDecided }: any) {
   const R = HM_DATA.RUN_DETAIL;
   const [selectedStep, setSelectedStep] = useS_RD(4);
   const [follow, setFollow] = useS_RD(true);
@@ -114,11 +118,12 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
   // 그 외 runId 로 진입하면 LIVE_RUNS/RECENT_RUNS 에서 해당 run 을 찾아 요약 뷰를 보여준다.
   const hasFullDetail = !runId || runId === R.id;
   if (!hasFullDetail) {
+    // 요약 뷰는 mock Run 형태(started/duration)를 기대하므로 로컬 데이터를 우선 사용한다.
     const summary = [...HM_DATA.LIVE_RUNS, ...HM_DATA.RECENT_RUNS].find(r => r.id === runId);
-    return <RunSummaryDetail runId={runId} run={summary} onBack={onBack} fullRunId={R.id}/>;
+    return <RunSummaryDetail runId={runId} run={summary} onBack={onBack} fullRunId={R.id} runVm={runVm} onDecided={onDecided}/>;
   }
 
-  // Allow page to enter awaiting state via prop
+  // Allow page to enter awaiting state via prop(실 phase/approval 또는 mock 데모)
   const status = awaitingMode ? "awaiting" : R.status;
 
   return (
@@ -145,16 +150,17 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
           </div>
         </div>
         <div style={{display:"flex", gap:6}}>
+          {/* 일시정지/중단/다시 재생은 미배선 — disabled + 툴팁으로 미구현 표기. */}
           {status === "running" && <>
-            <Button size="sm" variant="gray" leftIcon="clock">일시정지</Button>
-            <Button size="sm" variant="danger" leftIcon="close">중단</Button>
+            <Button size="sm" variant="gray" leftIcon="clock" disabled title="미구현">일시정지</Button>
+            <Button size="sm" variant="danger" leftIcon="close" disabled title="미구현">중단</Button>
           </>}
-          {status === "succeeded" && <Button size="sm" variant="secondary" leftIcon="refresh">다시 재생</Button>}
+          {status === "succeeded" && <Button size="sm" variant="secondary" leftIcon="refresh" disabled title="미구현">다시 재생</Button>}
         </div>
       </div>
 
-      {/* Approval panel (only when awaiting) */}
-      {status === "awaiting" && <ApprovalPanel runId={R.id} requestedAt={R.started}/>}
+      {/* Approval panel (only when awaiting) — runId 는 실제 라우트의 id 를 쓴다(승인 POST 대상). */}
+      {status === "awaiting" && <ApprovalPanel runId={runId || R.id} requestedAt={R.started} onDecided={onDecided}/>}
 
       {/* Top stats row */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
@@ -242,19 +248,19 @@ function HmRunDetail({ runId, onBack, awaitingMode }: any) {
           <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:10}}>
             <span style={{fontFamily:"var(--font-sans)", fontSize:12, color:"var(--on-surface-muted)", fontWeight:600}}>Transcript · agent 사고 + 도구 호출</span>
             <span style={{flex:1}}></span>
-            <label style={{display:"flex", alignItems:"center", gap:6, fontSize:13, color:"var(--on-surface-variant)", fontFamily:"var(--font-sans)", fontWeight:500}}>
-              <Toggle checked={follow} onChange={setFollow}/>
+            {/* 자동 추적 토글은 실제 스트림이 없어 시각적 데모 — 비활성으로 표기. */}
+            <label title="실시간 스트림 미배선(데모)" style={{display:"flex", alignItems:"center", gap:6, fontSize:13, color:"var(--on-surface-muted)", fontFamily:"var(--font-sans)", fontWeight:500, opacity:0.6}}>
+              <Toggle checked={follow} onChange={setFollow} disabled/>
               자동 추적
             </label>
-            <span style={{fontFamily:"var(--font-mono)", fontSize:11.5, color:"var(--on-surface-muted)"}}>[f]</span>
           </div>
 
           {R.steps.map((s, i) => <StepCard key={s.ix} step={s} arrived={arrivedIx === s.ix}/>)}
 
-          {/* Live SSE feed marker */}
-          <div style={{display:"flex", alignItems:"center", gap:8, padding:"12px 16px", fontFamily:"var(--font-sans)", fontSize:13, color:"var(--primary-40)", border:"1px dashed var(--primary-50)", borderRadius:8, background:"var(--primary-95)", fontWeight:500}}>
-            <span className="spinner" style={{width:10, height:10, borderWidth:1.5, borderTopColor:"var(--huginn-500)"}}></span>
-            <span>실시간 스트림 · 최신 단계로 자동 스크롤</span>
+          {/* 트랜스크립트는 데모 데이터(정적) — 실시간 SSE 스트림은 아직 미배선임을 정직하게 표기. */}
+          <div style={{display:"flex", alignItems:"center", gap:8, padding:"12px 16px", fontFamily:"var(--font-sans)", fontSize:13, color:"var(--on-surface-muted)", border:"1px dashed var(--border-subtle)", borderRadius:8, background:"var(--surface-2, transparent)", fontWeight:500}}>
+            <Icon name="info" size={14}/>
+            <span>데모 트랜스크립트(정적) · 실시간 스트림은 미구현</span>
           </div>
         </div>
       </div>
@@ -274,7 +280,7 @@ function StatCell({ label, value }: any) {
 
 // RUN_DETAIL(전체 트랜스크립트) 이외의 run 을 위한 요약 상세 뷰.
 // run 을 찾지 못하면 Not Found 상태를 보여준다.
-function RunSummaryDetail({ runId, run, onBack, fullRunId }: any) {
+function RunSummaryDetail({ runId, run, onBack, fullRunId, runVm, onDecided }: any) {
   if (!run) {
     return (
       <div style={{padding:"40px 0"}}>
@@ -285,6 +291,9 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId }: any) {
     );
   }
   const kLabel = (s) => s === "running" ? "실행 중" : s === "awaiting" ? "승인 대기" : s === "succeeded" ? "성공" : s === "failed" ? "실패" : s === "queued" ? "대기 중" : s === "cancelled" ? "취소" : s;
+  // 승인 대기 판정 — mock run.status 또는 실 runVm 의 phase/approval 중 하나라도 awaiting 이면.
+  const isAwaiting = run.status === "awaiting"
+    || runVm?.status === "awaiting" || runVm?.phase === "AwaitingApproval" || runVm?.approval === "Pending";
   return (
     <>
       {/* Header */}
@@ -305,16 +314,17 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId }: any) {
           </div>
         </div>
         <div style={{display:"flex", gap:6}}>
+          {/* 미배선 동작 — disabled + 툴팁. */}
           {run.status === "running" && <>
-            <Button size="sm" variant="gray" leftIcon="clock">일시정지</Button>
-            <Button size="sm" variant="danger" leftIcon="close">중단</Button>
+            <Button size="sm" variant="gray" leftIcon="clock" disabled title="미구현">일시정지</Button>
+            <Button size="sm" variant="danger" leftIcon="close" disabled title="미구현">중단</Button>
           </>}
-          {run.status === "succeeded" && <Button size="sm" variant="secondary" leftIcon="refresh">다시 재생</Button>}
+          {run.status === "succeeded" && <Button size="sm" variant="secondary" leftIcon="refresh" disabled title="미구현">다시 재생</Button>}
         </div>
       </div>
 
       {/* Approval panel (only when awaiting) */}
-      {run.status === "awaiting" && <ApprovalPanel runId={run.id} requestedAt={run.started}/>}
+      {isAwaiting && <ApprovalPanel runId={runId || run.id} requestedAt={runVm?.startedAt || run.started} onDecided={onDecided}/>}
 
       {/* Top stats row */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
@@ -393,11 +403,70 @@ function StepCard({ step: s, arrived }: any) {
 
 // 승인 대기 만료 정책(기본 90분). requestedAt(승인 요청=run 진입 시각) 기준 잔여시간 계산.
 const APPROVAL_TTL_MIN = 90;
-function ApprovalPanel({ runId, requestedAt }: any) {
+
+// 데모 데이터 diff(실제 PR 연결 전 플레이스홀더). escape 를 거쳐 렌더한다(아래 escDiff).
+const DEMO_DIFF_LINES: Array<{ k: "ctx" | "add" | "rem"; t: string }> = [
+  { k: "ctx", t: "spec:" },
+  { k: "ctx", t: "  resources:" },
+  { k: "ctx", t: "    limits:" },
+  { k: "rem", t: "      memory: 1Gi" },
+  { k: "add", t: "      memory: 4Gi" },
+  { k: "ctx", t: "requirements.txt:" },
+  { k: "add", t: "numpy==1.26.4" },
+  { k: "add", t: "pyarrow==15.0.2" },
+];
+const DEMO_PR_TITLE = "fix(triton): raise memory limit and lock numpy 1.26.4";
+
+// diff 텍스트를 안전하게 HTML 로 — 각 라인 텍스트는 escape, 클래스만 코드에서 부여.
+function escDiffHtml(lines: Array<{ k: string; t: string }>): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return lines.map((l) => `<span class="${l.k}">${esc(l.t)}</span>`).join("\n");
+}
+
+// runId, requestedAt(만료 계산), 그리고 선택적으로 실제 PR/diff(prTitle/diffLines). 미제공 시 데모 데이터 배지.
+// onDecided: 승인/거절 성공 후 부모가 상태를 갱신하도록 콜백.
+function ApprovalPanel({ runId, requestedAt, prTitle, diffLines, reasons, onDecided }: any) {
+  const [submitting, setSubmitting] = useS_RD(null); // null | "approve" | "reject"
+  const [error, setError] = useS_RD(null);
+  const [showReject, setShowReject] = useS_RD(false);
+  const [rejectReason, setRejectReason] = useS_RD("");
+
   const remainMin = requestedAt
     ? Math.round(APPROVAL_TTL_MIN - Math.max(0, (HM_DATA.NOW.getTime() - new Date(requestedAt).getTime()) / 60000))
     : null;
   const expiresLabel = remainMin == null ? null : remainMin > 0 ? `${remainMin}분 후 만료` : "만료됨";
+
+  const isDemo = !prTitle && !diffLines;
+  const lines = diffLines ?? DEMO_DIFF_LINES;
+  const title = prTitle ?? DEMO_PR_TITLE;
+  const reasonList: string[] = Array.isArray(reasons) && reasons.length
+    ? reasons
+    : ["dependency 변경 감지 (requirements.txt, +2 / -0)", "큰 변경 (+180줄 / -22줄)"];
+
+  async function decide(kind: "approve" | "reject") {
+    if (submitting) return;
+    if (kind === "reject" && !showReject) { setShowReject(true); return; }
+    setSubmitting(kind);
+    setError(null);
+    try {
+      const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/${kind}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(kind === "reject" ? { reason: rejectReason } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data?.error || `${kind === "approve" ? "승인" : "거절"} 실패 (${res.status})`);
+        return;
+      }
+      onDecided?.(kind, data);
+    } catch (e: any) {
+      setError(e?.message || "요청 실패");
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
   return (
     <div className="hm-approval">
       <div className="hm-approval-head">
@@ -406,27 +475,40 @@ function ApprovalPanel({ runId, requestedAt }: any) {
         {expiresLabel && <span className="expires">{expiresLabel}</span>}
       </div>
       <div className="hm-approval-reasons">
-        <div className="r"><span className="glyph">▲</span> dependency 변경 감지 (requirements.txt, +2 / -0)</div>
-        <div className="r"><span className="glyph">▲</span> 큰 변경 (+180줄 / -22줄)</div>
+        {reasonList.map((r, i) => (
+          <div className="r" key={i}><span className="glyph">▲</span> {r}</div>
+        ))}
       </div>
 
-      <div style={{fontFamily:"var(--font-sans)", fontSize:12, color:"var(--on-surface-muted)", fontWeight:600, marginBottom:6}}>제안된 PR</div>
-      <div style={{fontFamily:"var(--font-sans)", fontSize:16, fontWeight:700, color:"var(--on-surface)", marginBottom:4}}>fix(triton): raise memory limit and lock numpy 1.26.4</div>
-      <div style={{fontFamily:"var(--font-mono)", fontSize:12.5, color:"var(--on-surface-muted)", marginBottom:12}}>branch: huginn/{runId}</div>
-      <div className="hm-diff" dangerouslySetInnerHTML={{__html:
-`<span class="ctx">spec:</span>
-<span class="ctx">  resources:</span>
-<span class="ctx">    limits:</span>
-<span class="rem">      memory: 1Gi</span>
-<span class="add">      memory: 4Gi</span>
-<span class="ctx">requirements.txt:</span>
-<span class="add">numpy==1.26.4</span>
-<span class="add">pyarrow==15.0.2</span>`
-      }}>
+      <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:6}}>
+        <span style={{fontFamily:"var(--font-sans)", fontSize:12, color:"var(--on-surface-muted)", fontWeight:600}}>제안된 PR</span>
+        {isDemo && <span className="hm-chip" style={{fontSize:10, padding:"1px 6px", color:"var(--on-surface-muted)"}}>데모 데이터</span>}
       </div>
+      <div style={{fontFamily:"var(--font-sans)", fontSize:16, fontWeight:700, color:"var(--on-surface)", marginBottom:4}}>{title}</div>
+      <div style={{fontFamily:"var(--font-mono)", fontSize:12.5, color:"var(--on-surface-muted)", marginBottom:12}}>branch: huginn/{runId}</div>
+      <div className="hm-diff" dangerouslySetInnerHTML={{__html: escDiffHtml(lines)}}/>
+
+      {showReject && (
+        <div style={{margin:"10px 0"}}>
+          <textarea
+            className="md-textarea"
+            style={{width:"100%", minHeight:64, resize:"vertical"}}
+            placeholder="거절 사유(선택) — 에이전트 실행이 중단됩니다."
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+          />
+        </div>
+      )}
+      {error && (
+        <div style={{color:"var(--danger-50, #c0392b)", fontSize:12.5, fontFamily:"var(--font-sans)", marginBottom:8}}>{error}</div>
+      )}
       <div style={{display:"flex", gap:8, justifyContent:"flex-end"}}>
-        <Button variant="ghost" leftIcon="close">거절 (실행 중단)</Button>
-        <Button variant="primary" leftIcon="check">승인하고 PR 생성</Button>
+        <Button variant="ghost" leftIcon="close" disabled={!!submitting} onClick={() => decide("reject")}>
+          {submitting === "reject" ? "거절 중…" : showReject ? "거절 확정 (실행 중단)" : "거절 (실행 중단)"}
+        </Button>
+        <Button variant="primary" leftIcon="check" disabled={!!submitting} onClick={() => decide("approve")}>
+          {submitting === "approve" ? "승인 중…" : "승인하고 PR 생성"}
+        </Button>
       </div>
     </div>
   );

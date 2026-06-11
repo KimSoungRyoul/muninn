@@ -10,6 +10,7 @@
 
 import { NextRequest } from "next/server";
 import { ok, badRequest } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { patchRunStatus, patchIssueStatus, k8sEnabled, DEFAULT_NAMESPACE } from "@/lib/k8s";
 import { getRunStatus, normalizeRecalledMemoryIds } from "@/lib/incidents";
 import { dbEnabled, updateIncident, updateIncidentByIssue } from "@/lib/db";
@@ -18,6 +19,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   const runName = params.id;
   let body: any;
   try {
@@ -29,11 +32,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // issueName 은 항상 string 으로만 다룬다(outcome/awaiting/incident 종결의 단일 기준).
   const issueName = typeof body.issueName === "string" && body.issueName ? body.issueName : null;
 
+  // 숫자 파싱 가드 — NaN 은 JSON 직렬화 시 null 이 되어 merge-patch 가 기존 status 를 지운다.
+  // 유효한 유한수만 status 에 싣는다(비숫자/NaN 입력은 무시해 기존 값 보존).
+  const finiteOr = (v: unknown): number | null => {
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   // Agent→API 소유 필드만 모은다(나머지는 무시 — operator 소유 침범 금지).
   const status: Record<string, unknown> = {};
-  if (body.step != null) status.step = Number(body.step);
-  if (body.cost != null) status.cost = String(body.cost); // decimal USD 문자열(CRD float 회피)
-  if (body.tokens != null) status.tokens = Number(body.tokens);
+  const step = finiteOr(body.step);
+  if (step != null) status.step = step;
+  // cost 는 decimal USD 문자열(CRD float 회피)이나 NaN/비숫자 문자열이 들어가지 않게 검증.
+  const cost = finiteOr(body.cost);
+  if (cost != null) status.cost = String(cost);
+  const tokens = finiteOr(body.tokens);
+  if (tokens != null) status.tokens = tokens;
   if (typeof body.output === "string") status.output = body.output;
   const recalled = normalizeRecalledMemoryIds(body.recalledMemoryIds);
   if (recalled.length) status.recalledMemoryIds = recalled;
@@ -65,18 +80,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   // 사건 이력(metaDB) 동기화 — 비용/요약/결과/단계 기록. 회수 폐루프(설계 §7.3):
   // 에이전트는 incidentId 를 모르지만 issueName(MUNINN_ISSUE_NAME)은 아므로, issueName 으로 종결한다.
-  if (dbEnabled() && (body.incidentId != null || issueName)) {
+  const incidentIdNum = finiteOr(body.incidentId);
+  if (dbEnabled() && (incidentIdNum != null || issueName)) {
     const incidentStatus = body.final ? (body.failed ? "failed" : "succeeded")
       : body.requestApproval ? "awaiting-approval" : "running";
     const patch = {
-      ...(body.cost != null ? { cost: Number(body.cost) } : {}),
+      ...(cost != null ? { cost } : {}),
       ...(body.summary ? { summary: String(body.summary) } : {}),
       ...(typeof body.outcome === "string" ? { outcome: body.outcome } : {}),
       status: incidentStatus,
       runName,
     };
     try {
-      if (body.incidentId != null) await updateIncident(Number(body.incidentId), patch);
+      if (incidentIdNum != null) await updateIncident(incidentIdNum, patch);
       else if (issueName) await updateIncidentByIssue(issueName, patch);
     } catch {
       // 이력 갱신 실패는 보고 자체를 막지 않는다.

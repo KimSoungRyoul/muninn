@@ -1,8 +1,8 @@
-# huginnOperator(Go operator) CI — 빌드 + lint + 단위/envtest 테스트.
-#   - PR / main 푸시: huginnOperator/** 또는 이 워크플로 변경 시 실행.
+# huginnOperator(Go operator) CI — 빌드 + lint + 단위/envtest 테스트 + 생성물 동기화 가드.
+#   - PR / main 푸시: huginnOperator/** , deploy/helm/** , 또는 이 워크플로 변경 시 실행.
 #   - `make lint` 는 커스텀 golangci-lint(logcheck 플러그인 포함)를 빌드해 실행.
 #   - `make test` 는 manifests/generate/fmt/vet + envtest(etcd/kube-apiserver 자동 다운로드)를 수행.
-# 보안 강화 후속(선택): action 을 major 태그 대신 커밋 SHA 로 핀.
+# 보안 강화 후속: uses 를 커밋 SHA 로 핀(현재 major 태그). github-actions Dependabot 이 SHA 핀 갱신을 자동화한다.
 name: operator-ci
 
 on:
@@ -10,10 +10,12 @@ on:
     branches: [main]
     paths:
       - huginnOperator/**
+      - deploy/helm/**
       - .github/workflows/operator-ci.yml
   pull_request:
     paths:
       - huginnOperator/**
+      - deploy/helm/**
       - .github/workflows/operator-ci.yml
   workflow_dispatch:
 
@@ -48,3 +50,38 @@ jobs:
 
       - name: Test (unit + envtest)
         run: make test
+
+      # 생성물 동기화 가드: manifests/generate 결과가 커밋과 일치하는지(개발자가 재생성 후 커밋했는지) 검증.
+      - name: Verify generated manifests are committed
+        run: |
+          make manifests generate
+          git diff --exit-code -- config api \
+            || (echo '::error::config/api 생성물이 코드와 어긋납니다. `make manifests generate` 후 커밋하세요.' && exit 1)
+
+  # helm chart 검증: lint + template + crds 가 operator 원본과 동기화돼 있는지.
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint deploy/helm/muninn
+
+      - name: Helm template (default + metaDb on)
+        run: |
+          helm template muninn deploy/helm/muninn > /dev/null
+          helm template muninn deploy/helm/muninn \
+            --set metaDb.enabled=true \
+            --set metaDb.existingSecret=muninn-metadb-app > /dev/null
+
+      # helm crds/ 는 operator config/crd/bases 의 수동 복사다. drift 시 helm 설치 클러스터만 스키마가 오래된다.
+      - name: Verify helm CRDs match operator source
+        run: |
+          for f in muninn.io_huginnagents.yaml muninn.io_huginnissues.yaml muninn.io_huginnruns.yaml; do
+            diff "huginnOperator/config/crd/bases/$f" "deploy/helm/muninn/crds/$f" \
+              || (echo "::error::deploy/helm/muninn/crds/$f 가 operator 원본과 다릅니다. config/crd/bases 에서 복사하세요." && exit 1)
+          done

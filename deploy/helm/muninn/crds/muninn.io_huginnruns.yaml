@@ -58,7 +58,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: HuginnRunSpec defines the desired state of HuginnRun.
+            description: |-
+              HuginnRunSpec defines the desired state of HuginnRun.
+              생성 후 불변(non-idempotent 실행 계약, 핵심 계약 #2): issueRef/attempt/jobTemplate 는
+              Job 생성 후 갱신해도 Pod 에 반영되지 않으므로(controller 는 Job 을 갱신하지 않음) CEL 로 immutable 강제한다.
             properties:
               attempt:
                 default: 1
@@ -66,12 +69,19 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+                x-kubernetes-validations:
+                - message: attempt is immutable
+                  rule: self == oldSelf
               issueRef:
                 description: 'issueRef: 부모 HuginnIssue 의 metadata.name'
                 minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: issueRef is immutable
+                  rule: self == oldSelf
               jobTemplate:
-                description: 'jobTemplate: Pod 실행 recipe'
+                description: 'jobTemplate: Pod 실행 recipe. Job 생성 후 불변(갱신해도 Pod 미반영;
+                  위 주석 참고).'
                 properties:
                   claudePVCName:
                     description: 'claudePVCName: ~/.claude 로 마운트할 앱별 PVC(§5.5). 비면
@@ -310,6 +320,9 @@ spec:
                 required:
                 - image
                 type: object
+                x-kubernetes-validations:
+                - message: jobTemplate is immutable
+                  rule: self == oldSelf
               suspend:
                 description: |-
                   suspend: true 면 Operator 가 Job 을 삭제하고 phase=Cancelled 로 전이(operator-design §2.3).
@@ -343,10 +356,18 @@ spec:
                 description: ApprovalStatus 는 Human-in-the-loop 승인 메타(§6.4). Muninn
                   API 소유.
                 properties:
+                  decidedAt:
+                    description: 'decidedAt: 승인/거절 결정 시각(ISO8601). Muninn API(approve/reject
+                      route)가 기록(§6.4).'
+                    format: date-time
+                    type: string
                   decidedBy:
                     type: string
                   expiresAt:
                     format: date-time
+                    type: string
+                  reason:
+                    description: 'reason: 거절 사유(reject 시). Muninn API 가 기록(§6.4).'
                     type: string
                   reasons:
                     items:

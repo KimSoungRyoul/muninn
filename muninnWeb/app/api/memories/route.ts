@@ -6,6 +6,7 @@
 
 import { NextRequest } from "next/server";
 import { ok, created, badRequest, serverError } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { dbEnabled, listMemories, store } from "@/lib/db";
 import { MEMORIES } from "@/lib/data";
 
@@ -37,6 +38,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   if (!dbEnabled()) return badRequest("memory(postgres) 비활성 — DATABASE_URL 미설정");
   let body: any;
   try {
@@ -46,9 +49,14 @@ export async function POST(req: NextRequest) {
   }
   if (!body?.fact || typeof body.fact !== "string") return badRequest("fact(string) 필수");
 
+  // 메모리 sanitize — 공백 제거 후 최소/최대 길이 검증(빈/잡음/거대 입력으로 메모리 오염 방지).
+  const fact = body.fact.trim();
+  if (fact.length < 8) return badRequest("fact 가 너무 짧습니다(최소 8자) — 재사용 가능한 기억만 저장");
+  if (fact.length > 4000) return badRequest("fact 가 너무 깁니다(최대 4000자)");
+
   try {
     const row = await store({
-      fact: body.fact,
+      fact,
       scope: body.scope,
       appId: body.app ?? body.appId ?? null,
       appName: body.appName ?? null,

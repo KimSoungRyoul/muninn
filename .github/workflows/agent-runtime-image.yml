@@ -1,10 +1,13 @@
 # Huginn agent-runtime 이미지를 GitHub Packages(ghcr.io)로 빌드·관리한다.
-#   - PR            : 빌드만(푸시 안 함) — Dockerfile 검증
-#   - main 푸시     : latest + sha-<short> 태그로 푸시
-#   - v* 태그 푸시  : semver 태그로 푸시
-# 멀티아치(linux/amd64, linux/arm64).
+#   - PR            : build job 만 — amd64 단일 빌드 + selftest(오프라인 배선 점검). 푸시 안 함.
+#   - main 푸시     : build(검증) → publish — latest + sha-<short> 태그로 멀티아치 push.
+#   - v* 태그 푸시  : build(검증) → publish — semver 태그로 push.
 #
-# 보안 강화 후속(선택): action 을 major 태그 대신 커밋 SHA 로 핀.
+# 보안:
+#   - packages:write 는 publish job 에만 부여한다(PR 빌드 컨텍스트에는 쓰기 토큰을 주지 않는다).
+#     최상위는 contents:read 만. (서드파티 액션 탈취 시 PR 빌드에서 ghcr 변조 경로를 차단.)
+#   - selftest 를 publish 전에 강제한다(claude CLI 핀/venv/SDK import/claude_skill.sh 회귀를 push 전에 차단).
+# 보안 강화 후속: uses 를 커밋 SHA 로 핀(현재 major 태그). github-actions Dependabot 이 SHA 핀 갱신을 자동화한다.
 name: agent-runtime-image
 
 on:
@@ -23,17 +26,52 @@ on:
 env:
   IMAGE: ghcr.io/kimsoungryoul/muninn/agent-runtime
 
+# 최상위는 읽기만. 쓰기 권한은 publish job 에서만 승격한다.
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: agent-runtime-image-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ── 검증: amd64 이미지를 로컬 적재(load)해 selftest 를 돌린다. 푸시하지 않음(쓰기 토큰 없음). ──
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build amd64 image (load for selftest)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./huginnAgentRuntime
+          file: ./huginnAgentRuntime/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:ci-selftest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # provenance/SBOM 은 멀티아치 publish job 에서 처리(load 빌드는 단일 아치).
+          provenance: false
+
+      - name: Selftest (offline tool+SDK 배선 점검, API 호출 없음)
+        run: docker run --rm ${{ env.IMAGE }}:ci-selftest selftest
+
+  # ── 발행: PR 이 아닐 때만(main/tag). build(검증) 통과가 전제. 여기서만 packages:write. ──
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,9 +82,7 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      # PR 이 아닐 때만 로그인(=푸시할 때만 자격 사용)
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -65,16 +101,17 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: ./huginnAgentRuntime
           file: ./huginnAgentRuntime/Dockerfile
-          # PR=amd64 단일(검증), push/tag=멀티아치(QEMU arm64 에뮬레이션은 푸시 빌드에만)
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
-          push: ${{ github.event_name != 'pull_request' }}
+          platforms: linux/amd64,linux/arm64
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: false
+          # 이 이미지는 클러스터에서 Secret 을 주입받아 도는 에이전트 런타임 → 출처/무결성 검증 수단 제공.
+          provenance: mode=max
+          sbom: true

@@ -16,8 +16,10 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import time
 
 
 def log(msg: str) -> None:
@@ -67,6 +69,7 @@ def _system_prompt(pr_mode: str = "") -> str:
 
 
 # ---- Muninn API 보고/메모리(설계 §8) — 표준 라이브러리만 사용(추가 의존성 없음) ----
+import http.client  # noqa: E402
 import urllib.error  # noqa: E402
 import urllib.request  # noqa: E402
 
@@ -75,24 +78,57 @@ def _env(name: str) -> str:
     return (os.getenv(name) or "").strip()
 
 
-def _http_json(method: str, url: str, body: dict | None = None, timeout: float = 10.0) -> dict | None:
-    """JSON 요청 후 응답(dict)을 반환. 실패해도 에이전트 루프를 막지 않도록 None 반환."""
+def _http_json(
+    method: str,
+    url: str,
+    body: dict | None = None,
+    timeout: float = 10.0,
+    retries: int = 2,
+) -> dict | None:
+    """JSON 요청 후 응답(dict)을 반환. 실패해도 에이전트 루프를 막지 않도록 None 반환.
+
+    인증(컴포넌트 간 계약): MUNINN_API_TOKEN 이 설정돼 있으면 `Authorization: Bearer <token>`
+    헤더를 붙인다(미설정이면 헤더 없이 dev 모드). muninnWeb 가 동일 토큰으로 검증한다.
+
+    내구성(브리프 HIGH): API 일시 장애로 결과(output/cost)가 영구 유실되지 않도록
+    짧은 지수 backoff 재시도를 둔다. `retries` 는 *추가* 재시도 횟수(총 시도 = retries+1).
+    최종(final) 보고는 호출부에서 더 큰 retries 를 넘겨 더 끈질기게 재전송한다.
+    """
     if not url:
         return None
     data = json.dumps(body or {}, ensure_ascii=False).encode("utf-8") if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("content-type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8") or "{}"
-            return json.loads(raw)
-    except (urllib.error.URLError, ValueError, OSError) as exc:
-        log(f"WARN: HTTP {method} {url} 실패: {exc}")
-        return None
+    token = _env("MUNINN_API_TOKEN")
+    attempts = max(1, retries + 1)
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        # urllib Request 는 재사용 시 상태가 남을 수 있어 시도마다 새로 만든다.
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("content-type", "application/json")
+        if token:
+            req.add_header("authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8") or "{}"
+                return json.loads(raw)
+        # http.client.HTTPException(BadStatusLine 등)을 포함시켜 비정상 응답이
+        # 호출 루프 전체를 죽이지 않게 한다(브리프 HIGH).
+        except (urllib.error.URLError, http.client.HTTPException, ValueError, OSError) as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                backoff = min(8.0, 0.5 * (2 ** attempt))  # 0.5s, 1s, 2s, 4s, … (상한 8s)
+                log(f"WARN: HTTP {method} {url} 실패(시도 {attempt + 1}/{attempts}): {exc} → {backoff:.1f}s 후 재시도")
+                time.sleep(backoff)
+    log(f"WARN: HTTP {method} {url} 최종 실패({attempts}회): {last_exc}")
+    return None
 
 
 def _report(patch: dict) -> dict | None:
-    """진행 보고 → POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report (Agent→API 소유 필드)."""
+    """진행 보고 → POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report (Agent→API 소유 필드).
+
+    중간(step) 보고는 best-effort(짧은 재시도)지만, 최종(`final:true`) 보고는 그 run 의
+    유일한 결과물(output/cost)이자 incident 종결의 단일 경로이므로 더 끈질기게(지수 backoff
+    다회) 재전송한다(브리프 HIGH). 끝내 실패하면 None 을 반환하므로 호출부가 표면화한다.
+    """
     api = _env("MUNINN_API_ENDPOINT")
     run = _env("MUNINN_RUN_NAME")
     if not api or not run:
@@ -100,7 +136,9 @@ def _report(patch: dict) -> dict | None:
     issue = _env("MUNINN_ISSUE_NAME")
     if issue and "issueName" not in patch:
         patch = {**patch, "issueName": issue}
-    return _http_json("POST", f"{api.rstrip('/')}/api/runs/{run}/report", patch)
+    # 최종 보고는 결과 유실을 막기 위해 더 많이 재시도(총 5회), 중간 보고는 적게(총 2회).
+    retries = 4 if patch.get("final") else 1
+    return _http_json("POST", f"{api.rstrip('/')}/api/runs/{run}/report", patch, retries=retries)
 
 
 def _recall(query: str, k: int = 6) -> list:
@@ -135,10 +173,25 @@ def build_options(max_turns: int, max_budget_usd: float | None = None):
     """ClaudeAgentOptions 를 구성(라이브/셀프테스트 공통). SDK 계약 검증 지점.
 
     guardrails 매핑(§5.4): maxIterations→max_turns, maxCostUsd→max_budget_usd.
-    maxTokens 는 SDK 직접 옵션이 없어 플랫폼(Muninn API)이 step 누적으로 추적/집행한다.
+
+    maxTokens 한계(브리프 MEDIUM): SDK 에 직접 옵션이 없다. 토큰/cost 값은 SDK 가 주는 usage 에
+    의존하는데, 현재 SDK 버전에서 per-turn usage 가 AssistantMessage 에 실리지 않으면 누적은
+    스트림 종료 시 오는 ResultMessage 에서만 정확하다. 따라서 중간 step 보고의 tokens 는 SDK
+    동작에 따라 0 일 수 있고, 정확한 합산(cache 토큰 포함, _usage_tokens)은 최종 보고에서 보장된다.
+    실시간 '집행(enforce)'은 이 한계 때문에 보장할 수 없으며, 플랫폼은 최종값으로 '사후 추적/기록'한다.
+    AssistantMessage.usage 가 제공되는 SDK 버전에서는 중간 보고에도 누적치가 반영된다(run_live 참조).
     """
     from claude_agent_sdk import ClaudeAgentOptions
 
+    # [신뢰경계 / 보안 주의] 기본 permission_mode=bypassPermissions 는 플랫폼 설계상 의도된
+    # 동작이다 — dry-run(MUNINN_PR_MODE, 1차 안전장치)이 실제 `gh pr create` 등 부작용을 막고,
+    # PR 계획만 출력으로 보고한다. 다만 이 기본값에는 실질 위험이 있다:
+    #   1) MUNINN_GOAL/이벤트 페이로드는 webhook(알림 본문 등) 파생 *untrusted* 입력이며,
+    #      prompt injection 으로 에이전트에게 임의 도구 실행을 유도할 수 있다.
+    #   2) 프로세스 env 에 ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN / GITHUB_PAT 가 있고
+    #      이미지에 kubectl/helm/argocd/gh 가 들어 있어, 유출 시 클러스터 조작·자격 탈취 표면이 된다.
+    # 도구 allowlist 정책 엔진과 egress 제한(NetworkPolicy)은 범위 밖(후속). 운영 시
+    # MUNINN_PERMISSION_MODE 오버라이드 + egress NetworkPolicy 로 표면을 좁히는 것을 권장한다.
     permission_mode = os.getenv("MUNINN_PERMISSION_MODE", "bypassPermissions")
     opts: dict = {
         "system_prompt": _system_prompt(),
@@ -188,8 +241,8 @@ def selftest() -> int:
         report["ok"] = False
         report["checks"]["live_symbols"] = f"IMPORT FAILED: {exc}"
 
-    # 3) 플랫폼 CLI 존재 + claude CLI 응답(Node 런타임 동작 확인)
-    for tool in ("claude", "kubectl", "helm", "argocd", "gh", "git", "jq", "yq"):
+    # 3) 플랫폼 CLI 존재 + claude CLI 응답(Node 런타임 동작 확인). curl/python3 도 운영 경로(README 도구표)에 포함.
+    for tool in ("claude", "kubectl", "helm", "argocd", "gh", "git", "jq", "yq", "curl", "python3"):
         path = shutil.which(tool)
         report["checks"][tool] = path or "MISSING"
         if path is None:
@@ -209,12 +262,81 @@ def selftest() -> int:
         report["ok"] = False
         report["checks"]["claude_version"] = f"FAILED: {exc}"
 
+    # 4) ~/.claude(오퍼레이터 claudeMountPath, PVC fsGroup=1000) 가 현재 uid 로 쓰기 가능한지 검증.
+    #    PVC 권한/securityContext 회귀(fsGroup 누락 등)는 live 에서야 터지므로 여기서 미리 잡는다(브리프 LOW).
+    claude_home = os.path.expanduser("~/.claude")
+    try:
+        os.makedirs(claude_home, exist_ok=True)
+        probe = os.path.join(claude_home, ".selftest-write-probe")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+        report["checks"]["claude_home_writable"] = claude_home
+    except OSError as exc:
+        report["ok"] = False
+        report["checks"]["claude_home_writable"] = f"NOT WRITABLE ({claude_home}): {exc}"
+
+    # 5) 보고 경로 배선 점검 — 더미 endpoint 로 _report 코드 경로(URL 조립·JSON 직렬화·헤더)를 실제로 태운다.
+    #    네트워크 미도달(connection refused 등)은 정상으로 간주(오프라인 QA). 코드가 예외 없이 None 을 돌려주면 OK.
+    try:
+        prev_api = os.environ.get("MUNINN_API_ENDPOINT")
+        prev_run = os.environ.get("MUNINN_RUN_NAME")
+        prev_tok = os.environ.get("MUNINN_API_TOKEN")
+        # 127.0.0.1 의 닫힌 포트 → 즉시 connection refused(외부 트래픽 없음). 재시도 0 으로 빠르게 끝낸다.
+        os.environ["MUNINN_API_ENDPOINT"] = "http://127.0.0.1:1"
+        os.environ["MUNINN_RUN_NAME"] = "selftest-run"
+        os.environ["MUNINN_API_TOKEN"] = "selftest-token"
+        _http_json(
+            "POST",
+            "http://127.0.0.1:1/api/runs/selftest-run/report",
+            {"step": 0, "final": True, "failed": False},
+            timeout=0.5,
+            retries=0,
+        )
+        report["checks"]["report_wiring"] = "ok (code path exercised, network not required)"
+        # env 원복(전역 상태 오염 방지)
+        for key, val in (("MUNINN_API_ENDPOINT", prev_api), ("MUNINN_RUN_NAME", prev_run), ("MUNINN_API_TOKEN", prev_tok)):
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+    except Exception as exc:
+        report["ok"] = False
+        report["checks"]["report_wiring"] = f"FAILED: {exc}"
+
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
 
 
+def _usage_tokens(usage: dict) -> int:
+    """SDK usage dict 에서 전체 토큰을 합산한다.
+
+    input/output 뿐 아니라 cache_creation_input_tokens / cache_read_input_tokens 도
+    포함해 과소집계를 막는다(브리프 MEDIUM). 키가 없으면 0 으로 취급한다.
+    """
+    keys = (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    )
+    total = 0
+    for k in keys:
+        try:
+            total += int(usage.get(k, 0) or 0)
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
 async def run_live() -> int:
-    """MUNINN_GOAL 을 목표로 Claude Agent SDK 루프 실행."""
+    """MUNINN_GOAL 을 목표로 Claude Agent SDK 루프 실행.
+
+    내구성(브리프 HIGH): run 루프 본문을 try/finally 로 감싸 예외/SIGTERM/타임아웃 등
+    어떤 종료 경로에서도 terminal 보고(`final:true`)가 정확히 한 번은 전송되도록 보장한다 —
+    그렇지 않으면 metaDB incident 가 'running' 으로 영구 고착된다. 동기 보고(_report)는
+    async 컨텍스트에서 `asyncio.to_thread` 로 오프로드해 이벤트 루프(=SDK stdout 소비) 블로킹을 줄인다.
+    """
     from claude_agent_sdk import (
         AssistantMessage,
         ResultMessage,
@@ -235,8 +357,25 @@ async def run_live() -> int:
     max_budget = float(max_cost) if max_cost else None  # 0/None=무제한(가드레일이 명시한 경우)
     options = build_options(max_turns=max_turns, max_budget_usd=max_budget)
 
+    # SIGTERM(pod 축출/timeout 시 kubelet 이 보냄) → 현재 task 를 cancel 해 CancelledError 경로로
+    # 진입시킨다. 그러면 try/except 가 terminal 보고를 보내고, 미보내면 metaDB incident 가 영구
+    # 'running' 으로 고착된다(브리프 HIGH). add_signal_handler 가 불가한 환경(비-메인 스레드 등)은
+    # 무시 — main() 의 try/finally 가 최후 방어선이다.
+    try:
+        loop = asyncio.get_running_loop()
+        current = asyncio.current_task()
+        if current is not None:
+            loop.add_signal_handler(signal.SIGTERM, current.cancel)
+    except (NotImplementedError, RuntimeError, ValueError) as exc:
+        log(f"WARN: SIGTERM 핸들러 등록 실패(무시): {exc}")
+
+    # 동기 보고를 thread 로 오프로드하는 헬퍼 — async 루프가 HTTP 지연에 블로킹되지 않게 한다(브리프 MEDIUM).
+    async def report_async(patch: dict) -> dict | None:
+        return await asyncio.to_thread(_report, patch)
+
     # 1) 회상(recall) — 위임 직전, Muninn 메모리에서 관련 과거 사건/해결을 가져와 컨텍스트로 주입(설계 §3.1).
-    recalled = _recall(goal, k=6)
+    #    동기 urllib 호출이므로 thread 로 오프로드(이벤트 루프 블로킹 방지).
+    recalled = await asyncio.to_thread(_recall, goal, 6)
     recalled_ids = [m.get("id") for m in recalled if isinstance(m, dict) and m.get("id")]
     prompt = goal
     if recalled:
@@ -252,7 +391,7 @@ async def run_live() -> int:
             if m.get("score") is not None:
                 item["score"] = str(m["score"])
             recalled_payload.append(item)
-    _report({
+    await report_async({
         "step": 0,
         "recalledMemoryIds": recalled_payload,
     })
@@ -265,47 +404,96 @@ async def run_live() -> int:
     last_text = ""  # dry-run PR 계획 = 마지막 assistant 텍스트
     is_error = False
     subtype = ""
-    async for message in query(prompt=prompt, options=options):
-        if isinstance(message, AssistantMessage):
-            step += 1
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    log(f"assistant: {block.text}")
-                    if block.text.strip():
-                        last_text = block.text
-                elif isinstance(block, ToolUseBlock):
-                    log(f"tool_use: {block.name} {json.dumps(block.input, ensure_ascii=False)[:200]}")
-            # 진행 보고(스텝 단위) — step/cost/tokens(Agent→API 소유). 베스트에포트.
-            _report({"step": step, "cost": f"{cost:.4f}", "tokens": tokens})
-        elif isinstance(message, ResultMessage):
-            cost = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
-            turns = int(getattr(message, "num_turns", 0) or 0)
-            # 에이전트 실패(에러/max_turns 초과 등)를 성공으로 보고하지 않는다.
-            is_error = bool(getattr(message, "is_error", False))
-            subtype = str(getattr(message, "subtype", "") or "")
-            usage = getattr(message, "usage", None)
-            if isinstance(usage, dict):
-                tokens = int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0))
+    final_sent = False  # terminal 보고 중복 방지(정상 종료 경로 ↔ 예외/취소 경로)
+
+    async def send_final(failed: bool, abort_reason: str = "") -> bool:
+        """terminal 보고(final:true)를 1회 전송한다. 성공 여부(API 도달 여부)를 반환."""
+        nonlocal final_sent
+        if final_sent:
+            return True
+        final_sent = True
+        output = last_text.strip()
+        title_line = next((ln.strip("# ").strip() for ln in output.splitlines() if ln.strip()), "")
+        ok_local = not failed
+        outcome = (
+            (f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80])
+            if ok_local and output else ""
+        )
+        if abort_reason:
+            # 비정상 종료 표면화: outcome 비어 있으면 사유를 남겨 운영자가 'running 고착' 대신 원인을 본다.
+            outcome = outcome or f"aborted: {abort_reason}"
+        res = await report_async({
+            "step": step,
+            "cost": f"{cost:.4f}",
+            "tokens": tokens,
+            "output": output[:8000],
+            "outcome": outcome,
+            "final": True,
+            "failed": failed,
+        })
+        if res is None:
+            # 최종 보고가 끝내 실패 — 결과가 소리 없이 사라지지 않도록 stdout/exit 로 표면화한다(브리프 HIGH).
+            log("ERROR: 최종 보고 전송 실패(재시도 소진) — 결과가 API 에 기록되지 않았을 수 있음")
+        return res is not None
+
+    try:
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                step += 1
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        log(f"assistant: {block.text}")
+                        if block.text.strip():
+                            last_text = block.text
+                    elif isinstance(block, ToolUseBlock):
+                        log(f"tool_use: {block.name} {json.dumps(block.input, ensure_ascii=False)[:200]}")
+                    # AssistantMessage 에 per-turn usage 가 실리면 누적해 중간 보고에 싣는다.
+                    # (한계: SDK 버전에 따라 message.usage 가 ResultMessage 에만 올 수 있다 — 그 경우
+                    #  중간 tokens 는 0 이고 최종 보고에서만 정확하다. 아래 ResultMessage 분기 참조.)
+                msg_usage = getattr(message, "usage", None)
+                if isinstance(msg_usage, dict):
+                    tokens = max(tokens, _usage_tokens(msg_usage))
+                # 진행 보고(스텝 단위) — step/cost/tokens(Agent→API 소유). 베스트에포트(thread 오프로드).
+                await report_async({"step": step, "cost": f"{cost:.4f}", "tokens": tokens})
+            elif isinstance(message, ResultMessage):
+                cost = float(getattr(message, "total_cost_usd", 0.0) or 0.0)
+                turns = int(getattr(message, "num_turns", 0) or 0)
+                # 에이전트 실패(에러/max_turns 초과 등)를 성공으로 보고하지 않는다.
+                is_error = bool(getattr(message, "is_error", False))
+                subtype = str(getattr(message, "subtype", "") or "")
+                usage = getattr(message, "usage", None)
+                if isinstance(usage, dict):
+                    # cache 토큰 포함 전체 합산(과소집계 방지). 최종값이므로 max 가 아니라 직접 대입.
+                    tokens = _usage_tokens(usage)
+    except asyncio.CancelledError:
+        # SIGTERM(graceful cancel)/타임아웃 → 비정상 종료지만 terminal 보고는 반드시 보낸다.
+        is_error = True
+        log("WARN: 실행이 취소됨(SIGTERM/timeout) — terminal 보고 전송")
+        await send_final(failed=True, abort_reason="cancelled")
+        raise
+    except Exception as exc:
+        # SDK ProcessError 등 예외 — 결과 유실 방지를 위해 terminal 보고를 먼저 보낸다.
+        is_error = True
+        log(f"ERROR: 실행 중 예외: {exc} — terminal 보고 전송")
+        await send_final(failed=True, abort_reason=f"exception: {exc}")
+        raise
 
     ok = not is_error
     # 4) 결과 보고 + outcome(dry-run = PR 계획 요약). output 은 Agent→API 소유, outcome 은 Issue status.
     output = last_text.strip()
-    title_line = next((ln.strip("# ").strip() for ln in output.splitlines() if ln.strip()), "")
-    outcome = (f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80]) if ok and output else ""
-    _report({
-        "step": step,
-        "cost": f"{cost:.4f}",
-        "tokens": tokens,
-        "output": output[:8000],
-        "outcome": outcome,
-        "final": True,
-        "failed": is_error,
-    })
+    await send_final(failed=is_error)
 
     # 5) 기억화 — 성공 시 결과를 재사용 가능한 메모리로 저장(요약은 Muninn API/코파일럿이 distill 할 수도 있음).
     if ok and output:
         fact = output if len(output) <= 600 else output[:600] + " …"
-        _store_memory(fact, tags=(["dry-run", "pr-plan"] if pr_mode == "dry-run" else ["result"]))
+        await asyncio.to_thread(
+            _store_memory, fact, (["dry-run", "pr-plan"] if pr_mode == "dry-run" else ["result"])
+        )
+
+    outcome = ""
+    if ok and output:
+        title_line = next((ln.strip("# ").strip() for ln in output.splitlines() if ln.strip()), "")
+        outcome = f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80]
 
     log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}, subtype={subtype!r}, is_error={is_error}, outcome={outcome!r}")
     print(json.dumps(
@@ -317,15 +505,28 @@ async def run_live() -> int:
     return 0 if ok else 1
 
 
+def _terminal_report_best_effort(reason: str) -> None:
+    """최후 방어선 — run_live 의 try/except 가 보내지 못한 경우(루프 진입 전 예외, asyncio.run
+    자체 실패 등)에도 terminal 보고를 1회 시도한다. run_live 가 이미 보냈다면 web 쪽에서
+    멱등 처리되거나 단순 중복일 뿐, 'running 영구 고착'보다는 안전하다(브리프 HIGH)."""
+    try:
+        _report({"final": True, "failed": True, "outcome": f"aborted: {reason}"})
+    except Exception as exc:  # pragma: no cover - 보고 자체가 실패해도 종료는 막지 않는다
+        log(f"WARN: 최후 terminal 보고 실패(무시): {exc}")
+
+
 def main() -> int:
     if _is_selftest():
         return selftest()
     try:
         return asyncio.run(run_live())
     except KeyboardInterrupt:  # pragma: no cover
+        log("WARN: KeyboardInterrupt — terminal 보고 시도")
+        _terminal_report_best_effort("interrupted")
         return 130
     except Exception as exc:
         log(f"ERROR: 에이전트 실행 실패: {exc}")
+        _terminal_report_best_effort(f"exception: {exc}")
         return 1
 
 

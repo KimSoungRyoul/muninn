@@ -14,6 +14,7 @@ metadata:
     - apiVersion: muninn.io/v1beta1
       kind: HuginnAgent
       name: ai-router-svc
+      uid: 00000000-0000-0000-0000-000000000000  # 부모 HuginnAgent 의 .metadata.uid (필수). 직접 apply 시엔 이 블록 생략 권장 — Muninn API/Operator 가 보강한다.
       controller: true              # cascade GC (Operator 가 누락 시 보강)
 spec:
   agentRef: ai-router-svc
@@ -51,7 +52,7 @@ spec:
     k8sNamespace: ns-ai-platform
 
   retryPolicy:
-    maxRuns: 3                      # → Job backoffLimit
+    maxRuns: 3                      # attempt 별 Run 생성 상한(Issue controller). Job backoffLimit 아님 — Job 은 backoffLimit=0 고정(operator-design §2.1, 핵심 계약 #2).
     backoff: exponential
 
 status:

@@ -57,7 +57,9 @@ type HuginnAgentReconciler struct {
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnissues,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups="",resources=secrets;configmaps,verbs=get;list;watch
+// 주의: operator 는 Secret/ConfigMap '객체'를 직접 Get/List 하지 않는다(인증은 Pod env 의 secretKeyRef 로만
+// 참조 — 내용 read 아님). 따라서 cluster-wide secrets/configmaps read 마커를 제거해 권한 탈취 시 피해 반경을
+// 줄인다(리뷰 MEDIUM). 에이전트 SA 의 namespace 범위 read 는 ensureAgentRBAC 가 Role 로 별도 부여한다.
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;patch
 
 func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

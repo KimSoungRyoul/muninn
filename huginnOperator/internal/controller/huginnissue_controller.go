@@ -38,6 +38,12 @@ const (
 	issueRefIndexKey = "spec.issueRef"
 	defaultMaxRuns   = 3
 	baseBackoff      = 30 * time.Second
+	// maxBackoff: 지수 backoff 상한 클램프(리뷰 MEDIUM). 큰 maxRuns/attempt 에서도 수백 일·overflow 방지.
+	maxBackoff = 15 * time.Minute
+	// agentGracePeriod: Issue 생성 후 이 시간 내 AgentNotFound 는 캐시 지연으로 보고 requeue(리뷰 MEDIUM).
+	agentGracePeriod = 5 * time.Minute
+	// agentRequeueAfter: AgentNotFound grace 기간 중 재시도 간격.
+	agentRequeueAfter = 15 * time.Second
 )
 
 // HuginnIssueReconciler reconciles a HuginnIssue object.
@@ -71,10 +77,22 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	var agent muninniov1beta1.HuginnAgent
 	if err := r.Get(ctx, client.ObjectKey{Namespace: issue.Namespace, Name: issue.Spec.AgentRef}, &agent); err != nil {
 		if apierrors.IsNotFound(err) {
+			// AgentNotFound 는 영구 Failed 로 박지 않는다(리뷰 MEDIUM): web 이 Agent 생성 직후 Issue 를
+			// 위임하면 operator 의 Agent informer 캐시가 Issue 이벤트보다 늦게 동기화될 수 있다(watch 순서 미보장).
+			// 생성 후 grace 기간(agentGracePeriod) 내에는 condition 만 남기고 requeue 로 Agent 출현을 기다린다.
+			// grace 경과 후에만 Failed(터미널)로 확정해 level-based reconcile 원칙을 지킨다.
 			base := issue.DeepCopy()
+			if time.Since(issue.CreationTimestamp.Time) < agentGracePeriod {
+				setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "AgentNotFound",
+					fmt.Sprintf("agentRef %q 미발견 — 캐시 동기화 대기", issue.Spec.AgentRef))
+				if _, err := r.patchStatus(ctx, base, &issue); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{RequeueAfter: agentRequeueAfter}, nil
+			}
 			issue.Status.Phase = muninniov1beta1.IssueFailed
 			setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "AgentNotFound",
-				fmt.Sprintf("agentRef %q 를 찾을 수 없음", issue.Spec.AgentRef))
+				fmt.Sprintf("agentRef %q 를 찾을 수 없음(grace 경과)", issue.Spec.AgentRef))
 			return r.patchStatus(ctx, base, &issue)
 		}
 		return ctrl.Result{}, err
@@ -153,7 +171,12 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "Running", "에이전트 실행 중")
 	case latest.Status.Phase == muninniov1beta1.RunSucceeded:
 		issue.Status.Phase = muninniov1beta1.IssueSucceeded
-		issue.Status.Outcome = latest.Status.Output
+		// outcome 이중 writer 제거(리뷰 HIGH): outcome 은 Agent→API 소유 필드다(types §141,
+		// report route 가 "PR #842" 같은 정제된 값을 기록). operator 는 run.Status.Output(원문)으로
+		// 덮어쓰지 않는다 — 비어 있을 때만 보수적으로 채워 핑퐁을 막는다.
+		if issue.Status.Outcome == "" {
+			issue.Status.Outcome = latest.Status.Output
+		}
 		setIssueCondition(&issue, "OutputReady", metav1.ConditionTrue, "Succeeded", "실행 완료")
 	case latest.Status.Phase == muninniov1beta1.RunCancelled:
 		issue.Status.Phase = muninniov1beta1.IssueCancelled
@@ -162,7 +185,12 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		// 재시도 판정(operator-design §2.1): maxRuns 미만이면 backoff 후 다음 attempt 생성.
 		if int32(len(runs)) < maxRuns {
 			if wait, ready := backoffReady(latest, issue.Spec.RetryPolicy.Backoff); !ready {
-				issue.Status.Phase = muninniov1beta1.IssueRunning
+				// backoff 대기 중에는 활성 Run 이 없으므로 phase=Running 으로 표기하지 않는다(리뷰 MEDIUM):
+				// §6 의 'Running=활성 Run 존재' 의미·countActiveIssues 집계 왜곡을 막는다. Pending 으로 두고
+				// condition reason=BackoffWaiting 으로 재시도 대기 중임을 명시한다.
+				issue.Status.Phase = muninniov1beta1.IssuePending
+				setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "BackoffWaiting",
+					fmt.Sprintf("재시도 backoff 대기(%s 후)", wait.Round(time.Second)))
 				if _, err := r.patchStatus(ctx, base, &issue); err != nil {
 					return ctrl.Result{}, err
 				}
@@ -252,14 +280,24 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 	return nil
 }
 
+// patchStatus 는 Issue status 를 merge-patch 한다. optimistic lock(리뷰 HIGH): base 가 stale 이면
+// 409 conflict→requeue 로 신선한 캐시에서 재집계 — API 가 직접 쓴 issue.status.phase(예: report route 의
+// AwaitingApproval)를 stale run 캐시 기반 집계가 역전시키는 race 를 막는다.
 func (r *HuginnIssueReconciler) patchStatus(ctx context.Context, base, issue *muninniov1beta1.HuginnIssue) (ctrl.Result, error) {
-	if err := r.Status().Patch(ctx, issue, client.MergeFrom(base)); err != nil {
+	if err := r.Status().Patch(ctx, issue, client.MergeFromWithOptions(base,
+		client.MergeFromWithOptimisticLock{})); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
 
 // backoffReady 는 직전 실패 Run 의 finishedAt 기준으로 재시도 대기를 판정한다(§2.1).
+// 지수 backoff 의 shift overflow/폭주 가드(리뷰 MEDIUM): attempt 가 커지면 1<<(attempt-1) 이
+// int64 overflow(attempt≥64 에서 음수)로 'elapsed>=delay 항상 참'→backoff 없는 즉시 재시도 루프가
+// 된다. shift 전에 attempt 를 안전 상한으로 클램프하고, 최종 delay 도 maxBackoff 로 클램프한다.
 func backoffReady(latest *muninniov1beta1.HuginnRun, policy muninniov1beta1.BackoffPolicy) (time.Duration, bool) {
 	if latest.Status.FinishedAt == nil || policy == muninniov1beta1.BackoffPolicy("none") {
 		return 0, true
@@ -269,7 +307,19 @@ func backoffReady(latest *muninniov1beta1.HuginnRun, policy muninniov1beta1.Back
 	case muninniov1beta1.BackoffPolicy("linear"):
 		delay = baseBackoff * time.Duration(latest.Spec.Attempt)
 	default: // exponential
-		delay = baseBackoff * time.Duration(int64(1)<<(latest.Spec.Attempt-1))
+		// shift 폭(attempt-1)을 클램프 — maxBackoff 를 넘기는 시점이면 어차피 상한에 도달한다.
+		// baseBackoff=30s, maxBackoff=15m 기준 shift 5 이면 16m 로 상한 초과 → 6 으로 충분.
+		shift := latest.Spec.Attempt - 1
+		if shift < 0 {
+			shift = 0
+		}
+		if shift > 16 {
+			shift = 16 // 1<<16 * 30s 도 한참 maxBackoff 초과 — overflow 없이 안전.
+		}
+		delay = baseBackoff * time.Duration(int64(1)<<uint(shift))
+	}
+	if delay > maxBackoff || delay <= 0 {
+		delay = maxBackoff
 	}
 	elapsed := time.Since(latest.Status.FinishedAt.Time)
 	if elapsed >= delay {

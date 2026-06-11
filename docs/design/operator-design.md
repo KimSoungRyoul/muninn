@@ -1,8 +1,10 @@
 # Huginn Operator — 설계 검토 & 구체화
 
-> **상태**: Draft v0.1 · 2026-06-03
+> **상태**: Draft v0.2 · 2026-06-11 (CRD kind 명칭을 메인 스펙 v0.3 의 `HuginnAgent` 로 정정, SA 소유·event Secret 서술을 구현에 맞춤)
 > **범위**: 메인 설계서(`muninn-devops-agent-platform.md`) §2~§6 의 Operator 부분을 **구현 가능한 수준**으로 구체화하고, 발견한 모순/공백을 해소한다.
-> **결론 요약**: Operator 는 **Go + kubebuilder(controller-runtime)** 로 구현한다. CRD 3종에 controller 3개 + HuginnApplication ValidatingWebhook 1개. 재시도/상태소유권/취소 전파 등 설계서가 모호하게 남긴 4개 지점을 아래에서 확정한다.
+> **결론 요약**: Operator 는 **Go + kubebuilder(controller-runtime)** 로 구현한다. CRD 3종에 controller 3개 + HuginnAgent ValidatingWebhook 1개. 재시도/상태소유권/취소 전파 등 설계서가 모호하게 남긴 4개 지점을 아래에서 확정한다.
+>
+> **명칭 주의**: 구 명칭 `HuginnApplication`/`spec.applicationRef` 는 메인 스펙 v0.3 에서 **`HuginnAgent`/`spec.agentRef`** 로 확정됐다. 코드도 `HuginnAgentReconciler`/`agentRef` 다. 아래 본문의 잔존 표기는 모두 `HuginnAgent`/`agentRef` 로 읽어라.
 
 ---
 
@@ -28,11 +30,13 @@
 ## 1. Controller ↔ 리소스 watch 토폴로지
 
 ```
-HuginnApplicationReconciler
-  For:   HuginnApplication
-  Owns:  PersistentVolumeClaim, ServiceAccount   (앱별 격리 리소스, §5.5/§6.1)
-  Watch: HuginnIssue (→ owner App 으로 enqueue, status.activeIssues 재계산, §8.4)
-  할 일: webhookUrl 발급(§4.5) · bindings 검증 · 앱 PVC/SA 보장 · activeIssues/conditions
+HuginnAgentReconciler
+  For:   HuginnAgent
+  Owns:  PersistentVolumeClaim   (앱별 격리 리소스, §5.5)
+  ※ ServiceAccount(huginn-agent)는 ensure 하되 Owns 하지 않는다 — namespace 공용 SA 라
+    Agent 삭제 시 같이 GC 되면 다른 Run/Agent 가 깨진다(premature GC 방지; 코드 정정).
+  Watch: HuginnIssue (→ owner Agent 로 enqueue, status.activeIssues 재계산, §8.4)
+  할 일: webhookUrl 발급(§4.5) · bindings 검증 · 앱 PVC 보장 · SA(비소유) 보장 · activeIssues/conditions
 
 HuginnIssueReconciler
   For:   HuginnIssue
@@ -48,7 +52,7 @@ HuginnRunReconciler
          · Job 상태 → Run.status.phase 매핑 · timeout/ttl 을 Job 네이티브 필드로 위임 · suspend 시 Job 삭제
 ```
 
-**field indexer**(reconcile 성능): `HuginnIssue.spec.applicationRef`, `HuginnRun.spec.issueRef` 에 인덱스를 건다. `Owns()` 가 자동 생성하는 ownerRef 역참조와 별개로, 이름 기반 cross-ref 조회에 사용.
+**field indexer**(reconcile 성능): `HuginnIssue.spec.agentRef`, `HuginnRun.spec.issueRef` 에 인덱스를 건다. `Owns()` 가 자동 생성하는 ownerRef 역참조와 별개로, 이름 기반 cross-ref 조회에 사용.
 
 ---
 
@@ -107,11 +111,11 @@ HuginnRunReconciler
 | 리소스 | 생성/보장 주체 | 비고 |
 |---|---|---|
 | Namespace `ns-{workspace-slug}` | **Operator 범위 밖(MVP)**. 플랫폼 admin / Muninn API 가 사전 provision | 차기: WorkspaceReconciler 후보. Operator 는 App.namespace ↔ workspaceId 정합만 검증 |
-| 앱 PVC `pvc-claude-{app}` (`~/.claude`) | **HuginnApplicationReconciler** (Owns) | §5.5 MVP=앱별 격리 PVC. accessMode 는 설정(RWO 기본, 동시 Run 시 RWX) |
-| ServiceAccount `huginn-agent-{ns}` | **HuginnApplicationReconciler** (Owns) | 자기 ns Secret/CM 만 read(§6.1) |
+| 앱 PVC `pvc-claude-{app}` (`~/.claude`) | **HuginnAgentReconciler** (Owns) | §5.5 MVP=앱별 격리 PVC. accessMode 는 설정(RWO 기본, 동시 Run 시 RWX) |
+| ServiceAccount `huginn-agent` | **HuginnAgentReconciler** (ensure, **비소유**) | 자기 ns Secret/CM 만 read(§6.1). namespace 공용이라 Owns 하지 않는다(premature GC 방지) |
 | guardrails/context ConfigMap | **HuginnRunReconciler** 또는 env 직접 주입 | MVP=env 직접(`MUNINN_GUARDRAILS` JSON), CM 은 global-prompt/team-settings/soul 만 |
 | Job (→Pod) | **HuginnRunReconciler** (Owns) | jobTemplate.podSpec 기반 |
-| event Secret `{issue}-event` | **Muninn API** (CR 생성 시 함께) | Operator 는 참조만 |
+| event Secret `{issue}-event` | **Muninn API** (CR 생성 시 함께) | **미구현(후속)** — 현재 muninnWeb 은 원본 payload 보존/이 Secret 생성을 하지 않는다(메인 스펙 §4.4 콜아웃). Operator 는 참조만 |
 
 ### 2.5 에이전트 env 주입 — Issue 단위 + Run 단위
 
@@ -139,7 +143,7 @@ HuginnRunReconciler
 
 ## 4. Admission Webhook 범위 (§3.1)
 
-`HuginnApplication` ValidatingWebhook + Defaulting:
+`HuginnAgent` ValidatingWebhook + Defaulting:
 
 - **Validating(순수, 외부 의존 없음)**:
   - `spec.workspaceId` required & **immutable**(update 시 변경 거부).
@@ -192,9 +196,9 @@ Issue.phase = Run 들의 집계:
 - [x] CRD/RBAC 매니페스트 생성(`make manifests`)
 - [x] HuginnRunReconciler: Run→Job 생성, env/volume 주입, Job→phase 매핑, suspend→Cancel
 - [x] HuginnIssueReconciler: Issue→Run(attempt 1) 생성, run phase 집계, 재시도(maxRuns)
-- [x] HuginnApplicationReconciler: webhookUrl 발급, PVC/SA 보장, activeIssues 집계
-- [x] HuginnApplication ValidatingWebhook(workspaceId required/immutable) + Defaulting(label)
-- [x] field indexer(issueRef/applicationRef), Owns 토폴로지
+- [x] HuginnAgentReconciler: webhookUrl 발급, PVC/SA 보장, activeIssues 집계
+- [x] HuginnAgent ValidatingWebhook(workspaceId required/immutable) + Defaulting(label)
+- [x] field indexer(issueRef/agentRef), Owns 토폴로지
 - [x] `make build` 컴파일 통과
 - [ ] (차기) envtest 단위테스트, e2e(kind), finalizer 활성화, AwaitingApproval API 연동, 멤버십(API)
 

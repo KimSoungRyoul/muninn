@@ -27,6 +27,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,7 +42,15 @@ import (
 // 상속 caps 복사, suspend→취소. 진행 메트릭(step/cost/tokens)은 Agent→API 소유라 건드리지 않는다(§2.2).
 type HuginnRunReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
+}
+
+// recordEvent 는 Recorder 가 배선됐을 때만 K8s Event 를 발행한다(테스트에서 nil 허용).
+func (r *HuginnRunReconciler) recordEvent(run *muninniov1beta1.HuginnRun, eventType, reason, msg string) {
+	if r.Recorder != nil {
+		r.Recorder.Event(run, eventType, reason, msg)
+	}
 }
 
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnruns,verbs=get;list;watch;create;update;patch;delete
@@ -67,6 +76,20 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	base := run.DeepCopy()
 
+	// 취소 경로(operator-design §2.3): suspend=true 면 Job 삭제 + phase=Cancelled.
+	// 취소는 실행 중 부작용을 멈추는 안전장치이므로 caps 복사/Job 보장보다 먼저 처리한다 —
+	// 거절(reject)이 spec.suspend=true 를 패치했는데 Issue Get(caps) 이 transient 에러로 막혀
+	// 취소 전파가 지연되는 일을 피한다(리뷰 LOW).
+	if run.Spec.Suspend && !isRunTerminal(run.Status.Phase) {
+		if err := r.deleteJob(ctx, &run); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.markFinished(&run, muninniov1beta1.RunCancelled)
+		setRunCondition(&run, "Cancelled", metav1.ConditionTrue, "Suspended", "spec.suspend=true 로 취소됨")
+		r.recordEvent(&run, corev1.EventTypeNormal, "Cancelled", "spec.suspend=true 로 취소됨")
+		return r.patchStatus(ctx, base, &run)
+	}
+
 	// 상속 caps 1회 복사(Operator 소유): issue.inheritedGuardrails → status.maxStep/maxCostUsd/maxTokens.
 	// 가드는 maxStep 으로만 닫는다 — maxStep(=maxIterations, Minimum=1)은 복사 후 항상 ≥1 이라 정확히 1회만 실행된다.
 	// (maxCostUsd/maxTokens 는 0 이 정당값이라 OR 가드로 쓰면 재실행됨.)
@@ -78,25 +101,20 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			run.Status.MaxCostUsd = issue.Spec.InheritedGuardrails.MaxCostUsd
 			run.Status.MaxTokens = issue.Spec.InheritedGuardrails.MaxTokens
 		case apierrors.IsNotFound(err):
-			// 부모 Issue 가 이미 사라짐(cascade GC 중일 수 있음) — caps 복사 불가.
-			// MaxStep 을 sentinel(1, CRD Minimum=1)로 닫아, 매 reconcile 마다 Issue
-			// 재조회·로그가 반복되지 않게 한다(가드는 MaxStep 으로만 닫힌다; 위 주석 참고).
-			log.Info("부모 Issue 없음 — 상속 caps 미복사, MaxStep=1 로 고정", "issue", run.Spec.IssueRef)
-			run.Status.MaxStep = 1
+			// 부모 Issue 가 없음(cascade GC 중인 고아 Run). caps 도 회계 의미도 없고,
+			// 이 시점에 Job 을 만들면 곧 GC 될 Run 에 비멱등 에이전트 실행을 잠깐이라도 띄운다(리뷰 LOW).
+			// → sentinel(MaxStep=1) 로 가드만 닫지 않고, Job 미생성 상태에서 즉시 Failed 로 종료한다.
+			log.Info("부모 Issue 없음 — Job 미생성, Run 을 Failed 로 종료", "issue", run.Spec.IssueRef)
+			r.markFinished(&run, muninniov1beta1.RunFailed)
+			setRunCondition(&run, "Failed", metav1.ConditionTrue, "IssueNotFound",
+				fmt.Sprintf("부모 Issue %q 없음 — 실행하지 않음", run.Spec.IssueRef))
+			r.recordEvent(&run, corev1.EventTypeWarning, "IssueNotFound",
+				fmt.Sprintf("부모 Issue %q 없음 — Run 종료", run.Spec.IssueRef))
+			return r.patchStatus(ctx, base, &run)
 		default:
 			// transient API 에러: caps 미복사 상태로 Job 을 만들지 않도록 requeue 한다(§2.2).
 			return ctrl.Result{}, err
 		}
-	}
-
-	// 취소 경로(operator-design §2.3): suspend=true 면 Job 삭제 + phase=Cancelled.
-	if run.Spec.Suspend && !isRunTerminal(run.Status.Phase) {
-		if err := r.deleteJob(ctx, &run); err != nil {
-			return ctrl.Result{}, err
-		}
-		r.markFinished(&run, muninniov1beta1.RunCancelled)
-		setRunCondition(&run, "Cancelled", metav1.ConditionTrue, "Suspended", "spec.suspend=true 로 취소됨")
-		return r.patchStatus(ctx, base, &run)
 	}
 
 	// Job 보장(없으면 생성).
@@ -109,6 +127,20 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			// 이미 종료된 Run 의 Job 이 TTL 로 사라진 경우 — 재생성하지 않는다.
 			return ctrl.Result{}, nil
 		}
+		// 비터미널 Run 인데 Job 이 없다 — 두 경우를 구분한다(리뷰 HIGH):
+		//   (1) status.jobName != "" → 한 번 만들었던 Job 이 사라짐(운영자 delete/TTL 만료 중 operator 다운 등).
+		//       에이전트 실행은 non-idempotent(핵심 계약 #2)이므로 같은 attempt 를 절대 재실행하지 않는다.
+		//       Failed(reason=JobLost) 로 종료시켜 Issue 컨트롤러의 정규 재시도(새 attempt, maxRuns/backoff)로 넘긴다.
+		//   (2) status.jobName == "" → 최초 생성. 이 분기만 createJob 한다('Run=정확히 1 attempt=Job 1개' 불변식).
+		if run.Status.JobName != "" {
+			log.Info("Job 소실 감지(비터미널 Run) — 재생성하지 않고 Failed 로 종료", "job", run.Status.JobName)
+			r.markFinished(&run, muninniov1beta1.RunFailed)
+			setRunCondition(&run, "Failed", metav1.ConditionTrue, "JobLost",
+				fmt.Sprintf("Job %q 가 사라짐 — 비멱등 재실행 금지, Issue 가 새 attempt 로 재시도", run.Status.JobName))
+			r.recordEvent(&run, corev1.EventTypeWarning, "JobLost",
+				fmt.Sprintf("Job %q 소실 — 재생성하지 않고 Failed 처리", run.Status.JobName))
+			return r.patchStatus(ctx, base, &run)
+		}
 		if err := r.createJob(ctx, &run); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -118,6 +150,7 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			run.Status.Phase = muninniov1beta1.RunQueued
 		}
 		setRunCondition(&run, "JobCreated", metav1.ConditionTrue, "Created", "에이전트 Job 생성됨")
+		r.recordEvent(&run, corev1.EventTypeNormal, "JobCreated", fmt.Sprintf("에이전트 Job %q 생성됨", jobName))
 		return r.patchStatus(ctx, base, &run)
 	case err != nil:
 		return ctrl.Result{}, err
@@ -143,8 +176,19 @@ func (r *HuginnRunReconciler) mapJobToRunStatus(run *muninniov1beta1.HuginnRun, 
 		r.markFinished(run, muninniov1beta1.RunFailed)
 		setRunCondition(run, "Failed", metav1.ConditionTrue, jobFailureReason(job), "에이전트 Job 실패")
 	default:
-		// 활성 상태. AwaitingApproval(API 소유)은 보존한다(§2.2).
+		// 활성 상태. AwaitingApproval(API 소유 전이)은 보존한다(§2.2) — 단, 승인 완료는 예외.
 		if run.Status.Phase == muninniov1beta1.RunAwaitingApproval {
+			// 승인 후 phase 복귀(리뷰 MEDIUM): web 의 approve 경로(incidents.ts approveRun)는
+			// status.approval.state=Approved 만 패치하고 phase 는 건드리지 않는다. Job 이 아직
+			// 살아 있으면(에이전트가 승인 후 작업 계속) operator 가 Running 으로 복귀시켜야
+			// 콘솔/집계가 AwaitingApproval 에 고착되지 않는다(§2.2 보존 가드의 명시적 예외).
+			if run.Status.Approval != nil && run.Status.Approval.State == muninniov1beta1.ApprovalApproved {
+				run.Status.Phase = muninniov1beta1.RunRunning
+				setRunCondition(run, "Running", metav1.ConditionTrue, "Approved", "승인됨 — 실행 재개")
+				r.recordEvent(run, corev1.EventTypeNormal, "Approved", "운영자 승인 — phase 를 Running 으로 복귀")
+				return
+			}
+			// 아직 미승인(Pending) — API 소유 전이 존중, 보존만 한다.
 			return
 		}
 		if (job.Status.Ready != nil && *job.Status.Ready > 0) || job.Status.Active > 0 {
@@ -265,7 +309,13 @@ func (r *HuginnRunReconciler) createJob(ctx context.Context, run *muninniov1beta
 	if err := controllerutil.SetControllerReference(run, job, r.Scheme); err != nil {
 		return err
 	}
-	return r.Create(ctx, job)
+	// AlreadyExists 흡수(리뷰 LOW): status 패치 실패 후 재조회 시 캐시에 Job 이 아직 안 보여
+	// NotFound→createJob 으로 들어와도, 결정적 이름 덕에 같은 Job 이라 에러 requeue 없이 넘긴다
+	// (Issue 컨트롤러 createRun 과 동일 패턴으로 통일).
+	if err := r.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+	return nil
 }
 
 func (r *HuginnRunReconciler) deleteJob(ctx context.Context, run *muninniov1beta1.HuginnRun) error {
@@ -277,9 +327,17 @@ func (r *HuginnRunReconciler) deleteJob(ctx context.Context, run *muninniov1beta
 	return client.IgnoreNotFound(r.Delete(ctx, &job, &client.DeleteOptions{PropagationPolicy: &policy}))
 }
 
-// patchStatus 는 Operator 소유 필드만 MergeFrom 패치로 반영한다 → Agent→API 소유 필드 보존(§2.2).
+// patchStatus 는 Operator 소유 필드만 merge-patch 로 반영한다 → Agent→API 소유 필드 보존(§2.2).
+// optimistic lock(리뷰 HIGH): base(reconcile 시작 시 캐시 스냅샷)가 stale 이면 409 conflict 로
+// 거부되어 requeue 된다. 이로써 API 가 직전에 쓴 phase=AwaitingApproval 등을 stale 캐시 기반
+// Pending→Running 계산이 역전시키는 race 를 막는다(신선한 캐시로 재판정).
 func (r *HuginnRunReconciler) patchStatus(ctx context.Context, base, run *muninniov1beta1.HuginnRun) (ctrl.Result, error) {
-	if err := r.Status().Patch(ctx, run, client.MergeFrom(base)); err != nil {
+	if err := r.Status().Patch(ctx, run, client.MergeFromWithOptions(base,
+		client.MergeFromWithOptimisticLock{})); err != nil {
+		if apierrors.IsConflict(err) {
+			// 다른 writer(API/Agent)가 그사이 status 를 갱신 — 충돌은 정상 동작이므로 조용히 requeue.
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil

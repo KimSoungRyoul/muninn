@@ -163,7 +163,6 @@ spec:
                           instance:
                             type: string
                         required:
-                        - backend
                         - instance
                         type: object
                       tempo:
@@ -236,9 +235,6 @@ spec:
                     format: int64
                     minimum: 0
                     type: integer
-                required:
-                - maxCostUsd
-                - maxIterations
                 type: object
               identity:
                 description: Identity 는 관측 신호 ↔ 워크로드 매핑(Issue 으로 상속).
@@ -350,8 +346,6 @@ spec:
                     - error
                     - critical
                     type: string
-                required:
-                - severityThreshold
                 type: object
               workspaceId:
                 description: 'workspaceId: 멀티테넌시 경계(§3.1). required & immutable. admission

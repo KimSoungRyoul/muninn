@@ -26,7 +26,9 @@ spec:
       # muninn-web 는 Muninn API 다 — HuginnIssue 생성·HuginnRun 보고/승인 패치로 K8s API 를 호출한다.
       # 따라서 SA + 토큰 마운트가 필요(web/rbac.yaml 의 Role 로 huginn* 한정 권한).
       serviceAccountName: {{ include "muninn.web.serviceAccountName" . }}
-      automountServiceAccountToken: {{ .Values.web.serviceAccount.create }}
+      # 토큰 마운트는 SA 생성 여부와 분리한다 — 기존 SA(create=false) 사용 시에도 in-cluster K8s
+      # 자격이 있어야 k8sEnabled()가 통과한다(아니면 조용히 mock 폴백). 기본 true.
+      automountServiceAccountToken: {{ .Values.web.serviceAccount.automount }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -67,6 +69,15 @@ spec:
             # CR 이 사는 namespace(lib/k8s.ts DEFAULT_NAMESPACE). 기본=릴리스 namespace.
             - name: MUNINN_NAMESPACE
               value: {{ .Values.web.namespaceOverride | default .Release.Namespace | quote }}
+            # Muninn API 인증 토큰(lib/auth.ts). agent(runner.py)·operator 와 동일 토큰이어야 한다.
+            # 기본은 agent-secrets 의 muninn-api-token 키(operator 가 agent Job 에 주입하는 것과 동일).
+            # 키가 없으면 optional=true 라 빈 값 → web 은 dev 모드(인증 비활성+경고)로 동작한다.
+            - name: MUNINN_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.web.apiToken.existingSecret | default .Values.agent.secrets.name }}
+                  key: {{ .Values.web.apiToken.key | quote }}
+                  optional: true
             {{- if .Values.metaDb.enabled }}
             # 메모리 metaDB 연결 — CNPG(또는 외부 DB)가 만든 Secret 의 uri 키를 DATABASE_URL 로 주입.
             - name: DATABASE_URL

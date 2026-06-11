@@ -18,8 +18,10 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 )
@@ -89,6 +91,8 @@ func TestBuildJobTemplate(t *testing.T) {
 	// API 키/OAuth 토큰 둘 중 하나면 충분 → 둘 다 optional secretKeyRef.
 	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_API_KEY", agentSecretName, anthropicKeyName)
 	assertOptionalSecretRef(t, jt.Env, "CLAUDE_CODE_OAUTH_TOKEN", agentSecretName, oauthTokenKeyName)
+	// MUNINN_API_TOKEN: 런타임이 Muninn API 를 인증(§5.6). 동일 패턴(agent-secrets, optional).
+	assertOptionalSecretRef(t, jt.Env, "MUNINN_API_TOKEN", agentSecretName, muninnAPITokenKeyName)
 
 	if gh, ok := envByName(jt.Env, "GITHUB_PAT"); !ok || gh.ValueFrom == nil || gh.ValueFrom.SecretKeyRef.Name != "gh-pat" {
 		t.Error("GITHUB_PAT secretKeyRef(gh-pat) 누락")
@@ -165,5 +169,39 @@ func TestExpandPodSpec(t *testing.T) {
 	ps2 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:2"})
 	if len(ps2.Volumes) != 0 || len(ps2.Containers[0].VolumeMounts) != 0 {
 		t.Error("ClaudePVCName 비었는데 볼륨이 부착됨")
+	}
+}
+
+// runWithFinishedAt 은 backoffReady 테스트용 실패 Run 픽스처(attempt + finishedAt offset).
+func runWithFinishedAt(attempt int32, finishedAgo time.Duration) *muninniov1beta1.HuginnRun {
+	run := &muninniov1beta1.HuginnRun{}
+	run.Spec.Attempt = attempt
+	ft := metav1.NewTime(time.Now().Add(-finishedAgo))
+	run.Status.FinishedAt = &ft
+	return run
+}
+
+// TestBackoffReady 는 재시도 backoff 의 클램프/overflow 가드를 검증한다(리뷰 MEDIUM, 순수 함수).
+func TestBackoffReady(t *testing.T) {
+	// none 정책: 항상 즉시 ready.
+	if _, ready := backoffReady(runWithFinishedAt(3, 0), muninniov1beta1.BackoffPolicy("none")); !ready {
+		t.Error("none 정책은 즉시 ready 여야 함")
+	}
+	// finishedAt nil: 즉시 ready.
+	if _, ready := backoffReady(&muninniov1beta1.HuginnRun{}, "exponential"); !ready {
+		t.Error("finishedAt nil 은 즉시 ready 여야 함")
+	}
+	// 큰 attempt(overflow 유발 가능): delay 가 음수가 되지 않고 maxBackoff 이하로 클램프되어야 함.
+	// finishedAt 이 방금이면 not-ready, 대기시간은 (0, maxBackoff] 범위.
+	wait, ready := backoffReady(runWithFinishedAt(64, 0), "exponential")
+	if ready {
+		t.Error("방금 끝난 큰 attempt 는 backoff 대기여야 함(overflow 로 즉시 ready 되면 버그)")
+	}
+	if wait <= 0 || wait > maxBackoff {
+		t.Errorf("backoff wait = %v, want (0, %v]", wait, maxBackoff)
+	}
+	// 충분히 오래 전 종료면 ready.
+	if _, ready := backoffReady(runWithFinishedAt(2, maxBackoff+time.Minute), "exponential"); !ready {
+		t.Error("maxBackoff 초과 경과면 ready 여야 함")
 	}
 }

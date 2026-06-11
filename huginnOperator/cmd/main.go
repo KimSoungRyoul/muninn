@@ -182,6 +182,11 @@ func main() {
 	if err := (&controller.HuginnAgentReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// webhookUrl base FQDN + 앱별 PVC 용량/StorageClass 를 env 로 배선(리뷰 MEDIUM).
+		// 비우면 컨트롤러가 기본값(defaultAPIBaseURL / 1Gi / 클러스터 기본 SC)을 쓴다.
+		APIBaseURL:       os.Getenv("MUNINN_API_BASE_URL"),
+		PVCSize:          os.Getenv("MUNINN_AGENT_PVC_SIZE"),
+		StorageClassName: os.Getenv("MUNINN_AGENT_STORAGE_CLASS"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnAgent")
 		os.Exit(1)
@@ -200,6 +205,9 @@ func main() {
 	if err := (&controller.HuginnRunReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// EventRecorder: 주요 전이(JobCreated/JobLost/Cancelled/Approved/IssueNotFound)를 K8s Event 로
+		// 발행해 kubectl describe 로 관측 가능하게 한다(리뷰 MEDIUM; events RBAC 는 이미 선언됨).
+		Recorder: mgr.GetEventRecorderFor("huginnrun-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnRun")
 		os.Exit(1)

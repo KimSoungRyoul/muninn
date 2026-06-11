@@ -5,6 +5,7 @@
 
 import { NextRequest } from "next/server";
 import { ok, badRequest } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { patchRunStatus, k8sEnabled, DEFAULT_NAMESPACE } from "@/lib/k8s";
 import { normalizeRecalledMemoryIds } from "@/lib/incidents";
 
@@ -12,6 +13,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   let body: any;
   try {
     body = await req.json();

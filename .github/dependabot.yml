@@ -1,0 +1,66 @@
+# Dependabot — 의존성 업데이트 자동화(주간; 보안 패치는 Dependabot 이 즉시 별도 PR).
+# 영향 생태계 5개: npm/pnpm(muninnWeb), gomod(huginnOperator), pip(agent), docker, github-actions.
+# next 14.2.x 같은 정체를 구조적으로 방지하고, github-actions 의 커밋 SHA 핀 갱신도 자동화한다.
+version: 2
+updates:
+  # ── muninnWeb (npm/pnpm) ──
+  - package-ecosystem: npm
+    directory: /muninnWeb
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "muninnWeb"]
+    commit-message:
+      prefix: "build(muninnWeb)"
+    groups:
+      # 보안 외 마이너/패치 업데이트는 묶어 PR 소음을 줄인다.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # ── huginnOperator (Go modules) ──
+  - package-ecosystem: gomod
+    directory: /huginnOperator
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "huginnOperator"]
+    commit-message:
+      prefix: "build(operator)"
+    groups:
+      k8s:
+        # controller-runtime + k8s.io 는 버전이 맞물리므로 함께 올린다.
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+
+  # ── huginnAgentRuntime/agent (pip) ──
+  - package-ecosystem: pip
+    directory: /huginnAgentRuntime/agent
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "agent-runtime"]
+    commit-message:
+      prefix: "build(agent)"
+
+  # ── Docker base images (agent-runtime + web) ──
+  - package-ecosystem: docker
+    directories:
+      - /huginnAgentRuntime
+      - /muninnWeb
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "build(docker)"
+
+  # ── GitHub Actions (SHA 핀 갱신 자동화) ──
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"

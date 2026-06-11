@@ -1,0 +1,59 @@
+# muninnWeb(Next.js 콘솔 + Muninn API) CI — lockfile 정합성 + lint + build(타입체크 게이트).
+#   - PR / main 푸시: muninnWeb/** 또는 이 워크플로 변경 시 실행.
+#   - `pnpm build`(= next build)는 muninnWeb 의 타입체크 게이트다(실 K8s/DB 배선 코드 포함).
+#   - 빌드는 Anthropic/K8s/DB 에 접속하지 않는다(런타임에만 배선) → 자격 불필요.
+# 보안 강화 후속: uses 를 커밋 SHA 로 핀(현재 major 태그). github-actions Dependabot 이 SHA 핀 갱신을 자동화한다.
+name: web-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - muninnWeb/**
+      - .github/workflows/web-ci.yml
+  pull_request:
+    paths:
+      - muninnWeb/**
+      - .github/workflows/web-ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: muninnWeb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: muninnWeb/pnpm-lock.yaml
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build (type-check gate)
+        run: pnpm build
+        env:
+          # Next telemetry off(CI 소음/네트워크 회피).
+          NEXT_TELEMETRY_DISABLED: "1"

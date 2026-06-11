@@ -47,6 +47,8 @@ const (
 	agentSecretName   = "agent-secrets" // 인증 키 소스(§5.1)
 	anthropicKeyName  = "anthropic-api-key"
 	oauthTokenKeyName = "claude-code-oauth-token" // OAuth 인증 대안(Pro/Max/team)
+	// muninnAPITokenKeyName: 런타임이 Muninn API(보고/승인/메모리)를 인증할 토큰. agent-secrets 의 키.
+	muninnAPITokenKeyName = "muninn-api-token"
 
 	serviceAccountName = "huginn-agent" // 자기 namespace Secret/CM 만 read(§6.1)
 
@@ -100,6 +102,15 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 			SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
 				Key:                  oauthTokenKeyName,
+				Optional:             ptr.To(true),
+			},
+		}},
+		// MUNINN_API_TOKEN: 런타임이 Muninn API(보고/승인/메모리) 호출을 인증하는 토큰(§5.6).
+		// 인증 키와 동일 패턴(agent-secrets, optional) — 미배포 환경에서도 Pod 가 뜨도록 optional.
+		{Name: "MUNINN_API_TOKEN", ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
+				Key:                  muninnAPITokenKeyName,
 				Optional:             ptr.To(true),
 			},
 		}},

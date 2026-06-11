@@ -100,7 +100,8 @@ type SourceSpec struct {
 type TriggerSpec struct {
 	// severityThreshold 미만 alert 는 Gateway 가 drop(§4.1)
 	// +kubebuilder:default=warning
-	SeverityThreshold Severity `json:"severityThreshold"`
+	// +optional
+	SeverityThreshold Severity `json:"severityThreshold,omitempty"`
 }
 
 // Guardrails 는 안전 한도(SDK 파라미터로 집행; §5.4).
@@ -108,11 +109,13 @@ type Guardrails struct {
 	// maxIterations → SDK max_turns
 	// +kubebuilder:default=12
 	// +kubebuilder:validation:Minimum=1
-	MaxIterations int32 `json:"maxIterations"`
+	// +optional
+	MaxIterations int32 `json:"maxIterations,omitempty"`
 	// maxCostUsd → SDK max_budget_usd (cost 는 예상치). MVP 는 정수 USD 로 단순화(float 직렬화 회피).
 	// +kubebuilder:default=5
 	// +kubebuilder:validation:Minimum=0
-	MaxCostUsd int32 `json:"maxCostUsd"`
+	// +optional
+	MaxCostUsd int32 `json:"maxCostUsd,omitempty"`
 	// maxTokens: 토큰 예산 상한(0=무제한). onGuardrailNearLimit 트리거(§6.4)가 cost/tokens 한도로 참조.
 	// Operator 가 Run 생성 시 status.maxTokens 로 복사(operator-design §2.2).
 	// +kubebuilder:validation:Minimum=0
@@ -137,7 +140,8 @@ type ToolBinding struct {
 // MetricsBinding 은 Prometheus 호환 메트릭 백엔드(pluggable; 그림=Mimir).
 type MetricsBinding struct {
 	// +kubebuilder:default=mimir
-	Backend  string `json:"backend"`
+	// +optional
+	Backend  string `json:"backend,omitempty"`
 	Instance string `json:"instance"`
 	// +optional
 	Config map[string]string `json:"config,omitempty"`

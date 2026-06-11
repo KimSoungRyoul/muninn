@@ -28,6 +28,9 @@ export function phaseToStatus(phase?: string): RunStatus {
 }
 
 // ---- 콘솔 뷰 타입(코파일럿/표가 그대로 렌더) ----
+// 데이터 출처 표식 — k8s 조회 실패 시 mock 폴백을 실데이터로 오인하지 않게 코파일럿/UI 가 구분.
+export type DataSource = "k8s" | "mock";
+
 export interface RunVM {
   id: string;
   app: string;
@@ -41,6 +44,7 @@ export interface RunVM {
   namespace: string;
   approval: string | null; // Pending | Approved | Rejected | Expired
   startedAt: string | null;
+  source?: DataSource;
 }
 
 export interface IncidentVM {
@@ -54,6 +58,7 @@ export interface IncidentVM {
   dedup: number;
   issuingUser: string | null;
   runs: RunVM[];
+  dataSource?: DataSource;
 }
 
 const ns = () => k8s.DEFAULT_NAMESPACE;
@@ -79,6 +84,13 @@ export function normalizeRecalledMemoryIds(raw: unknown): Array<{ id: string; sc
     .filter((x): x is { id: string; score?: string; reason?: string } => x != null);
 }
 
+// K8s label 값으로 안전한 형태인지(정규식 (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?, 최대 63자).
+// app/issue 이름은 CR name 이라 통상 label-safe 이나, 외부 입력일 수 있어 방어적으로 검사한다.
+const LABEL_VALUE_RE = /^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$/;
+function isLabelSafe(v: string): boolean {
+  return v.length <= 63 && LABEL_VALUE_RE.test(v);
+}
+
 function runView(cr: any): RunVM {
   const st = cr?.status ?? {};
   const labels = cr?.metadata?.labels ?? {};
@@ -95,6 +107,7 @@ function runView(cr: any): RunVM {
     namespace: cr?.metadata?.namespace ?? ns(),
     approval: st.approval?.state ?? null,
     startedAt: st.startedAt ?? null,
+    source: "k8s",
   };
 }
 
@@ -132,15 +145,17 @@ export async function listApplications(): Promise<AppVM[]> {
   return items.map(appView);
 }
 
-/** id 또는 name 으로 HuginnAgent CR 1개를 가져온다(없으면 null). */
+/** name 으로 HuginnAgent CR 1개를 가져온다(없으면 null). */
 export async function getApplicationCr(key: string): Promise<any | null> {
   if (!k8s.k8sEnabled()) return null;
   try {
     return await k8s.getHuginnAgent(ns(), key);
-  } catch {
-    // name 이 아닐 수 있으니 목록에서 name 매칭 재시도
-    const items = await k8s.listHuginnAgents(ns());
-    return items.find((a: any) => a?.metadata?.name === key) ?? null;
+  } catch (err: any) {
+    // 404 만 null(미존재)로 처리한다. 그 외(RBAC/네트워크)는 재throw — 풀 LIST 폴백은
+    // get 이 이미 name 기준이라 동일 name 을 다시 찾을 수 없어 무의미했고 오류만 삼켰다.
+    const code = err?.statusCode ?? err?.code ?? err?.response?.statusCode;
+    if (code === 404) return null;
+    throw err;
   }
 }
 
@@ -160,14 +175,15 @@ export async function queryIncidents(opts: { status?: "active" | "all"; app?: st
         const runs = e.runIds.map((id) => runById.get(id)).filter(Boolean).map((r: any) => ({
           id: r.id, app: r.app, status: r.status as RunStatus, phase: r.status,
           step: r.step, max: r.max, cost: r.cost, output: r.output,
-          issue: e.id, namespace: ns(), approval: r.status === "awaiting" ? "Pending" : null, startedAt: r.started,
+          issue: e.id, namespace: ns(), approval: r.status === "awaiting" ? "Pending" : null,
+          startedAt: r.started, source: "mock" as DataSource,
         }));
         const phase = runs.some((r) => r.status === "running" || r.status === "queued") ? "Running"
           : runs.some((r) => r.status === "awaiting") ? "AwaitingApproval"
           : runs.some((r) => r.status === "succeeded") ? "Succeeded" : "Failed";
         return {
           issue: e.id, app: e.app, source: e.source, severity: e.severity, title: e.title,
-          goal: e.title, phase, dedup: e.dedup, issuingUser: null, runs,
+          goal: e.title, phase, dedup: e.dedup, issuingUser: null, runs, dataSource: "mock" as DataSource,
         };
       })
       .filter((i) => !wantActive || ACTIVE_PHASES.has(i.phase));
@@ -178,8 +194,14 @@ export async function queryIncidents(opts: { status?: "active" | "all"; app?: st
   // throw 하므로, 여기서 잡아 mock 으로 떨어뜨려 500 대신 graceful degrade 한다.
   if (!k8s.k8sEnabled()) return mock();
 
+  // app 필터가 있으면 muninn.io/agent 라벨로 서버측 필터(풀 덤프 회피). issue/run 양쪽 동일 라벨.
+  const agentSel = opts.app && isLabelSafe(opts.app) ? `muninn.io/agent=${opts.app}` : undefined;
+
   try {
-    const [issues, runs] = await Promise.all([k8s.listHuginnIssues(ns()), k8s.listHuginnRuns(ns())]);
+    const [issues, runs] = await Promise.all([
+      k8s.listHuginnIssues(ns(), agentSel),
+      k8s.listHuginnRuns(ns(), agentSel),
+    ]);
     const runsByIssue = new Map<string, any[]>();
     for (const r of runs) {
       const key = r?.spec?.issueRef ?? "";
@@ -202,6 +224,7 @@ export async function queryIncidents(opts: { status?: "active" | "all"; app?: st
           dedup: num(st.dedupCount),
           issuingUser: i?.spec?.issuingUser ?? null,
           runs: (runsByIssue.get(name) ?? []).map(runView),
+          dataSource: "k8s" as DataSource,
         };
       })
       .filter((i) => !wantActive || ACTIVE_PHASES.has(i.phase));
@@ -218,9 +241,12 @@ export async function listRunsVM(opts: { status?: RunStatus; app?: string } = {}
     return [...byId.values()].map((r: any) => ({
       id: r.id, app: r.app, status: r.status, phase: r.status, step: r.step, max: r.max,
       cost: r.cost, output: r.output, issue: null, namespace: ns(),
-      approval: r.status === "awaiting" ? "Pending" : null, startedAt: r.started,
+      approval: r.status === "awaiting" ? "Pending" : null, startedAt: r.started, source: "mock" as DataSource,
     }));
   };
+
+  // app 필터는 muninn.io/agent 라벨로 서버측 축소(풀 덤프 회피). status(phase)는 라벨이 아니라 JS 필터.
+  const agentSel = opts.app && isLabelSafe(opts.app) ? `muninn.io/agent=${opts.app}` : undefined;
 
   let runs: RunVM[];
   if (!k8s.k8sEnabled()) {
@@ -228,13 +254,14 @@ export async function listRunsVM(opts: { status?: RunStatus; app?: string } = {}
   } else {
     // queryIncidents 와 동일: k8sEnabled 가 true 라도 실제 호출이 실패할 수 있어 mock 으로 fallback.
     try {
-      runs = (await k8s.listHuginnRuns(ns())).map(runView);
+      runs = (await k8s.listHuginnRuns(ns(), agentSel)).map(runView);
     } catch (err) {
       console.warn("[muninn] listRunsVM: k8s 조회 실패 — mock 으로 fallback", err);
       runs = mock();
     }
   }
   if (opts.status) runs = runs.filter((r) => r.status === opts.status);
+  // 라벨 미부여 CR 방어용으로 app JS 필터도 유지(서버측 라벨 필터가 1차).
   if (opts.app) runs = runs.filter((r) => r.app === opts.app);
   return runs;
 }
@@ -251,7 +278,10 @@ export async function getIssueRuns(issueName: string): Promise<{
   } catch {
     return null;
   }
-  const runs = (await k8s.listHuginnRuns(ns()))
+  // operator 가 자식 Run 에 muninn.io/issue=<issueName> 라벨을 항상 부여 — 서버측 필터로 풀 덤프 회피.
+  // issueName 은 CR name 이라 통상 label-safe. spec.issueRef JS 필터는 라벨 누락 CR 방어용으로 유지.
+  const issueSel = isLabelSafe(issueName) ? `muninn.io/issue=${issueName}` : undefined;
+  const runs = (await k8s.listHuginnRuns(ns(), issueSel))
     .filter((r: any) => r?.spec?.issueRef === issueName)
     .map(runView);
   return {
@@ -270,7 +300,7 @@ export async function getRunStatus(runId: string): Promise<RunVM | null> {
     return {
       id: all.id, app: all.app, status: all.status, phase: all.status, step: all.step, max: all.max,
       cost: all.cost, output: all.output, issue: null, namespace: ns(),
-      approval: all.status === "awaiting" ? "Pending" : null, startedAt: all.started,
+      approval: all.status === "awaiting" ? "Pending" : null, startedAt: all.started, source: "mock",
     };
   }
   try {
@@ -313,6 +343,16 @@ function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "manual";
 }
 
+// fingerprint(콜론 등 포함 가능) → K8s label-safe 값. delegateIncident 와 dedup 이 동일 라벨을 보게 한다.
+export function fingerprintLabelOf(fingerprint: string): string {
+  return fingerprint.replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^[-_.]+|[-_.]+$/g, "").slice(0, 63);
+}
+
+// webhook/위임 입력으로부터 정규 fingerprint 문자열(spec.event.fingerprint)을 만든다.
+export function eventFingerprint(source: string, rawFingerprint: string | undefined, goal: string): string {
+  return rawFingerprint || `${source}:${slug(goal)}`;
+}
+
 export async function delegateIncident(input: DelegateInput): Promise<DelegateResult> {
   if (!k8s.k8sEnabled()) {
     // mock: CR 생성 불가 — 시뮬레이션 응답(코파일럿이 사용자에게 안내)
@@ -325,10 +365,10 @@ export async function delegateIncident(input: DelegateInput): Promise<DelegateRe
   const g = agent?.spec?.guardrails ?? {};
   const source = input.source ?? "manual";
   const issueName = `issue-${slug(input.app)}-${rid()}`;
-  const fingerprint = input.fingerprint || `${source}:${slug(input.goal)}`;
+  const fingerprint = eventFingerprint(source, input.fingerprint, input.goal);
   // K8s label 값은 ':' 등을 못 쓴다(정규식 (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?).
   // fingerprint(콜론 포함)는 spec.event 에만 두고, 라벨에는 label-safe 로 정규화해 넣는다.
-  const fingerprintLabel = fingerprint.replace(/[^A-Za-z0-9_.-]/g, "-").replace(/^[-_.]+|[-_.]+$/g, "").slice(0, 63);
+  const fingerprintLabel = fingerprintLabelOf(fingerprint);
 
   const body: Record<string, unknown> = {
     apiVersion: `${k8s.GROUP}/${k8s.VERSION}`,
@@ -405,24 +445,114 @@ export async function delegateIncident(input: DelegateInput): Promise<DelegateRe
 }
 
 // ---- 승인/거절: Muninn API 소유 필드(status.approval)만 merge-patch(설계 §4.3) ----
-export async function approveRun(runId: string, decidedBy = "operator"): Promise<{ ok: boolean; runId: string; reason?: string }> {
+export interface DecisionResult {
+  ok: boolean;
+  runId: string;
+  reason?: string;            // 실패 분류: k8s-disabled | not-found | invalid-state | expired | patch-failed
+  phase?: string;             // invalid-state 시 현재 phase
+  approvalState?: string | null; // invalid-state 시 현재 approval.state
+  error?: string;             // patch-failed 시 상세
+}
+
+// 승인/거절 가능 상태인지 검증한다(읽기-검사-패치). 종료된 Run 재결정·이미 결정된 승인 재결정·만료 차단.
+// 읽기-검사-패치 race 는 남지만 늦은/중복 결정의 대부분을 막는다.
+async function loadApprovableRun(runId: string): Promise<{ cr: any } | DecisionResult> {
+  let cr: any;
+  try {
+    cr = await k8s.getHuginnRun(ns(), runId);
+  } catch (err: any) {
+    const code = err?.statusCode ?? err?.code ?? err?.response?.statusCode;
+    if (code === 404) return { ok: false, runId, reason: "not-found" };
+    return { ok: false, runId, reason: "patch-failed", error: err instanceof Error ? err.message : String(err) };
+  }
+  const st = cr?.status ?? {};
+  const phase: string = st.phase ?? "";
+  const approvalState: string | null = st.approval?.state ?? null;
+  if (phase !== "AwaitingApproval" || approvalState !== "Pending") {
+    return { ok: false, runId, reason: "invalid-state", phase, approvalState };
+  }
+  // 만료(expiresAt) 경과 차단 — operator/web 어느 쪽이든 만료 강제.
+  const expiresAt = st.approval?.expiresAt;
+  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+    return { ok: false, runId, reason: "expired", phase, approvalState };
+  }
+  return { cr };
+}
+
+export async function approveRun(runId: string, decidedBy = "operator"): Promise<DecisionResult> {
   if (!k8s.k8sEnabled()) return { ok: false, runId, reason: "k8s-disabled" };
-  await k8s.patchRunStatus(ns(), runId, {
-    approval: { state: "Approved", decidedBy, decidedAt: new Date().toISOString() },
-  });
+  const loaded = await loadApprovableRun(runId);
+  if ("ok" in loaded) return loaded;
+  try {
+    await k8s.patchRunStatus(ns(), runId, {
+      approval: { state: "Approved", decidedBy, decidedAt: new Date().toISOString() },
+    });
+  } catch (err) {
+    return { ok: false, runId, reason: "patch-failed", error: err instanceof Error ? err.message : String(err) };
+  }
   return { ok: true, runId };
 }
 
-export async function rejectRun(runId: string, reason = "", decidedBy = "operator"): Promise<{ ok: boolean; runId: string; reason?: string }> {
+export async function rejectRun(runId: string, reason = "", decidedBy = "operator"): Promise<DecisionResult> {
   if (!k8s.k8sEnabled()) return { ok: false, runId, reason: "k8s-disabled" };
-  // 승인 거절 기록(API 소유) + Run suspend(operator 가 활성 Run 취소; operator-design §2.3)
-  await k8s.patchRunStatus(ns(), runId, {
-    approval: { state: "Rejected", decidedBy, decidedAt: new Date().toISOString(), ...(reason ? { reason } : {}) },
-  });
+  const loaded = await loadApprovableRun(runId);
+  if ("ok" in loaded) return loaded;
+  // 승인 거절 기록(API 소유) + Run suspend(operator 가 활성 Run 취소; operator-design §2.3).
+  // 거절 사유는 CRD 계약(reasons[{type,detail}])과 자기류 reason 필드 둘 다 기록 — operator 가
+  // ApprovalStatus.reason/decidedAt 을 추가하는 중이므로 그대로 유지(중복 작업 금지).
+  try {
+    await k8s.patchRunStatus(ns(), runId, {
+      approval: {
+        state: "Rejected",
+        decidedBy,
+        decidedAt: new Date().toISOString(),
+        ...(reason ? { reason, reasons: [{ type: "OperatorRejected", detail: reason }] } : {}),
+      },
+    });
+  } catch (err) {
+    return { ok: false, runId, reason: "patch-failed", error: err instanceof Error ? err.message : String(err) };
+  }
   try {
     await k8s.patchRunSpec(ns(), runId, { suspend: true });
   } catch {
     // suspend 실패는 치명적 아님(거절 기록은 남음)
   }
   return { ok: true, runId };
+}
+
+// ---- webhook dedup(설계 §4.4) — 활성 동일 fingerprint Issue 가 있으면 새 Issue 생성 대신 dedupCount++ ----
+export interface DedupResult {
+  hit: boolean;
+  issueName?: string;   // 기존 활성 Issue name(hit 일 때)
+  dedupCount?: number;  // 증가 후 카운트
+}
+
+/**
+ * 위임 전 호출 — fingerprint 라벨로 활성(Pending/Running/AwaitingApproval) HuginnIssue 를 찾아,
+ * 있으면 status.dedupCount 를 +1 merge-patch 하고 hit=true 를 반환한다. 없으면 hit=false(새로 생성).
+ * Redis 도입 전 K8s 라벨 기반 MVP. fingerprint 는 label-safe 로 정규화된 값을 받는다.
+ */
+export async function dedupActiveIssue(app: string, fingerprintLabel: string): Promise<DedupResult> {
+  if (!k8s.k8sEnabled() || !fingerprintLabel || !isLabelSafe(fingerprintLabel)) return { hit: false };
+  let issues: any[];
+  try {
+    issues = await k8s.listHuginnIssues(ns(), `muninn.io/event-fingerprint=${fingerprintLabel}`);
+  } catch {
+    // 조회 실패 시 dedup 을 건너뛰고 생성으로 진행(과소 dedup이 과다 생성보다 안전).
+    return { hit: false };
+  }
+  const active = issues.find((i: any) => {
+    const sameApp = !app || i?.spec?.agentRef === app || i?.metadata?.labels?.["muninn.io/agent"] === app;
+    return sameApp && ACTIVE_PHASES.has(i?.status?.phase ?? "Pending");
+  });
+  if (!active) return { hit: false };
+
+  const name = active?.metadata?.name as string;
+  const next = num(active?.status?.dedupCount) + 1;
+  try {
+    await k8s.patchIssueStatus(ns(), name, { dedupCount: next });
+  } catch {
+    // 카운트 증가 실패해도 dedup-hit 판정은 유지(중복 Issue 생성 회피가 우선).
+  }
+  return { hit: true, issueName: name, dedupCount: next };
 }
