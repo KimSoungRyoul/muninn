@@ -35,7 +35,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1beta1
+    name: v1
     schema:
       openAPIV3Schema:
         description: HuginnAgent is the Schema for the huginnagents API
@@ -462,5 +462,455 @@ spec:
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - jsonPath: .spec.workspaceId
+      name: Workspace
+      type: string
+    - jsonPath: .spec.kind
+      name: Kind
+      type: string
+    - jsonPath: .spec.output
+      name: Output
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.activeIssues
+      name: Active
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    deprecated: true
+    deprecationWarning: muninn.io/v1beta1 is deprecated; migrate to muninn.io/v1
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: HuginnAgent is the Schema for the huginnagents API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: HuginnAgentSpec defines the desired state of HuginnAgent.
+            properties:
+              agent:
+                description: AgentSpec 은 에이전트 런타임 설정.
+                properties:
+                  image:
+                    description: 'image: agent-runtime 컨테이너 이미지'
+                    type: string
+                  runtime:
+                    default: claude-code
+                    type: string
+                  soulRef:
+                    description: 'soulRef: SOUL.md(ConfigMap 이름). Operator 가 Run 생성
+                      시 MUNINN_SOUL_REF 로 주입(§8.3)'
+                    type: string
+                required:
+                - image
+                type: object
+              bindings:
+                description: Bindings 는 에이전트가 사용할 Platform Tool(MCP 서버) 집합. 모든 Issue
+                  의 기본값 source(§3.1).
+                properties:
+                  deployment:
+                    properties:
+                      airflow:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      argocd:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                    type: object
+                  observability:
+                    properties:
+                      grafana:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      loki:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      metrics:
+                        description: MetricsBinding 은 Prometheus 호환 메트릭 백엔드(pluggable;
+                          그림=Mimir).
+                        properties:
+                          backend:
+                            default: mimir
+                            type: string
+                          config:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          instance:
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      tempo:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                    type: object
+                  registry:
+                    properties:
+                      harbor:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                    type: object
+                type: object
+              description:
+                type: string
+              displayName:
+                type: string
+              guardrails:
+                description: Guardrails 는 안전 한도(SDK 파라미터로 집행; §5.4).
+                properties:
+                  dailyRunCap:
+                    default: 50
+                    description: 'dailyRunCap: 24h 슬라이딩 윈도우 Run 상한'
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  maxCostUsd:
+                    default: 5
+                    description: maxCostUsd → SDK max_budget_usd (cost 는 예상치). MVP
+                      는 정수 USD 로 단순화(float 직렬화 회피).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  maxIterations:
+                    default: 12
+                    description: maxIterations → SDK max_turns
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxTokens:
+                    description: |-
+                      maxTokens: 토큰 예산 상한(0=무제한). onGuardrailNearLimit 트리거(§6.4)가 cost/tokens 한도로 참조.
+                      Operator 가 Run 생성 시 status.maxTokens 로 복사(operator-design §2.2).
+                    format: int64
+                    minimum: 0
+                    type: integer
+                type: object
+              identity:
+                description: Identity 는 관측 신호 ↔ 워크로드 매핑(Issue 으로 상속).
+                properties:
+                  k8sLabels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  k8sNamespace:
+                    type: string
+                  otelServiceName:
+                    type: string
+                required:
+                - k8sNamespace
+                type: object
+              kind:
+                description: 'kind: 배포 바인딩 자동 결정의 UX 힌트(저장은 명시적 spec.bindings)'
+                enum:
+                - triton
+                - fastapi
+                - airflow
+                - other
+                type: string
+              output:
+                description: 'output: 결과 형식'
+                enum:
+                - pull_request
+                - github_issue
+                type: string
+              source:
+                description: SourceSpec 은 GitHub 연결(모든 앱 필수).
+                properties:
+                  defaultBranch:
+                    default: main
+                    type: string
+                  pr:
+                    description: PRPolicy 는 PR 출력 정책(설계서 §6.2).
+                    properties:
+                      approvalTriggers:
+                        description: PRApprovalTriggers 는 PR 출력 시 인간 승인이 필요한 조건(설계서
+                          §6.4).
+                        properties:
+                          onDependencyChange:
+                            description: 'onDependencyChange: 의존성 파일 변경 시 승인 필요'
+                            type: boolean
+                          onGuardrailNearLimit:
+                            description: 'onGuardrailNearLimit: cost/tokens 가 percent%
+                              도달 시 승인 필요'
+                            properties:
+                              percent:
+                                default: 60
+                                format: int32
+                                maximum: 100
+                                minimum: 1
+                                type: integer
+                            required:
+                            - percent
+                            type: object
+                          onLargeDiff:
+                            description: 'onLargeDiff: diff 가 lines 초과 시 승인 필요'
+                            properties:
+                              lines:
+                                default: 200
+                                format: int32
+                                minimum: 1
+                                type: integer
+                            required:
+                            - lines
+                            type: object
+                          onWorkflowChange:
+                            description: 'onWorkflowChange: .github/workflows/** 변경
+                              시 승인 필요'
+                            type: boolean
+                        type: object
+                      draft:
+                        default: true
+                        description: 'draft: 항상 draft 로 생성(강제). 기본 true.'
+                        type: boolean
+                      labels:
+                        items:
+                          type: string
+                        type: array
+                      requireApprovalOnWorkflowChange:
+                        type: boolean
+                    type: object
+                  provider:
+                    default: github
+                    type: string
+                  repo:
+                    description: 'repo: "owner/name" 형식'
+                    pattern: ^[^/]+/[^/]+$
+                    type: string
+                  secretRef:
+                    description: 'secretRef: fine-grained PAT Secret 이름(특정 repo, PR
+                      생성만; §6.2)'
+                    type: string
+                required:
+                - repo
+                type: object
+              trigger:
+                description: TriggerSpec 은 이벤트 진입 정책.
+                properties:
+                  severityThreshold:
+                    default: warning
+                    description: severityThreshold 미만 alert 는 Gateway 가 drop(§4.1)
+                    enum:
+                    - info
+                    - warning
+                    - error
+                    - critical
+                    type: string
+                type: object
+              workspaceId:
+                description: 'workspaceId: 멀티테넌시 경계(§3.1). required & immutable. admission
+                  webhook 가 멤버십 보조 검증.'
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: workspaceId is immutable
+                  rule: self == oldSelf
+            required:
+            - agent
+            - guardrails
+            - identity
+            - kind
+            - output
+            - source
+            - trigger
+            - workspaceId
+            type: object
+          status:
+            description: HuginnAgentStatus defines the observed state of HuginnAgent.
+            properties:
+              activeIssues:
+                description: 'activeIssues: reconcile 마다 계산(phase∈{Pending,Running,AwaitingApproval}
+                  세션 수; §8.4)'
+                format: int32
+                type: integer
+              conditions:
+                description: 'conditions: K8s 표준(Ready 등)'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lastEventAt:
+                format: date-time
+                type: string
+              memoryCount:
+                description: MemoryCount 는 회상 가능한 기억 단편 수(status 요약).
+                properties:
+                  app:
+                    format: int32
+                    type: integer
+                  globalShared:
+                    format: int32
+                    type: integer
+                type: object
+              phase:
+                description: AppPhase 는 Application 의 거시 상태.
+                enum:
+                - Pending
+                - Ready
+                - Degraded
+                type: string
+              webhookUrl:
+                description: 'webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/hooks/{name}'
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: false
     subresources:
       status: {}

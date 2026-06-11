@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -268,7 +268,7 @@ type HuginnAgentStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:deprecatedversion:warning="muninn.io/v1beta1 is deprecated; migrate to muninn.io/v1"
+// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=happ
 // +kubebuilder:printcolumn:name="Workspace",type=string,JSONPath=`.spec.workspaceId`

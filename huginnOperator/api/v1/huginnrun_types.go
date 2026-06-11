@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1beta1
+package v1
 
 import (
 	corev1 "k8s.io/api/core/v1"
@@ -195,7 +195,7 @@ type HuginnRunStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:deprecatedversion:warning="muninn.io/v1beta1 is deprecated; migrate to muninn.io/v1"
+// +kubebuilder:storageversion
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=hrun
 // +kubebuilder:printcolumn:name="Issue",type=string,JSONPath=`.spec.issueRef`

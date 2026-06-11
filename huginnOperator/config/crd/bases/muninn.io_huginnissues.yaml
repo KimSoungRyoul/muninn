@@ -35,7 +35,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1beta1
+    name: v1
     schema:
       openAPIV3Schema:
         description: HuginnIssue is the Schema for the huginnissues API
@@ -469,5 +469,462 @@ spec:
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - jsonPath: .spec.agentRef
+      name: Agent
+      type: string
+    - jsonPath: .spec.event.severity
+      name: Severity
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.observedRuns
+      name: Runs
+      type: integer
+    - jsonPath: .status.dedupCount
+      name: Dedup
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    deprecated: true
+    deprecationWarning: muninn.io/v1beta1 is deprecated; migrate to muninn.io/v1
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: HuginnIssue is the Schema for the huginnissues API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              HuginnIssueSpec defines the desired state of HuginnIssue.
+              생성 후 불변(이벤트 1건 = Issue 1개; 재시도는 새 attempt Run): agentRef/event/inheritedGuardrails 는 CEL 로 immutable.
+            properties:
+              agentRef:
+                description: 'agentRef: 부모 HuginnAgent 의 metadata.name(도메인상 "Application").'
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: agentRef is immutable
+                  rule: self == oldSelf
+              event:
+                description: 'event: 정규화된 이벤트 페이로드(§4.3)'
+                properties:
+                  fingerprint:
+                    type: string
+                  id:
+                    type: string
+                  payload:
+                    additionalProperties:
+                      type: string
+                    description: 'payload: 정규화 요약(키-값)'
+                    type: object
+                  payloadSecretRef:
+                    description: 'payloadSecretRef: 원본 alert JSON(민감정보 가능) Secret
+                      이름'
+                    type: string
+                  receivedAt:
+                    format: date-time
+                    type: string
+                  severity:
+                    description: Severity 는 이벤트 심각도.
+                    enum:
+                    - info
+                    - warning
+                    - error
+                    - critical
+                    type: string
+                  source:
+                    description: EventSource 는 트리거 출처.
+                    enum:
+                    - grafana
+                    - airflow
+                    - argocd
+                    - manual
+                    type: string
+                  title:
+                    type: string
+                required:
+                - fingerprint
+                - id
+                - severity
+                - source
+                type: object
+                x-kubernetes-validations:
+                - message: event is immutable
+                  rule: self == oldSelf
+              goal:
+                description: 'goal: event 단위 불변 컨텍스트(§8.6)'
+                type: string
+              identity:
+                description: 'identity: HuginnAgent 에서 복사'
+                properties:
+                  k8sLabels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  k8sNamespace:
+                    type: string
+                  otelServiceName:
+                    type: string
+                required:
+                - k8sNamespace
+                type: object
+              inheritedBindings:
+                description: 'inheritedBindings: HuginnAgent.spec.bindings 스냅샷'
+                properties:
+                  deployment:
+                    properties:
+                      airflow:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      argocd:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                    type: object
+                  observability:
+                    properties:
+                      grafana:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      loki:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      metrics:
+                        description: MetricsBinding 은 Prometheus 호환 메트릭 백엔드(pluggable;
+                          그림=Mimir).
+                        properties:
+                          backend:
+                            default: mimir
+                            type: string
+                          config:
+                            additionalProperties:
+                              type: string
+                            type: object
+                          instance:
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                      tempo:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                    type: object
+                  registry:
+                    properties:
+                      harbor:
+                        description: ToolBinding 은 단일 Platform Tool 인스턴스 바인딩(§8.5).
+                        properties:
+                          config:
+                            additionalProperties:
+                              type: string
+                            description: 'config: 도구별 추가 설정(dashboardUid/defaultQuery/defaultService/defaultFilter
+                              등)'
+                            type: object
+                          instance:
+                            description: 'instance: platform_tool.name(UNIQUE) → Gateway
+                              가 tool_id 로 매핑'
+                            type: string
+                        required:
+                        - instance
+                        type: object
+                    type: object
+                type: object
+              inheritedGuardrails:
+                description: 'inheritedGuardrails: HuginnAgent.spec.guardrails 에서
+                  복사(§3.2). 생성 후 불변(Run 이 caps 로 1회 복사).'
+                properties:
+                  maxCostUsd:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  maxIterations:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  maxTokens:
+                    description: 'maxTokens: 토큰 예산 상한(0=무제한). Operator 가 Run.status.maxTokens
+                      로 복사.'
+                    format: int64
+                    minimum: 0
+                    type: integer
+                required:
+                - maxCostUsd
+                - maxIterations
+                type: object
+                x-kubernetes-validations:
+                - message: inheritedGuardrails is immutable
+                  rule: self == oldSelf
+              issuingUser:
+                description: |-
+                  issuingUser: manual(대화형/CopilotKit) 트리거로 이슈를 개시한 운영자(감사용).
+                  webhook(grafana/airflow/argocd) 출처면 비운다.
+                type: string
+              recalledMemoryIds:
+                description: |-
+                  recalledMemoryIds: 위임 직전 Muninn API 가 회상한 기억 id(감사 추적 + 에이전트 seed).
+                  설계 §3.1/§7 — 회상한 근거 기억을 이슈에 동봉한다.
+                items:
+                  type: string
+                type: array
+              retryPolicy:
+                description: 'retryPolicy: 재시도 상한/백오프'
+                properties:
+                  backoff:
+                    default: exponential
+                    description: 'BackoffPolicy 는 재시도 간 대기 증가 방식(operator-design §2.1:
+                      Issue controller 가 RequeueAfter 로 구현).'
+                    enum:
+                    - exponential
+                    - linear
+                    - none
+                    type: string
+                  maxRuns:
+                    default: 3
+                    description: |-
+                      maxRuns: 세션이 만들 수 있는 Run 총개수 상한(operator-design §2.1).
+                      Job backoffLimit 이 아니라 attempt 별 HuginnRun 생성 상한이다.
+                      Maximum=10: backoff 지수(1<<attempt) overflow/폭주 방지(huginnissue_controller.backoffReady 가드와 짝).
+                    format: int32
+                    maximum: 10
+                    minimum: 1
+                    type: integer
+                required:
+                - maxRuns
+                type: object
+              suspend:
+                description: 'suspend: true 면 Operator 가 활성 Run 들을 취소시킨다(operator-design
+                  §2.3)'
+                type: boolean
+              userPrompt:
+                description: 'userPrompt: manual 트리거의 원본 운영자 프롬프트(감사·재실행). webhook
+                  이면 비운다.'
+                type: string
+            required:
+            - agentRef
+            - event
+            - goal
+            - identity
+            - inheritedGuardrails
+            type: object
+          status:
+            description: HuginnIssueStatus defines the observed state of HuginnIssue.
+            properties:
+              approval:
+                description: 'approval: AwaitingApproval 시 승인 메타 집계(§6.4)'
+                properties:
+                  decidedAt:
+                    description: 'decidedAt: 승인/거절 결정 시각(ISO8601). Muninn API(approve/reject
+                      route)가 기록(§6.4).'
+                    format: date-time
+                    type: string
+                  decidedBy:
+                    type: string
+                  expiresAt:
+                    format: date-time
+                    type: string
+                  reason:
+                    description: 'reason: 거절 사유(reject 시). Muninn API 가 기록(§6.4).'
+                    type: string
+                  reasons:
+                    items:
+                      description: ApprovalReason 은 승인 필요 사유 1건(§6.4).
+                      properties:
+                        detail:
+                          type: string
+                        type:
+                          type: string
+                      required:
+                      - type
+                      type: object
+                    type: array
+                  requestedAt:
+                    format: date-time
+                    type: string
+                  state:
+                    description: ApprovalState 는 승인 결정 상태.
+                    enum:
+                    - Pending
+                    - Approved
+                    - Rejected
+                    - Expired
+                    type: string
+                type: object
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              dedupCount:
+                description: 'dedupCount: 같은 fingerprint 누적(§4.4). Muninn API 가 갱신.'
+                format: int32
+                type: integer
+              observedRuns:
+                description: 'observedRuns: 지금까지 생성한 Run 수(재시도 상한 판정용; Operator 소유)'
+                format: int32
+                type: integer
+              outcome:
+                description: 'outcome: 완료 시 "PR #842" / "Issue #143". Agent→API 가
+                  갱신.'
+                type: string
+              phase:
+                description: IssuePhase 는 세션 거시 상태(§3.4). Run 들의 phase 집계로 산출.
+                enum:
+                - Pending
+                - Running
+                - AwaitingApproval
+                - Succeeded
+                - Failed
+                - Cancelled
+                type: string
+              runRefs:
+                description: 'runRefs: 생성된 HuginnRun 이름들(attempt 순)'
+                items:
+                  type: string
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: false
     subresources:
       status: {}

@@ -14,21 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1beta1 contains API Schema definitions for the muninn.io v1beta1 API group.
+// Package v1 contains API Schema definitions for the muninn.io v1 API group.
 //
 // 버저닝/Deprecation 정책(CONTRACT §4, 상세: docs/crd-versioning.md):
 //
-//   - group=muninn.io 는 영구 불변. v1 이 storage 버전(hub), v1beta1 은 served=true·deprecated=true.
-//   - 스키마는 v1 와 필드 1:1 동일(rename 없음)이라 conversion 이 trivial 하다 — controller-gen 이
-//     Hub/Convertible 마커 없이는 conversion.strategy 를 emit 하지 않으므로(=None) conversion webhook
-//     이 불필요하고 envtest/helm 에 cert 배선이 필요 없다. 동일 스키마인 한 v1beta1 served 를 유지한다.
-//   - deprecated 마커는 각 Kind 타입의 root 마커 블록(huginn*_types.go 의 +kubebuilder:object:root=true
-//     아래)에 `+kubebuilder:deprecatedversion:warning=...` 로 부착돼 있다 — 클라이언트에 마이그레이션 경고.
-//   - storage 마이그레이션(기존 v1beta1 객체를 v1 로 re-write)을 수행한 뒤에만 v1beta1 served 를 내린다.
+//   - v1 은 storage 버전(hub)이다. 스키마는 v1beta1 와 필드 1:1 동일(rename 없음)이라
+//     conversion 이 trivial 하다 — controller-gen 은 Hub/Convertible 마커가 없으면
+//     conversion.strategy 를 emit 하지 않으므로(=None) conversion webhook 이 불필요하다.
+//   - v1beta1 은 served=true 를 유지하되 deprecated=true(클라이언트 마이그레이션 경고). storage 는 v1.
+//     storage 마이그레이션(기존 객체 re-write) 후에만 v1beta1 served 를 내린다.
 //
 // +kubebuilder:object:generate=true
 // +groupName=muninn.io
-package v1beta1
+// +versionName=v1
+package v1
 
 import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -38,7 +37,7 @@ import (
 var (
 	// SchemeGroupVersion is group version used to register these objects.
 	// This name is used by applyconfiguration generators (e.g. controller-gen).
-	SchemeGroupVersion = schema.GroupVersion{Group: "muninn.io", Version: "v1beta1"}
+	SchemeGroupVersion = schema.GroupVersion{Group: "muninn.io", Version: "v1"}
 
 	// GroupVersion is an alias for SchemeGroupVersion, for backward compatibility.
 	GroupVersion = SchemeGroupVersion

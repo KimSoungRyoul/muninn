@@ -1,64 +1,87 @@
 # CRD 버저닝 전략 (muninn.io)
 
 CONTRACT §4 대응. 이 문서는 `muninn.io` CRD 의 버전 전략과, `v1` storage 버전 도입을
-**왜 이번 PR 에서 보류했는지**, 그리고 도입 시 정확히 무엇을 해야 green 을 유지할 수 있는지를 기술한다.
+**어떻게 conversion webhook 없이(strategy None) 구현했는지**를 기술한다.
 
-## 현재 상태
+## 현재 상태 (v1 도입 완료)
 
 - group: `muninn.io` (영구 불변)
-- 버전: `v1beta1` — 유일한 `served=true, storage=true`
+- 버전:
+  - `v1` — `served=true, storage=true` (hub / storage 버전)
+  - `v1beta1` — `served=true, storage=false, deprecated=true` (마이그레이션 경고)
 - kinds: `HuginnAgent`, `HuginnIssue`, `HuginnRun`
-- conversion: 단일 버전이므로 conversion webhook 없음(`strategy` 미선언 = `None`)
+- 스키마: v1 와 v1beta1 가 **필드 1:1 동일**(rename/추가 없음). 두 버전의 OpenAPI 스키마는 byte 수준에서 동일.
+- conversion: **strategy `None`** — 생성 CRD 에 `spec.conversion` 스탠자가 **없다**. 동일 스키마이므로
+  K8s apiserver 가 conversion webhook 없이 apiVersion 만 바꿔(=trivial relabel) 모든 served 버전을 서빙한다.
 
-## 목표 (v1 도입 시)
+## 채택 경로: A (conversion 전략 None)
 
-- `v1` 을 신규 storage 버전으로 추가. **스키마는 v1beta1 와 필드 1:1 동일(rename 없음)** —
-  conversion 을 trivial 하게 유지하기 위함.
-- `v1beta1`: `served=true`, `deprecated=true` 로 표시(클라이언트에 마이그레이션 경고).
-- `v1`: `served=true`, `storage=true`(hub).
-- 컨트롤러/웹훅은 동일 스키마라 내부적으로는 한 버전 타입만 다뤄도 무방(spoke 가 hub 로 변환됨).
+설계 시 두 경로를 검토했다:
 
-## 왜 이번 PR 에서 보류했나 (green 유지 절대 제약)
+- **경로 A (채택): conversion `None`** — 동일 스키마면 webhook 없이 서빙 가능.
+- 경로 B: trivial Hub/Spoke conversion webhook — A 가 불가할 때의 폴백.
 
-full `v1` + conversion 은 operator-only 범위에서 CI green 을 깨뜨린다. 근거(`.github/workflows/operator-ci.yml`):
+핵심 확인 사항이었던 "controller-gen 이 multi-version 에 conversion webhook 을 강제하는가?" 를
+실제 생성물로 검증했다. **controller-gen v0.20.1 은 Go 타입에 `Hub()`/`Convertible`(ConvertTo/ConvertFrom)
+마커가 없으면 `spec.conversion` 을 emit 하지 않는다.** `+kubebuilder:storageversion` /
+`+kubebuilder:deprecatedversion` 마커만으로는 conversion webhook 이 생성되지 않는다.
 
-1. **envtest 스위트 깨짐.** CI 의 `make test` 는 unit + envtest(etcd/kube-apiserver 자동 다운로드)를
-   돌린다. controller-gen 은 multi-version(한쪽 `+kubebuilder:storageversion`) CRD 에 대해 기본으로
-   `spec.conversion.strategy: Webhook` 를 emit 한다. 이 CRD 를 로드한 envtest API server 는 모든
-   쓰기에서 conversion webhook 을 호출하려 하지만, 현재 `internal/controller/suite_test.go` 와
-   `internal/webhook/v1beta1/webhook_suite_test.go` 는 conversion webhook 서버(+TLS cert)를 띄우지
-   않는다. 결과적으로 CRD 쓰기가 전부 실패 → 두 envtest 스위트가 red.
-   - 지정된 순수 단위 테스트(`TestBuildJobTemplate|TestExpandPodSpec|TestBackoffReady`,
-     `internal/webhook` 의 `TestValidateAgent*`)는 envtest 불필요라 green 으로 남지만, CONTRACT 가
-     요구하는 "envtest/빌드 green 유지"는 깨진다.
+결과적으로 생성된 CRD 는 `spec.conversion` 키가 없고, 이때 apiserver 의 기본값은 `strategy: None` 이다.
+None 전략은 서빙 버전 간 스키마가 동일할 때 안전하며(apiVersion 만 다시 라벨링), 본 프로젝트는 그 전제를
+충족하므로 conversion webhook / cert-manager / envtest webhook 배선이 **전혀 필요 없다**.
 
-2. **helm CRD drift 가드 깨짐.** CI `helm` job 은 `deploy/helm/muninn/crds/*` 가
-   `huginnOperator/config/crd/bases/*` 와 byte-identical 인지 `diff` 로 검증한다. multi-version CRD 는
-   bases 를 바꾸므로 helm 복사본도 갱신해야 하고, conversion webhook 을 쓰는 CRD 는 helm 차트에
-   conversion `Service` + `caBundle`(cert-manager `Certificate`/injection) 배선이 필요하다 —
-   이는 deploy 컴포넌트 범위의 변경으로, operator-only 작업으로는 닫을 수 없다.
+→ A 가 envtest green 이므로 A 로 갔다(단순·안전). B 는 사용하지 않았다.
 
-따라서 CONTRACT §4 의 명시적 폴백("깨지면 v1 추가를 보류하고 준비 작업만")에 따라 **준비 작업만** 수행했다.
+## 구현 내역
 
-## 이번 PR 에서 한 준비 작업
+1. `api/v1/` 패키지 신설: v1beta1 의 3개 타입 파일을 동일 필드로 복제(`package v1`),
+   `groupversion_info.go`(`Version: "v1"`, `+versionName=v1`). 각 Kind 의 root 마커 블록에
+   `+kubebuilder:storageversion` 부여.
+2. `api/v1beta1/`: 각 Kind 의 root 마커 블록에
+   `+kubebuilder:deprecatedversion:warning="muninn.io/v1beta1 is deprecated; migrate to muninn.io/v1"` 부착.
+3. `make generate` → `api/v1/zz_generated.deepcopy.go`.
+4. `cmd/main.go`: scheme 에 `muninniov1.AddToScheme` 추가(v1beta1 와 병행 등록).
+5. 컨트롤러/웹훅: **v1beta1 타입 유지(최소 변경).** strategy `None` + 동일 스키마이므로 v1beta1 로
+   watch/reconcile/patch 해도 apiserver 가 v1-stored 객체를 v1beta1 로 투명하게 서빙한다(아래 "버전 선택 근거").
+6. `make manifests generate` → `config/crd/bases/*.yaml` 갱신 → `deploy/helm/muninn/crds/*.yaml` 로
+   byte-identical 복사(CI helm drift 가드 충족).
+7. `PROJECT` 파일에 v1 resource 3개 추가(kubebuilder convention).
 
-- `api/v1beta1/groupversion_info.go` 에 버저닝/deprecation 정책 주석(비-마커 doc comment — 생성물
-  불변) 추가. v1 추가 시 부착할 `+kubebuilder:deprecatedversion` 마커 위치를 명시.
-- 본 전략 문서(`docs/crd-versioning.md`) 작성.
+## 컨트롤러/웹훅 버전 선택 근거 (왜 v1beta1 유지인가)
 
-## v1 을 실제로 도입할 때 체크리스트 (green 유지 조건)
+storage=v1 이지만 컨트롤러·admission webhook 은 v1beta1 타입을 그대로 쓴다. 이유:
 
-1. `api/v1/` 패키지 신설: v1beta1 와 동일 타입 + `groupversion_info.go`(`Version: "v1"`),
-   타입 패키지 주석에 `+kubebuilder:storageversion` 부여. `make generate` 로 `zz_generated.deepcopy.go`.
-2. conversion 선택:
-   - **권장(동일 스키마):** trivial Hub/Spoke — `v1` 에 `Hub()`, `v1beta1` 에 `ConvertTo/ConvertFrom`
-     (필드 1:1 복사). controller-gen 은 `conversion.strategy: Webhook` CRD 를 emit.
-3. **envtest 하니스 보강(필수):** `suite_test.go` 두 곳에 conversion webhook 을 SetupWebhookWithManager
-   로 등록하고, `envtest.WebhookInstallOptions` 로 cert 를 주입. 그러지 않으면 envtest 가 red.
-4. `cmd/main.go`: v1 을 scheme 에 등록하고 각 kind 에 conversion 포함 webhook 등록.
-5. `make manifests generate` 후 `config/crd/bases/*` 갱신 → `deploy/helm/muninn/crds/*` 로 복사.
-6. helm 차트: conversion `Service` + caBundle(cert-manager) 배선, values 로 토글 노출.
-7. storage 마이그레이션: 기존 v1beta1 객체를 v1 로 re-write(`kubectl get ... -o yaml | kubectl replace`
-   또는 storage-version-migrator) 후에만 v1beta1 `served` 를 내린다.
+- **컨트롤러:** strategy `None` 에서 apiserver 는 v1-stored 객체를 클라이언트가 요청한 served 버전으로
+  투명 변환(=relabel)해 돌려준다. 스키마가 동일하므로 v1beta1-typed cache/client 가 정상 동작한다.
+  전체 컨트롤러·테스트를 v1 로 rename 하는 것은 ~150곳 변경이라 위험만 크고 이득이 없어 보류.
+- **admission webhook:** 현재 모든 실제 write 클라이언트가 v1beta1 를 쓴다 — muninnWeb `lib/k8s.ts`
+  의 `VERSION = "v1beta1"`, `config/samples/v1beta1_*.yaml`, `huginnAgentRuntime/examples/kind-e2e.yaml`.
+  따라서 v1beta1-scoped defaulting/validation webhook 이 모든 write 트래픽을 커버한다. v1 직접 write 가
+  도입되는 시점에 v1 webhook 을 추가하면 된다(아래 "후속 작업").
 
-위 1–6 이 한 PR 안에서 모두 green 으로 맞물려야 하며, 특히 3·6 은 operator+deploy 협업이 필요하다.
+## 검증 결과 (전부 green)
+
+```
+make manifests generate     # CRD/deepcopy 재생성 — 변경 없이 idempotent
+go build ./...              # OK
+go vet ./...                # OK
+make lint                   # 0 issues
+go test ./internal/... -count=1
+#   internal/controller            ok  (~7s, envtest)
+#   internal/webhook/v1beta1       ok  (~5.5s, envtest)
+# helm CRD drift: config/crd/bases/* 와 deploy/helm/muninn/crds/* byte-identical
+```
+
+생성 CRD 의 conversion 확인: `grep -n conversion config/crd/bases/*.yaml` → 매치 없음(=strategy None).
+버전 헤더: 각 CRD 의 `versions[]` 에 `v1`(storage:true) 과 `v1beta1`(storage:false, deprecated:true,
+deprecationWarning) 이 함께 존재.
+
+## 후속 작업 (이번 범위 밖)
+
+1. **storage 마이그레이션:** 기존 v1beta1 객체를 v1 로 re-write
+   (`kubectl get ... -o yaml | kubectl replace -f -` 또는 storage-version-migrator)한 뒤에만
+   v1beta1 `served` 를 내린다.
+2. **클라이언트 v1 전환:** muninnWeb `lib/k8s.ts` 의 `VERSION` 과 `config/samples/*` 를 v1 로 옮길 때,
+   v1 직접 write 에도 defaulting/validation 이 걸리도록 v1 admission webhook 을 추가한다(현재 v1beta1 전용).
+3. 스키마가 향후 divergent 해지면(필드 추가/rename) None 전략의 전제가 깨지므로 경로 B(Hub/Spoke
+   conversion webhook + cert-manager + envtest cert 배선)로 전환해야 한다.

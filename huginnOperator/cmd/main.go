@@ -35,6 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	muninniov1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1"
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 	"github.com/KimSoungRyoul/muninn/huginnOperator/internal/controller"
 	webhookv1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/internal/webhook/v1beta1"
@@ -50,6 +51,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(muninniov1beta1.AddToScheme(scheme))
+	utilruntime.Must(muninniov1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
