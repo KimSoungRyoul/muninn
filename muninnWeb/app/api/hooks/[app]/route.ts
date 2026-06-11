@@ -12,7 +12,8 @@ const ALLOWED_SEVERITY = new Set(["info", "warning", "error", "critical"]);
 // 설계 §4.3 정규화 + §4.4 dedup. POST /api/hooks/:app — 외부 모니터링(grafana 등) webhook 수신.
 // 두 트리거 경로 중 webhook 경로(대화형 위임과 1급 동등): 정규화→severity gate→dedup→**실제 HuginnIssue 위임**.
 // k8s 미연결(로컬)에서는 시뮬레이션 응답으로 graceful fallback.
-export async function POST(req: NextRequest, { params }: { params: { app: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ app: string }> }) {
+  const params = await props.params;
   const denied = requireAuth(req);
   if (denied) return denied;
 

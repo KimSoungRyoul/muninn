@@ -50,6 +50,26 @@ def _pr_mode() -> str:
     return os.getenv("MUNINN_PR_MODE", "dry-run").strip() or "dry-run"
 
 
+def _truthy(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def _require_approval(g: dict | None = None) -> bool:
+    """위험 작업 전 사람 승인(HITL)이 필요한지(CONTRACT §3).
+
+    우선순위: env MUNINN_REQUIRE_APPROVAL > guardrails.requireApproval. 둘 다 미설정 시 False.
+    """
+    if _truthy("MUNINN_REQUIRE_APPROVAL"):
+        return True
+    g = _guardrails() if g is None else g
+    return bool(g.get("requireApproval"))
+
+
+def _workspace() -> str:
+    """워크스페이스(=K8s 네임스페이스, CONTRACT §2). 미설정 시 빈 문자열(페이로드에서 생략)."""
+    return _env("MUNINN_WORKSPACE")
+
+
 def _system_prompt(pr_mode: str = "") -> str:
     # 글로벌/팀/SOUL 프롬프트는 ConfigMap 참조(MUNINN_*_REF)로 전달되며 마운트 후 합성된다(§5.1).
     # MVP 런너는 goal 중심의 최소 system prompt 를 구성한다.
@@ -147,7 +167,13 @@ def _recall(query: str, k: int = 6) -> list:
     if not mem or not query:
         return []
     app = _env("MUNINN_AGENT_NAME")
-    body = {"query": query, "k": k, **({"app": app} if app else {})}
+    ws = _workspace()
+    body = {
+        "query": query,
+        "k": k,
+        **({"app": app} if app else {}),
+        **({"workspace": ws} if ws else {}),  # 멀티테넌시 필터(CONTRACT §2)
+    }
     res = _http_json("POST", f"{mem.rstrip('/')}/api/memories/recall", body)
     items = (res or {}).get("items") or []
     return items if isinstance(items, list) else []
@@ -159,14 +185,105 @@ def _store_memory(fact: str, tags: list | None = None) -> dict | None:
     if not mem or not fact:
         return None
     app = _env("MUNINN_AGENT_NAME")
+    ws = _workspace()
     body = {
         "fact": fact,
         "tags": tags or [],
         "sourceRunId": _env("MUNINN_RUN_NAME") or None,
         "changedBy": "agent",
         **({"app": app, "appName": app, "scope": "app"} if app else {"scope": "global"}),
+        **({"workspace": ws} if ws else {}),  # 멀티테넌시 격리(CONTRACT §2)
     }
     return _http_json("POST", f"{mem.rstrip('/')}/api/memories", body)
+
+
+# ---- 사람 승인(HITL) 루프(CONTRACT §3) — 표준 라이브러리만 ----
+
+
+def _approval_reasons(goal: str, plan: str = "") -> list[dict]:
+    """승인 요청 사유를 goal/계획 요약에서 추출한다(최소 1건, CONTRACT §3).
+
+    plan(에이전트가 산출한 PR 계획/요약)이 있으면 그 첫 줄을, 없으면 goal 요약을 detail 로 쓴다.
+    PR 생성/실제 변경 적용은 인프라에 영향을 주므로 type 은 "infra-change" 로 분류한다.
+    """
+    src = (plan or goal or "").strip()
+    summary = next((ln.strip("# ").strip() for ln in src.splitlines() if ln.strip()), "")
+    if not summary:
+        summary = "위험 작업(PR 생성/변경 적용) 전 운영자 승인 필요"
+    return [{"type": "infra-change", "detail": summary[:300]}]
+
+
+def _request_approval(reasons: list[dict]) -> dict | None:
+    """승인 요청 보고 → POST .../report (API 가 phase=AwaitingApproval, approval.state=Pending 전이).
+
+    CONTRACT §3: body 는 `{"requestApproval": {"reasons":[...]}}`. report route(app/api/runs/[id]/report)
+    는 `body.requestApproval`(truthy) 와 `body.approvalReasons`(top-level)를 읽으므로, 계약 형태와
+    라우트 파싱을 둘 다 만족하도록 reasons 를 양쪽에 싣는다(중복이지만 API 가 멱등 처리).
+    """
+    return _report({
+        "requestApproval": {"reasons": reasons},
+        "approvalReasons": reasons,
+    })
+
+
+def _parse_approval_state(run_obj: dict | None) -> str | None:
+    """GET /api/runs/{id} 응답에서 approval.state 를 안전하게 추출한다.
+
+    응답 형태가 둘 다 가능하므로 방어적으로 파싱한다:
+      * RunVM(평탄화): `{"approval": "Pending"|"Approved"|...}` (lib/incidents.ts runView)
+      * CR-유사(중첩): `{"status": {"approval": {"state": "..."}}}` 또는 `{"approval": {"state": "..."}}`
+    파싱 불가/필드 없음이면 None(→ 계속 폴링).
+    """
+    if not isinstance(run_obj, dict):
+        return None
+    approval = run_obj.get("approval")
+    if approval is None:
+        status = run_obj.get("status")
+        if isinstance(status, dict):
+            approval = status.get("approval")
+    if isinstance(approval, str):
+        return approval or None
+    if isinstance(approval, dict):
+        state = approval.get("state")
+        return state if isinstance(state, str) and state else None
+    return None
+
+
+def _approval_detail(run_obj: dict | None) -> str:
+    """outcome 표면화용 — decidedBy/reason 이 있으면 합쳐 반환(없으면 빈 문자열). 방어적 파싱."""
+    if not isinstance(run_obj, dict):
+        return ""
+    approval = run_obj.get("approval")
+    if not isinstance(approval, dict):
+        status = run_obj.get("status")
+        approval = status.get("approval") if isinstance(status, dict) else None
+    if not isinstance(approval, dict):
+        return ""
+    parts = [str(approval[k]) for k in ("decidedBy", "reason") if approval.get(k)]
+    return " / ".join(parts)
+
+
+def _poll_approval_once() -> dict | None:
+    """GET {MUNINN_API_ENDPOINT}/api/runs/{run} 1회(동기). 실패 시 None(→ 다음 주기 재시도)."""
+    api = _env("MUNINN_API_ENDPOINT")
+    run = _env("MUNINN_RUN_NAME")
+    if not api or not run:
+        return None
+    return _http_json("GET", f"{api.rstrip('/')}/api/runs/{run}")
+
+
+def _approval_poll_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("MUNINN_APPROVAL_POLL_SECONDS", "10") or 10))
+    except (TypeError, ValueError):
+        return 10.0
+
+
+def _approval_timeout_seconds() -> float:
+    try:
+        return max(1.0, float(os.getenv("MUNINN_APPROVAL_TIMEOUT", "1800") or 1800))
+    except (TypeError, ValueError):
+        return 1800.0
 
 
 def build_options(max_turns: int, max_budget_usd: float | None = None):
@@ -406,8 +523,11 @@ async def run_live() -> int:
     subtype = ""
     final_sent = False  # terminal 보고 중복 방지(정상 종료 경로 ↔ 예외/취소 경로)
 
-    async def send_final(failed: bool, abort_reason: str = "") -> bool:
-        """terminal 보고(final:true)를 1회 전송한다. 성공 여부(API 도달 여부)를 반환."""
+    async def send_final(failed: bool, abort_reason: str = "", outcome_override: str = "") -> bool:
+        """terminal 보고(final:true)를 1회 전송한다. 성공 여부(API 도달 여부)를 반환.
+
+        outcome_override 가 주어지면(승인 거절/만료/타임아웃 같은 정상 중단) 그 값을 outcome 으로 쓴다.
+        """
         nonlocal final_sent
         if final_sent:
             return True
@@ -415,10 +535,13 @@ async def run_live() -> int:
         output = last_text.strip()
         title_line = next((ln.strip("# ").strip() for ln in output.splitlines() if ln.strip()), "")
         ok_local = not failed
-        outcome = (
-            (f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80])
-            if ok_local and output else ""
-        )
+        if outcome_override:
+            outcome = outcome_override
+        else:
+            outcome = (
+                (f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80])
+                if ok_local and output else ""
+            )
         if abort_reason:
             # 비정상 종료 표면화: outcome 비어 있으면 사유를 남겨 운영자가 'running 고착' 대신 원인을 본다.
             outcome = outcome or f"aborted: {abort_reason}"
@@ -436,7 +559,58 @@ async def run_live() -> int:
             log("ERROR: 최종 보고 전송 실패(재시도 소진) — 결과가 API 에 기록되지 않았을 수 있음")
         return res is not None
 
+    async def gate_approval() -> str:
+        """위험 작업 직전 사람 승인(HITL) 게이트(CONTRACT §3). 반환 outcome:
+
+          "" (빈)        → 승인됨/승인 불필요 → 작업 계속.
+          "rejected: …"  → 거절 → 정상 중단(종료코드 0).
+          "expired" / "approval-timeout" → 만료/타임아웃 → 정상 중단(종료코드 0).
+
+        dry-run 에선 PR 계획 확정 직전, live 에선 실제 변경 적용 직전에 호출된다(여기선 query 루프 진입 직전).
+        SIGTERM 시 asyncio.sleep 에서 CancelledError 가 올라와 상위 except 가 terminal 보고를 보낸다.
+        """
+        reasons = _approval_reasons(goal)
+        log(f"승인 요청(HITL): reasons={json.dumps(reasons, ensure_ascii=False)}")
+        # 요청도 thread 오프로드(동기 urllib). 실패해도 폴링은 시도(이미 Pending 일 수 있음).
+        await asyncio.to_thread(_request_approval, reasons)
+
+        poll = _approval_poll_seconds()
+        timeout = _approval_timeout_seconds()
+        deadline = time.monotonic() + timeout
+        log(f"승인 폴링 시작: 간격 {poll:.0f}s, 타임아웃 {timeout:.0f}s")
+        while True:
+            run_obj = await asyncio.to_thread(_poll_approval_once)
+            state = _parse_approval_state(run_obj)
+            if state == "Approved":
+                log("승인됨(Approved) → 작업 계속")
+                return ""
+            if state == "Rejected":
+                detail = _approval_detail(run_obj)
+                log(f"거절됨(Rejected){f': {detail}' if detail else ''} → 정상 중단")
+                return f"rejected: {detail}" if detail else "rejected"
+            if state == "Expired":
+                log("승인 만료(Expired) → 정상 중단")
+                return "expired"
+            # Pending/None(미파싱) → 계속 폴링. 타임아웃 경과 시 정상 중단.
+            if time.monotonic() >= deadline:
+                log("승인 타임아웃 → 정상 중단")
+                return "approval-timeout"
+            await asyncio.sleep(poll)
+
     try:
+        # 승인 게이트 — 위험 작업(query 루프) 진입 직전. 거절/만료/타임아웃은 정상 중단(failed=False, exit 0).
+        if _require_approval(g):
+            gate_outcome = await gate_approval()
+            if gate_outcome:
+                await send_final(failed=False, outcome_override=gate_outcome)
+                log(f"live 종료(승인 게이트): outcome={gate_outcome!r}")
+                print(json.dumps(
+                    {"mode": "live", "ok": True, "turns": 0, "cost_usd": cost, "tokens": tokens,
+                     "subtype": "approval-stop", "is_error": False, "outcome": gate_outcome,
+                     "recalled": recalled_ids, "pr_mode": pr_mode},
+                    ensure_ascii=False,
+                ))
+                return 0
         async for message in query(prompt=prompt, options=options):
             if isinstance(message, AssistantMessage):
                 step += 1

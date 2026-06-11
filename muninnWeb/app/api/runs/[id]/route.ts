@@ -11,7 +11,8 @@ import { k8sEnabled } from "@/lib/k8s";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const id = params.id;
 
   // 실제 클러스터 연결 시: CR 조회(runView 매핑). getRunStatus 내부에서 404/오류는 null.

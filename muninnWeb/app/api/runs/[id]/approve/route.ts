@@ -10,7 +10,8 @@ import { k8sEnabled } from "@/lib/k8s";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const denied = requireAuth(req);
   if (denied) return denied;
   let decidedBy = "operator";
