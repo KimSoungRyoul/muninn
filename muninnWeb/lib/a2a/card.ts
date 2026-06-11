@@ -64,7 +64,9 @@ export function huginnAgentToAgentCard(cr: any, baseUrl: string): A2AAgentCard {
 // 요청에서 외부 base URL 추정(프록시 헤더 우선, 없으면 host).
 export function baseUrlFromRequest(req: Request): string {
   const url = new URL(req.url);
-  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+  // 다중 프록시 체인은 x-forwarded-* 를 콤마로 누적("https, http")하므로 첫(클라이언트에 가장 가까운) 값만 쓴다.
+  const first = (v: string | null) => v?.split(",")[0]?.trim() || null;
+  const proto = first(req.headers.get("x-forwarded-proto")) ?? url.protocol.replace(":", "");
+  const host = first(req.headers.get("x-forwarded-host")) ?? req.headers.get("host") ?? url.host;
   return `${proto}://${host}`;
 }

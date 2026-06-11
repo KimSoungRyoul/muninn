@@ -10,9 +10,9 @@ function mid(): string {
   return `m_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-// SSRF/토큰유출 가드: 임의 URL 로 bearer 를 흘리지 않는다.
-// - A2A_ALLOWED_HOSTS(쉼표구분 host 또는 host:port)가 설정되면 그 목록만 허용(로컬 데모는 여기에 localhost:4010 추가).
-// - 미설정이면 메타데이터/링크로컬 IP 차단 + https 강제(실수로 사설망/클라우드 메타데이터로 토큰 전송 방지).
+// SSRF/토큰유출 가드(fail-closed): 임의 URL 로 bearer 를 흘리지 않는다.
+// - A2A_ALLOWED_HOSTS(쉼표구분 host 또는 host:port) allowlist 에 있는 대상만 허용(로컬 데모는 localhost:4010 추가).
+// - 미설정이면 전면 거부 — loopback/RFC1918/IPv6/DNS rebinding 을 빠짐없이 막기 어려워 명시적 allowlist 를 요구한다.
 // strict=false 라 discriminated union 내로잉이 안 되므로 { url?, reason? } 형태로 반환(url 있으면 통과).
 function urlGuard(raw: string): { url?: URL; reason?: string } {
   let url: URL;
@@ -52,6 +52,9 @@ export const sendTaskToA2AAgentTool = defineTool({
         willSend: { agentUrl, goal, ...(contextId ? { contextId } : {}) },
       };
     }
+    // confirmed 는 모델이 주장하는 값이라 프롬프트 인젝션으로 우회될 수 있다(PoC 한계). 비가역 외부 위임이므로
+    // 최소한 감사 로그를 남긴다 — 운영 승격 시 CopilotKit useHumanInTheLoop 로 실제 사용자 클릭을 요구하라(설계 후속).
+    console.warn(`[a2a-client] 외부 위임 confirmed: agentUrl=${agentUrl} goal="${goal.slice(0, 80)}"`);
     const body: JsonRpcRequest = {
       jsonrpc: "2.0",
       id: 1,
@@ -86,6 +89,8 @@ export const sendTaskToA2AAgentTool = defineTool({
         body: JSON.stringify(body),
         // 느리거나 멈춘 peer 가 서버 도구 실행을 무한정 잡지 않도록 상한(20s).
         signal: AbortSignal.timeout(20_000),
+        // 30x redirect 로 allowlist 를 우회(Location 이 사설망/메타데이터)하는 SSRF 를 막는다.
+        redirect: "error",
       });
     } catch (err) {
       const isTimeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");

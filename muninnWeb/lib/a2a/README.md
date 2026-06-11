@@ -69,7 +69,7 @@ curl -N localhost:3030/a2a/agents/<HuginnAgent> \
 ```
 
 > `message/send`·`message/stream` 은 `k8sEnabled()` 가 true 여야 실제 위임된다(아니면 `k8s-disabled`).
-> 인증: `MUNINN_A2A_REQUIRE_AUTH=1` 이면 `Authorization: Bearer <token>` 필수.
+> 인증: `MUNINN_A2A_AUTH_DISABLED=1` 이 아니면 `Authorization: Bearer <token>` 필수(fail-closed).
 
 ## V1 — 코파일럿을 A2A 클라이언트로 (클러스터 불필요)
 

@@ -7,7 +7,8 @@ import { runVmToStatusUpdate, issueToSubmittedTask, latestRun } from "./task-map
 type Emit = (data: unknown) => void;
 
 const POLL_MS = 1500;
-const MAX_TICKS = 200; // ≈5분 상한(2 P2 에서 operator watch 로 대체)
+const MAX_TICKS = 200; // ≈5분 상한(P2 에서 operator watch 로 대체)
+const MAX_MISSES = 3; // getRunStatus 가 연속 null 일 때 일시 장애 내성(이만큼 후에야 -32001)
 
 export function sseResponse(
   producer: (emit: Emit) => Promise<void>,
@@ -23,12 +24,23 @@ export function sseResponse(
           /* 닫힌 컨트롤러 — 무시 */
         }
       };
+      // 클라이언트가 연결을 끊으면(req.signal abort) 즉시 스트림을 닫아 폴링 루프가 빨리 빠져나오게 한다.
+      const onAbort = () => {
+        try {
+          controller.close();
+        } catch {
+          /* 이미 닫힘 */
+        }
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener("abort", onAbort, { once: true });
       try {
         await producer(emit);
-      } catch (err) {
-        // JSON-RPC 봉투로 감싸 비표준 SSE 이벤트를 막는다(클라이언트 파서 일관성). id 는 producer 가 모르므로 null.
-        emit({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "stream-error", data: String(err) } });
+      } catch {
+        // 내부 상세는 노출하지 않는다(서버 로그는 producer 측에서). 클라이언트엔 일반화된 JSON-RPC 에러만.
+        emit({ jsonrpc: "2.0", id: null, error: { code: -32603, message: "stream-error" } });
       } finally {
+        signal?.removeEventListener("abort", onAbort);
         try {
           controller.close();
         } catch {
@@ -83,20 +95,29 @@ const aborted = (signal?: AbortSignal) => signal?.aborted === true;
 // HuginnRun(task.id) 을 종료 상태까지 폴링하며 JSON-RPC SSE 결과를 emit.
 export async function streamTask(taskId: string, rpcId: unknown, emit: Emit, signal?: AbortSignal) {
   try {
+    let misses = 0;
+    let contextId = taskId; // 마지막으로 관측한 Run 의 contextId(=issue) — timeout 이벤트에 정확히 채우려고 유지.
     for (let i = 0; i < MAX_TICKS && !aborted(signal); i++) {
       const vm = await getRunStatus(taskId);
       if (!vm) {
-        emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `task '${taskId}' 없음` } });
-        return;
+        // 일시 조회 실패 내성 — 연속 MAX_MISSES 회 null 일 때만 '없음'으로 종료.
+        if (++misses >= MAX_MISSES) {
+          emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `task '${taskId}' 없음` } });
+          return;
+        }
+        await sleep(POLL_MS, signal);
+        continue;
       }
+      misses = 0;
       const ev = runVmToStatusUpdate(vm);
+      contextId = ev.contextId;
       emit({ jsonrpc: "2.0", id: rpcId, result: ev });
       if (ev.final) return;
       await sleep(POLL_MS, signal);
     }
-    if (!aborted(signal)) emit(timeoutEvent(taskId, taskId, rpcId));
-  } catch (err) {
-    emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32603, message: "stream-error", data: String(err) } });
+    if (!aborted(signal)) emit(timeoutEvent(taskId, contextId, rpcId));
+  } catch {
+    emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32603, message: "stream-error" } });
   }
 }
 
@@ -106,7 +127,12 @@ export async function streamIssue(issueName: string, app: string, rpcId: unknown
     emit({ jsonrpc: "2.0", id: rpcId, result: issueToSubmittedTask(issueName, app) });
     for (let i = 0; i < MAX_TICKS && !aborted(signal); i++) {
       const issue = await getIssueRuns(issueName);
-      const latest = latestRun(issue?.runs);
+      // Issue 가 사라졌으면(삭제) 5분 폴링하지 말고 즉시 종료(스트림 진입 전 존재 확인했으므로 null=삭제).
+      if (!issue) {
+        emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `context '${issueName}' 없음` } });
+        return;
+      }
+      const latest = latestRun(issue.runs);
       if (latest) {
         const ev = runVmToStatusUpdate(latest);
         emit({ jsonrpc: "2.0", id: rpcId, result: ev });
@@ -115,7 +141,7 @@ export async function streamIssue(issueName: string, app: string, rpcId: unknown
       await sleep(POLL_MS, signal);
     }
     if (!aborted(signal)) emit(timeoutEvent(issueName, issueName, rpcId));
-  } catch (err) {
-    emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32603, message: "stream-error", data: String(err) } });
+  } catch {
+    emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32603, message: "stream-error" } });
   }
 }
