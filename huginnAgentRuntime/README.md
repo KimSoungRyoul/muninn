@@ -107,6 +107,7 @@ kubectl -n ns-huginn-e2e get hissue,hrun,job,pod -w
 
 ## 버전 핀
 
-도구 버전은 Dockerfile `ARG` 로 핀되어 있고 빌드 시 오버라이드 가능하다
-(`--build-arg HELM_VERSION=...`). `kubectl` 은 비우면 `dl.k8s.io/release/stable.txt`
-최신 stable 을 사용한다.
+베이스 이미지(`node:24-bookworm-slim`)는 digest 로 핀되고, 모든 도구 버전은 Dockerfile `ARG`
+로 구체 stable 버전에 핀되어 있다(재현성·공급망 안전). 다운로드는 공식 `.sha256`/체크섬 파일로
+검증한다. 빌드 시 오버라이드 가능하다(`--build-arg HELM_VERSION=...`). `kubectl` 은 ARG 를 비우면
+`dl.k8s.io/release/stable.txt` 최신 stable 로 폴백한다(CI 에서 조회해 주입하는 용도).

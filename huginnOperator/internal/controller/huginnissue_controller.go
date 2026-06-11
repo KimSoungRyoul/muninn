@@ -307,15 +307,10 @@ func backoffReady(latest *muninniov1beta1.HuginnRun, policy muninniov1beta1.Back
 	case muninniov1beta1.BackoffPolicy("linear"):
 		delay = baseBackoff * time.Duration(latest.Spec.Attempt)
 	default: // exponential
-		// shift 폭(attempt-1)을 클램프 — maxBackoff 를 넘기는 시점이면 어차피 상한에 도달한다.
+		// shift 폭(attempt-1)을 [0,16] 으로 클램프 — maxBackoff 를 넘기는 시점이면 어차피 상한에 도달한다.
 		// baseBackoff=30s, maxBackoff=15m 기준 shift 5 이면 16m 로 상한 초과 → 6 으로 충분.
-		shift := latest.Spec.Attempt - 1
-		if shift < 0 {
-			shift = 0
-		}
-		if shift > 16 {
-			shift = 16 // 1<<16 * 30s 도 한참 maxBackoff 초과 — overflow 없이 안전.
-		}
+		// 1<<16 * 30s 도 한참 maxBackoff 초과 — overflow 없이 안전.
+		shift := max(0, min(latest.Spec.Attempt-1, 16))
 		delay = baseBackoff * time.Duration(int64(1)<<uint(shift))
 	}
 	if delay > maxBackoff || delay <= 0 {

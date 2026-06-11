@@ -7,21 +7,26 @@
 
 # Claude Code CLI 는 Node 패키지(@anthropic-ai/claude-code)이고 Python SDK 는 이 CLI 를
 # subprocess 로 띄우므로 Node 런타임이 항상 필요하다 → Node 베이스에 Python 을 더한다.
-# Node 24 = 현재 LTS(최신 안정 라인).
-FROM node:24-bookworm-slim
+# Node 24 = 현재 LTS(최신 안정 라인, 24.16.0). 재현성·공급망 안전을 위해 digest 핀.
+# 이 digest 는 멀티아치 OCI 인덱스(linux/amd64 + linux/arm64)이며 24-bookworm-slim 태그가
+# 가리키는 24.16.0 과 동일하다. 갱신: docker manifest inspect node:24-bookworm-slim,
+# 또는 registry-1.docker.io/v2/library/node/manifests/24-bookworm-slim 의 Docker-Content-Digest.
+FROM node:24-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203
 
 # --- 도구 버전(빌드 ARG 로 오버라이드 가능) ---
 # 재현성·공급망 안전을 위해 모든 도구를 구체 버전으로 핀한다(브리프 MEDIUM).
 # kubectl 은 과거 빈 값="최신 stable"이었으나, GHA 레이어 캐시(cache-from=gha)와 결합 시
 # RUN 문자열이 안 바뀌면 옛 캐시 레이어가 재사용돼 '항상 최신' 의도와 어긋났다 → 기본 핀.
 # '최신 stable 자동 추적'이 필요하면 CI 에서 조회해 --build-arg KUBECTL_VERSION=... 로 주입하라.
-ARG KUBECTL_VERSION="v1.31.4"
-ARG HELM_VERSION="v3.16.4"
-ARG ARGOCD_VERSION="v2.13.3"
-ARG GH_VERSION="2.63.2"
-ARG YQ_VERSION="v4.44.6"
+# 버전은 각 도구의 최신 stable(2026-06 기준). 다운로드 URL·체크섬 파일 포맷·tar 레이아웃은
+# 아래 RUN 들과 동일 계약 유지를 확인했다(helm v4 도 get.helm.sh 경로/`.sha256sum`/`linux-<arch>/helm` 동일).
+ARG KUBECTL_VERSION="v1.36.1"
+ARG HELM_VERSION="v4.2.0"
+ARG ARGOCD_VERSION="v3.4.3"
+ARG GH_VERSION="2.94.0"
+ARG YQ_VERSION="v4.53.3"
 # claude code CLI 는 SDK 가 subprocess 로 의존하는 핵심 컴포넌트 → 재현성 위해 구체 버전 핀.
-ARG CLAUDE_CODE_VERSION="2.1.167"
+ARG CLAUDE_CODE_VERSION="2.1.173"
 # buildx 가 주입(미지정 시 dpkg 로 폴백)
 ARG TARGETARCH=""
 

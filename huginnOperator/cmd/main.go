@@ -207,6 +207,9 @@ func main() {
 		Scheme: mgr.GetScheme(),
 		// EventRecorder: 주요 전이(JobCreated/JobLost/Cancelled/Approved/IssueNotFound)를 K8s Event 로
 		// 발행해 kubectl describe 로 관측 가능하게 한다(리뷰 MEDIUM; events RBAC 는 이미 선언됨).
+		// 구 events API(record.EventRecorder)를 의도적으로 사용 — controller-runtime manager 가
+		// 신 events API recorder 를 직접 제공하지 않아(브로드캐스터 수동 구성 필요) 비용 대비 이득이 없다.
+		//nolint:staticcheck // SA1019: 구 events API 유지; 신 events API 마이그레이션은 별도 후속.
 		Recorder: mgr.GetEventRecorderFor("huginnrun-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnRun")
