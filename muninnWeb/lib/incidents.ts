@@ -520,6 +520,65 @@ export async function rejectRun(runId: string, reason = "", decidedBy = "operato
   return { ok: true, runId };
 }
 
+// ---- 승인 요청 전이(런타임 승인루프의 API 측, CONTRACT §3 / operator-design §2.2) ----
+// 런너가 위험 작업 직전 report 에 requestApproval 을 보내면, report 라우트가 이 헬퍼로
+// API 소유 status(phase=AwaitingApproval, approval.state=Pending …)를 merge-patch 한다.
+// approval 만료는 기본 90분(MUNINN_APPROVAL_TTL_MINUTES 로 override).
+
+export interface ApprovalReason {
+  type: string;
+  detail?: string;
+}
+
+// 이미 종료(terminal)된 Run 은 승인 전이를 받지 않는다 — 늦은/중복 requestApproval 이
+// 종료된 Run 을 다시 AwaitingApproval 로 되돌리지 않게 한다(상태 검증).
+const TERMINAL_PHASES = new Set(["Succeeded", "Failed", "Cancelled"]);
+export function isTerminalPhase(phase?: string): boolean {
+  return TERMINAL_PHASES.has(phase ?? "");
+}
+
+function approvalTtlMinutes(): number {
+  const v = Number(process.env.MUNINN_APPROVAL_TTL_MINUTES);
+  return Number.isFinite(v) && v > 0 ? v : 90;
+}
+
+/**
+ * requestApproval 보고로부터 API 소유 status 조각(phase=AwaitingApproval + approval Pending)을
+ * 만든다. reasons 는 [{type, detail?}] 로 정규화(문자열만 온 경우도 수용). expiresAt=now+TTL.
+ */
+export function buildApprovalRequest(reasons: unknown): {
+  phase: "AwaitingApproval";
+  approval: { state: "Pending"; reasons?: ApprovalReason[]; requestedAt: string; expiresAt: string };
+} {
+  const now = Date.now();
+  const requestedAt = new Date(now).toISOString();
+  const expiresAt = new Date(now + approvalTtlMinutes() * 60_000).toISOString();
+  const normReasons = normalizeApprovalReasons(reasons);
+  return {
+    phase: "AwaitingApproval",
+    approval: {
+      state: "Pending",
+      ...(normReasons.length ? { reasons: normReasons } : {}),
+      requestedAt,
+      expiresAt,
+    },
+  };
+}
+
+/** 승인 사유 배열 정규화 — {type, detail?} 형태로. 문자열은 type 으로 수용, 빈 항목은 버린다. */
+export function normalizeApprovalReasons(raw: unknown): ApprovalReason[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((r: any): ApprovalReason | null => {
+      if (typeof r === "string") return r ? { type: r } : null;
+      if (r && typeof r === "object" && typeof r.type === "string" && r.type) {
+        return { type: r.type, ...(typeof r.detail === "string" && r.detail ? { detail: r.detail } : {}) };
+      }
+      return null;
+    })
+    .filter((x): x is ApprovalReason => x != null);
+}
+
 // ---- webhook dedup(설계 §4.4) — 활성 동일 fingerprint Issue 가 있으면 새 Issue 생성 대신 dedupCount++ ----
 export interface DedupResult {
   hit: boolean;

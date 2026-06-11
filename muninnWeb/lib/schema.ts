@@ -14,6 +14,9 @@ export const memory = pgTable(
   "memory",
   {
     id: text("id").primaryKey(),
+    // 멀티테넌시(CONTRACT §2): workspace = K8s 네임스페이스. 모든 recall/store/list 는 이 값으로
+    // 격리한다(테넌트 간 메모리 누수/포이즌 방지). 기존 행 호환을 위해 default 'default'.
+    workspace: text("workspace").notNull().default("default"),
     scope: text("scope").notNull(), // 'global' | 'app'
     appId: text("app_id"),
     appName: text("app_name"),
@@ -32,6 +35,8 @@ export const memory = pgTable(
     index("memory_fact_fts").using("gin", sql`to_tsvector('simple', ${t.fact})`),
     index("memory_tags_idx").using("gin", t.tags),
     index("memory_app_idx").on(t.appId),
+    // 모든 쿼리가 workspace 로 선필터하므로 인덱스로 격리 비용을 낮춘다.
+    index("memory_workspace_idx").on(t.workspace),
   ],
 );
 
@@ -66,6 +71,29 @@ export const incidentLog = pgTable(
   },
   // 이슈당 사건 이력 1건 보장 → updateIncidentByIssue 가 정확히 1행만 갱신(부분 유니크).
   (t) => [uniqueIndex("incident_log_issue_uq").on(t.issueName).where(sql`issue_name is not null`)],
+);
+
+// 이벤트 인입 내구성(CONTRACT §5) — webhook 수신 즉시 영속 기록한다. 동기 CR 생성(위임)이
+// 실패해도 원본 이벤트가 유실되지 않게(상태로 추적 → 재처리 가능). DB 미설정 시엔 best-effort 스킵.
+export const inboundEvent = pgTable(
+  "inbound_event",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    app: text("app"), // 대상 HuginnAgent name(라우트 path param)
+    source: text("source"), // grafana | airflow | argocd
+    severity: text("severity"),
+    fingerprint: text("fingerprint"),
+    title: text("title"),
+    payload: text("payload"), // 원본 JSON 직렬화(재처리/감사)
+    // received → delegated | deduped | below-threshold | failed. 실패 시 fail_reason 으로 사유 기록.
+    status: text("status").notNull().default("received"),
+    failReason: text("fail_reason"),
+    issueName: text("issue_name"), // 위임 성공 시 생성된 Issue name(추적)
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  // 미처리(received/failed) 이벤트를 빠르게 찾기 위한 인덱스(재처리 워커용).
+  (t) => [index("inbound_event_status_idx").on(t.status)],
 );
 
 export type MemoryRowDb = typeof memory.$inferSelect;

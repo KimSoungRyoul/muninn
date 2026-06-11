@@ -273,11 +273,20 @@ func runScopedEnv(run *muninniov1beta1.HuginnRun) []corev1.EnvVar {
 	if prMode == "" {
 		prMode = "dry-run" // MVP: 실제 gh pr create 대신 diff/요약만 생성(설계 §8). 실 PR 은 후속.
 	}
+	// MUNINN_WORKSPACE: 멀티테넌시 경계(CONTRACT §2, "워크스페이스 = K8s 네임스페이스"). runner.py 가
+	// 메모리 store/recall 페이로드에 workspace 로 동봉해 테넌트 간 기억 누수를 막는다. 권위 소스는
+	// muninn.io/workspace 라벨(agent defaulter→issue→run 으로 전파)이며, 라벨이 누락된 경로에서도
+	// 격리가 끊기지 않도록 run.Namespace(=워크스페이스) 로 폴백한다.
+	workspace := run.Labels[LabelWorkspace]
+	if workspace == "" {
+		workspace = run.Namespace
+	}
 	return []corev1.EnvVar{
 		{Name: "MUNINN_RUN_NAME", Value: run.Name},
 		{Name: "MUNINN_ISSUE_NAME", Value: run.Spec.IssueRef},
 		{Name: "MUNINN_AGENT_NAME", Value: run.Labels[LabelAgent]}, // 앱(HuginnAgent) — 메모리 scope
 		{Name: "MUNINN_NAMESPACE", Value: run.Namespace},
+		{Name: "MUNINN_WORKSPACE", Value: workspace},
 		{Name: "MUNINN_ATTEMPT", Value: fmt.Sprintf("%d", run.Spec.Attempt)},
 		{Name: "MUNINN_PR_MODE", Value: prMode},
 	}

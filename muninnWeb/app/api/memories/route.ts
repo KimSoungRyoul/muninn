@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 import { ok, created, badRequest, serverError } from "@/lib/api";
 import { requireAuth } from "@/lib/auth";
 import { dbEnabled, listMemories, store } from "@/lib/db";
+import { workspaceFromRequest } from "@/lib/workspace";
 import { MEMORIES } from "@/lib/data";
 
 export const runtime = "nodejs";
@@ -19,6 +20,8 @@ export async function GET(req: NextRequest) {
   const appId = sp.get("app") ?? undefined;
   const q = sp.get("q") ?? undefined;
   const limit = sp.get("limit") ? Number(sp.get("limit")) : undefined;
+  // 멀티테넌시(CONTRACT §2): 헤더 x-muninn-workspace 또는 ?workspace=, 폴백 env/'default'.
+  const workspace = workspaceFromRequest(req, sp.get("workspace"));
 
   if (!dbEnabled()) {
     // mock fallback
@@ -30,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const items = await listMemories({ scope, appId, query: q, limit });
+    const items = await listMemories({ workspace, scope, appId, query: q, limit });
     return ok({ method: q ? "keyword" : "recency", count: items.length, items });
   } catch (e) {
     return serverError("memory 조회 실패", e);
@@ -38,7 +41,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = requireAuth(req);
+  const denied = await requireAuth(req);
   if (denied) return denied;
   if (!dbEnabled()) return badRequest("memory(postgres) 비활성 — DATABASE_URL 미설정");
   let body: any;
@@ -54,9 +57,13 @@ export async function POST(req: NextRequest) {
   if (fact.length < 8) return badRequest("fact 가 너무 짧습니다(최소 8자) — 재사용 가능한 기억만 저장");
   if (fact.length > 4000) return badRequest("fact 가 너무 깁니다(최대 4000자)");
 
+  // 저장 workspace: 헤더 > body.workspace > env/'default'.
+  const workspace = workspaceFromRequest(req, body.workspace);
+
   try {
     const row = await store({
       fact,
+      workspace,
       scope: body.scope,
       appId: body.app ?? body.appId ?? null,
       appName: body.appName ?? null,

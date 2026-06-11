@@ -18,6 +18,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -108,6 +109,16 @@ func validateAgent(obj *muninniov1beta1.HuginnAgent) error {
 	var errs field.ErrorList
 	if obj.Spec.WorkspaceID == "" {
 		errs = append(errs, field.Required(field.NewPath("spec", "workspaceId"), "workspaceId is required"))
+	}
+	// 멀티테넌시 강제(CONTRACT §2, operator-design §3.1): "워크스페이스 = K8s 네임스페이스".
+	// workspaceId 와 CR 이 사는 metadata.namespace 가 일치해야 한다 — 한 namespace 안에서 다른
+	// workspace 라벨을 단 CR 로 격리 selector(muninn.io/workspace)를 우회하는 것을 막는다.
+	// obj.Namespace 가 비어 있을 수 있는 경로(예: 단위 테스트의 빈 객체)에서는 검사하지 않고,
+	// namespace 가 채워진 실제 admission(API server 가 항상 채움)에서만 일치를 강제한다.
+	if obj.Spec.WorkspaceID != "" && obj.Namespace != "" && obj.Spec.WorkspaceID != obj.Namespace {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec", "workspaceId"), obj.Spec.WorkspaceID,
+			fmt.Sprintf("workspaceId must equal metadata.namespace %q (workspace = namespace)", obj.Namespace)))
 	}
 	if !agentNameRe.MatchString(obj.Name) {
 		errs = append(errs, field.Invalid(
