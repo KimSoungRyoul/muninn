@@ -43,6 +43,20 @@ export function isTerminal(state: A2ATaskState): boolean {
   return TERMINAL.has(state);
 }
 
+// 스트림을 닫아야 하는 상태: 종료 상태 + input-required.
+// input-required(≡AwaitingApproval)는 에이전트가 입력(승인) 대기로 '멈추는' 인터럽트라, 스트림을 final 로 닫아
+// 제어를 클라이언트에 돌려줘야 한다(설계 §1/§6.1: HITL 승인 폴링을 A2A input-required 스트리밍으로 대체).
+// isTerminal(완전 종료)과는 의미가 다르므로 별도 헬퍼로 둔다.
+export function isStreamFinal(state: A2ATaskState): boolean {
+  return isTerminal(state) || state === "input-required";
+}
+
+// K8s list 는 순서를 보장하지 않으므로(재시도 시 attempt-2 Run 등) startedAt 내림차순으로 최신 Run 을 고른다.
+export function latestRun(runs: RunVM[] | undefined | null): RunVM | null {
+  if (!runs?.length) return null;
+  return [...runs].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0];
+}
+
 // HuginnRun(VM) → A2A Task. contextId = HuginnIssue(없으면 run id 로 대체).
 export function runVmToTask(vm: RunVM): A2ATask {
   const task: A2ATask = {
@@ -92,7 +106,7 @@ export function runVmToStatusUpdate(vm: RunVM, final?: boolean): A2AStatusUpdate
     taskId: vm.id,
     contextId: vm.issue ?? vm.id,
     status: { state },
-    final: final ?? isTerminal(state),
+    final: final ?? isStreamFinal(state),
     metadata: { app: vm.app, phase: vm.phase, step: vm.step, cost: vm.cost, approval: vm.approval },
   };
 }

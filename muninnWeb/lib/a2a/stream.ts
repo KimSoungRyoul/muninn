@@ -2,7 +2,7 @@
 // 설계: docs/design/muninn-a2a-integration.md §4(V2 P2)/§6.1. operator watch 대신 폴링 기반(PoC) —
 // HuginnRun.status.phase 를 주기적으로 읽어 A2A status-update 이벤트로 emit, 종료 상태에서 닫는다.
 import { getRunStatus, getIssueRuns } from "../incidents";
-import { runVmToStatusUpdate, issueToSubmittedTask } from "./task-mapper";
+import { runVmToStatusUpdate, issueToSubmittedTask, latestRun } from "./task-mapper";
 
 type Emit = (data: unknown) => void;
 
@@ -106,7 +106,7 @@ export async function streamIssue(issueName: string, app: string, rpcId: unknown
     emit({ jsonrpc: "2.0", id: rpcId, result: issueToSubmittedTask(issueName, app) });
     for (let i = 0; i < MAX_TICKS && !aborted(signal); i++) {
       const issue = await getIssueRuns(issueName);
-      const latest = issue?.runs[issue.runs.length - 1];
+      const latest = latestRun(issue?.runs);
       if (latest) {
         const ev = runVmToStatusUpdate(latest);
         emit({ jsonrpc: "2.0", id: rpcId, result: ev });

@@ -2,15 +2,19 @@
 // 설계: docs/design/muninn-a2a-integration.md §4(V2)/§5. 운영에선 next.config rewrite 로
 // A2A 표준 경로 /.well-known/agent-card.json 에 매핑한다.
 import { NextRequest } from "next/server";
-import { ok, notFound } from "@/lib/api";
+import { ok, notFound, badRequest } from "@/lib/api";
 import { getApplicationCr, listApplications } from "@/lib/incidents";
 import { k8sEnabled } from "@/lib/k8s";
 import { huginnAgentToAgentCard, baseUrlFromRequest } from "@/lib/a2a/card";
+import { a2aServerEnabled, a2aAuthOk } from "@/lib/a2a/gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest, { params }: { params: { app: string } }) {
+  // POST 와 동일 게이트(fail-closed) — 광고한 능력(streaming 등)과 실제 활성 상태를 일치시키고 무인증 노출 방지.
+  if (!a2aServerEnabled()) return notFound("A2A 서버 라우트 비활성(MUNINN_A2A_ENABLED=1 필요)");
+  if (!a2aAuthOk(req)) return badRequest("인증 필요(Authorization: Bearer)");
   const baseUrl = baseUrlFromRequest(req);
 
   if (!k8sEnabled()) {
