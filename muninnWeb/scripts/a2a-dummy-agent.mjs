@@ -25,11 +25,19 @@ const CARD = {
   skills: [{ id: "echo", name: "echo", description: "받은 goal 을 그대로 완료 처리", tags: ["demo"] }],
 };
 
+const MAX_BODY = 256 * 1024; // 무제한 버퍼링 방지(데모용 상한).
 const readBody = (req) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     let b = "";
-    req.on("data", (c) => (b += c));
+    req.on("data", (c) => {
+      b += c;
+      if (b.length > MAX_BODY) {
+        reject(new Error("body too large"));
+        req.destroy();
+      }
+    });
     req.on("end", () => resolve(b));
+    req.on("error", reject);
   });
 
 const textOf = (msg) =>
@@ -71,10 +79,13 @@ const server = createServer(async (req, res) => {
     if (method === "message/stream") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const send = (r) => res.write(`data: ${JSON.stringify({ jsonrpc: "2.0", id: id ?? null, result: r })}\n\n`);
-      send(mkTask(goal, "submitted"));
-      setTimeout(() => send({ kind: "status-update", taskId: "dummy", contextId: "ctx", status: { state: "working" }, final: false }), 300);
+      // submitted Task 의 id/contextId 를 이후 status-update 가 그대로 재사용 — 일관된 task 식별자 유지.
+      const task = mkTask(goal, "submitted");
+      send(task);
+      const upd = (state, final) => ({ kind: "status-update", taskId: task.id, contextId: task.contextId, status: { state }, final });
+      setTimeout(() => send(upd("working", false)), 300);
       setTimeout(() => {
-        send({ kind: "status-update", taskId: "dummy", contextId: "ctx", status: { state: "completed" }, final: true });
+        send(upd("completed", true));
         res.end();
       }, 800);
       return;
@@ -86,7 +97,8 @@ const server = createServer(async (req, res) => {
   res.writeHead(404).end("not found");
 });
 
-server.listen(PORT, () => {
+// 로컬 데모 전용 — 모든 인터페이스(0.0.0.0)가 아니라 loopback 에만 바인딩한다.
+server.listen(PORT, "127.0.0.1", () => {
   console.log(`[dummy-a2a-agent] listening on ${BASE}`);
   console.log(`  GET  ${BASE}/card`);
   console.log(`  POST ${BASE}  (message/send · message/stream)`);

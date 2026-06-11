@@ -122,9 +122,12 @@ export async function streamTask(taskId: string, rpcId: unknown, emit: Emit, sig
 }
 
 // HuginnIssue(contextId) 의 최신 Run 을 종료까지 폴링하며 emit(위임 직후 Run 미생성 구간 포함).
+// app 스코프 강제: 이 Issue 에 속한 Run 중 r.app === app 인 것만 본다(라우트의 tasks/get 과 동일 패턴).
 export async function streamIssue(issueName: string, app: string, rpcId: unknown, emit: Emit, signal?: AbortSignal) {
   try {
-    emit({ jsonrpc: "2.0", id: rpcId, result: issueToSubmittedTask(issueName, app) });
+    // submitted 합성 이벤트는 '아직 Run 이 없을 때' 한 번만 — 이미 진행/종료된 Run 을 재구독할 때
+    // 매번 submitted 로 시작하면 상태가 역행(working→submitted)한다. 첫 tick 결과로 결정한다.
+    let emittedSubmitted = false;
     for (let i = 0; i < MAX_TICKS && !aborted(signal); i++) {
       const issue = await getIssueRuns(issueName);
       // Issue 가 사라졌으면(삭제) 5분 폴링하지 말고 즉시 종료(스트림 진입 전 존재 확인했으므로 null=삭제).
@@ -132,11 +135,15 @@ export async function streamIssue(issueName: string, app: string, rpcId: unknown
         emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `context '${issueName}' 없음` } });
         return;
       }
-      const latest = latestRun(issue.runs);
+      const latest = latestRun((issue.runs ?? []).filter((r) => r.app === app));
       if (latest) {
         const ev = runVmToStatusUpdate(latest);
         emit({ jsonrpc: "2.0", id: rpcId, result: ev });
         if (ev.final) return;
+      } else if (!emittedSubmitted) {
+        // Run 이 아직 없음 → submitted Task 1회만.
+        emit({ jsonrpc: "2.0", id: rpcId, result: issueToSubmittedTask(issueName, app) });
+        emittedSubmitted = true;
       }
       await sleep(POLL_MS, signal);
     }

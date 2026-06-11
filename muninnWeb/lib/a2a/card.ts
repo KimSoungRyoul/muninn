@@ -61,12 +61,20 @@ export function huginnAgentToAgentCard(cr: any, baseUrl: string): A2AAgentCard {
   };
 }
 
-// 요청에서 외부 base URL 추정(프록시 헤더 우선, 없으면 host).
+// host 헤더 형식 검증(영숫자·점·하이픈·옵션 포트). 인젝션된 값이 Agent Card url 로 반영되는 것을 막는다.
+const HOST_RE = /^[a-zA-Z0-9.-]+(:[0-9]{1,5})?$/;
+
+// 요청에서 외부 base URL 추정. 운영에선 A2A_PUBLIC_BASE_URL(신뢰 가능한 고정값)을 우선한다.
+// env 가 없으면 프록시 헤더/host 를 쓰되 형식 검증으로 host 헤더 인젝션을 차단한다.
 export function baseUrlFromRequest(req: Request): string {
+  const fixed = process.env.A2A_PUBLIC_BASE_URL?.replace(/\/+$/, "");
+  if (fixed) return fixed;
   const url = new URL(req.url);
   // 다중 프록시 체인은 x-forwarded-* 를 콤마로 누적("https, http")하므로 첫(클라이언트에 가장 가까운) 값만 쓴다.
   const first = (v: string | null) => v?.split(",")[0]?.trim() || null;
-  const proto = first(req.headers.get("x-forwarded-proto")) ?? url.protocol.replace(":", "");
-  const host = first(req.headers.get("x-forwarded-host")) ?? req.headers.get("host") ?? url.host;
+  const proto = first(req.headers.get("x-forwarded-proto")) === "https" ? "https" : url.protocol.replace(":", "");
+  const rawHost = first(req.headers.get("x-forwarded-host")) ?? req.headers.get("host") ?? url.host;
+  // 검증 실패하면 신뢰할 수 없는 host 대신 요청 URL 의 host(런타임이 결정한 값)로 폴백.
+  const host = HOST_RE.test(rawHost) ? rawHost : url.host;
   return `${proto}://${host}`;
 }

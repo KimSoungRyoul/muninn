@@ -5,22 +5,9 @@ import type { RunStatus } from "../types";
 import type { RunVM } from "../incidents";
 import type { A2ATask, A2ATaskState, A2AStatusUpdateEvent } from "./types";
 
-// HuginnRun.phase(PascalCase) → A2A TaskState.
-const PHASE_TO_A2A: Record<string, A2ATaskState> = {
-  Queued: "submitted",
-  Pending: "submitted",
-  Running: "working",
-  AwaitingApproval: "input-required", // ★ HITL ↔ A2A input-required
-  Succeeded: "completed",
-  Failed: "failed",
-  Cancelled: "canceled",
-};
-export function phaseToA2AState(phase?: string): A2ATaskState {
-  return PHASE_TO_A2A[phase ?? ""] ?? "submitted";
-}
-
 // 콘솔 status(소문자, RunVM.status) → A2A TaskState.
-// RunVM.status 는 실/mock 양쪽에서 정규화돼 있어 phase 보다 신뢰성이 높다(incidents.ts runView/mock 참고).
+// RunVM.status 는 실/mock 양쪽에서 정규화돼 있어(incidents.ts runView/mock) phase 보다 신뢰성이 높아 매핑의 단일 소스다.
+// (HuginnRun.phase→A2A 직매핑은 RunVM.status 로 일원화해 제거 — 중복/표류 방지.)
 const STATUS_TO_A2A: Record<RunStatus, A2ATaskState> = {
   queued: "submitted",
   running: "working",
@@ -52,9 +39,12 @@ export function isStreamFinal(state: A2ATaskState): boolean {
 }
 
 // K8s list 는 순서를 보장하지 않으므로(재시도 시 attempt-2 Run 등) startedAt 내림차순으로 최신 Run 을 고른다.
+// startedAt 미설정(아직 Job 미기동 = 가장 최근 생성된 attempt)은 가장 최신으로 취급해야 하므로 future sentinel 로 치환한다.
+const NOT_STARTED = "9999-12-31T23:59:59Z";
 export function latestRun(runs: RunVM[] | undefined | null): RunVM | null {
   if (!runs?.length) return null;
-  return [...runs].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""))[0];
+  const key = (r: RunVM) => r.startedAt ?? NOT_STARTED;
+  return [...runs].sort((a, b) => key(b).localeCompare(key(a)))[0];
 }
 
 // HuginnRun(VM) → A2A Task. contextId = HuginnIssue(없으면 run id 로 대체).
@@ -98,15 +88,15 @@ export function issueToSubmittedTask(issueName: string, app: string): A2ATask {
   };
 }
 
-// 스트리밍용 증분 이벤트(message/stream · tasks/resubscribe). final=종료 상태 도달.
-export function runVmToStatusUpdate(vm: RunVM, final?: boolean): A2AStatusUpdateEvent {
+// 스트리밍용 증분 이벤트(message/stream · tasks/resubscribe). final=스트림 종료 상태(종료 + input-required).
+export function runVmToStatusUpdate(vm: RunVM): A2AStatusUpdateEvent {
   const state = statusToA2AState(vm.status);
   return {
     kind: "status-update",
     taskId: vm.id,
     contextId: vm.issue ?? vm.id,
     status: { state },
-    final: final ?? isStreamFinal(state),
+    final: isStreamFinal(state),
     metadata: { app: vm.app, phase: vm.phase, step: vm.step, cost: vm.cost, approval: vm.approval },
   };
 }

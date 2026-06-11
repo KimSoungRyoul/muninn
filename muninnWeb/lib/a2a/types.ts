@@ -108,23 +108,8 @@ export interface JsonRpcRequest {
   method: string;
   params?: unknown;
 }
-export interface JsonRpcSuccess {
-  jsonrpc: "2.0";
-  id: string | number | null;
-  result: unknown;
-}
-export interface JsonRpcErrorBody {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-export interface JsonRpcError {
-  jsonrpc: "2.0";
-  id: string | number | null;
-  error: JsonRpcErrorBody;
-}
 
-// A2A/JSON-RPC 표준 + muninn 확장 에러 코드
+// A2A/JSON-RPC 표준 에러 코드(스펙 a2a.json). 인증 누락은 JSON-RPC 코드가 아니라 HTTP 401 로 신호한다(라우트 참고).
 export const RPC = {
   PARSE_ERROR: -32700,
   INVALID_REQUEST: -32600,
@@ -134,5 +119,4 @@ export const RPC = {
   TASK_NOT_FOUND: -32001,
   TASK_NOT_CANCELABLE: -32002,
   UNSUPPORTED_OPERATION: -32004,
-  AUTH_REQUIRED: -32099,
 } as const;

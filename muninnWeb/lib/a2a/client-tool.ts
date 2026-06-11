@@ -102,6 +102,9 @@ export const sendTaskToA2AAgentTool = defineTool({
     const json: any = await res.json().catch(() => null);
     if (!res.ok || !json) return { error: "a2a-request-failed", status: res.status };
     if (json.error) return { error: "a2a-error", detail: json.error };
-    return { task: json.result };
+    // A2A 의 message/send 결과는 Task 또는 Message 일 수 있다(스펙). kind 로 구분해 정확히 라벨링한다.
+    const result = json.result;
+    if (result?.kind === "message") return { message: result };
+    return { task: result };
   },
 });

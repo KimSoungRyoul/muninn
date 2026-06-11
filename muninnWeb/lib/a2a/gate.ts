@@ -12,3 +12,20 @@ export function a2aAuthOk(req: Request): boolean {
   if (process.env.MUNINN_A2A_AUTH_DISABLED === "1") return true;
   return (req.headers.get("authorization") ?? "").toLowerCase().startsWith("bearer ");
 }
+
+// 인증 실패는 A2A 스펙대로 HTTP 401 + WWW-Authenticate 로 신호한다(JSON-RPC 에러코드가 아님).
+// 스펙 인지 클라이언트는 401 을 인증 챌린지로 인식한다. GET/POST 라우트가 공유한다.
+export function a2aUnauthorized(): Response {
+  return new Response(JSON.stringify({ error: "unauthorized", note: "Authorization: Bearer 필요" }), {
+    status: 401,
+    headers: { "content-type": "application/json", "www-authenticate": 'Bearer realm="muninn-a2a"' },
+  });
+}
+
+// 서버 비활성(게이트 off) — 라우트 자체를 숨기듯 404. GET/POST 공유.
+export function a2aDisabled(): Response {
+  return new Response(JSON.stringify({ error: "not-found" }), {
+    status: 404,
+    headers: { "content-type": "application/json" },
+  });
+}
