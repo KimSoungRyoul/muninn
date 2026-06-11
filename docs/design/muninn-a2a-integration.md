@@ -60,7 +60,7 @@ A2A 의 JSON-RPC 표기(소문자) 기준. (proto/gRPC 바인딩은 `TASK_STATE_
 | `canceled` | `Cancelled` (`spec.suspend=true`) | API→Operator | 종료 |
 | `auth-required` | (예약 — 미사용) | — | 중단 |
 
-가장 절묘한 일치는 **`input-required` ↔ `AwaitingApproval`**: A2A 의 "에이전트가 입력 대기로 멈춤" 상태가 muninn 의 HITL 승인 게이트와 정확히 같다. 매핑 구현은 `muninnWeb/lib/a2a/task-mapper.ts`(`phaseToA2AState`, `statusToA2AState`, `runVmToTask`).
+가장 절묘한 일치는 **`input-required` ↔ `AwaitingApproval`**: A2A 의 "에이전트가 입력 대기로 멈춤" 상태가 muninn 의 HITL 승인 게이트와 정확히 같다. 매핑 구현은 `muninnWeb/lib/a2a/task-mapper.ts`(`statusToA2AState`, `runVmToTask`, `runVmToStatusUpdate`, `isStreamFinal`) — 매핑 출처는 `HuginnRun.phase` 가 아니라 정규화된 `RunVM.status`(소문자) 다.
 
 ## 3. 아키텍처
 
@@ -110,8 +110,10 @@ muninnWeb 가 게이트웨이/레지스트리이므로 여기에:
 
 **신규 — `muninnWeb/lib/a2a/`**
 - `types.ts` — A2A 최소 타입(AgentCard, Task, TaskState, Message, Part, JSON-RPC 봉투).
-- `task-mapper.ts` — `phaseToA2AState` / `statusToA2AState` / `runVmToTask` (순수 함수).
+- `task-mapper.ts` — `statusToA2AState` / `runVmToTask` / `runVmToStatusUpdate` / `latestRun` / `isStreamFinal` (순수 함수).
 - `card.ts` — `huginnAgentToAgentCard(cr, baseUrl)` (순수 변환).
+- `gate.ts` — `a2aServerEnabled` / `a2aAuthOk` + 401/404 응답 헬퍼.
+- `stream.ts` — SSE 브리지(첫 프레임 Task, 이후 status-update; Issue 종료성으로 final 판정).
 - `client-tool.ts` — `send_task_to_a2a_agent` defineTool (V1).
 
 **신규 라우트 — `muninnWeb/app/a2a/agents/[app]/`**

@@ -83,11 +83,16 @@ const server = createServer(async (req, res) => {
       const task = mkTask(goal, "submitted");
       send(task);
       const upd = (state, final) => ({ kind: "status-update", taskId: task.id, contextId: task.contextId, status: { state }, final });
-      setTimeout(() => send(upd("working", false)), 300);
-      setTimeout(() => {
+      const t1 = setTimeout(() => send(upd("working", false)), 300);
+      const t2 = setTimeout(() => {
         send(upd("completed", true));
         res.end();
       }, 800);
+      // 클라이언트 조기 종료 시 타이머 정리(데모용 — 좀비 타이머 방지).
+      req.on("close", () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      });
       return;
     }
     res.writeHead(200, { "content-type": "application/json" });

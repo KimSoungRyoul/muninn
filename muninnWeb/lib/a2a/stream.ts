@@ -1,14 +1,20 @@
 // A2A 스트리밍(SSE) 헬퍼 — message/stream · tasks/resubscribe.
 // 설계: docs/design/muninn-a2a-integration.md §4(V2 P2)/§6.1. operator watch 대신 폴링 기반(PoC) —
-// HuginnRun.status.phase 를 주기적으로 읽어 A2A status-update 이벤트로 emit, 종료 상태에서 닫는다.
+// HuginnRun.status.phase 를 주기적으로 읽어 emit. 스펙: 스트림의 첫 프레임은 Task(kind:"task"), 이후 status-update.
+// 종료: 단일 Run(streamTask)은 Run 종료, contextId(streamIssue)는 Issue 종료(재시도 backoff 동안 열어둠).
 import { getRunStatus, getIssueRuns } from "../incidents";
-import { runVmToStatusUpdate, issueToSubmittedTask, latestRun } from "./task-mapper";
+import { runVmToStatusUpdate, runVmToTask, issueToSubmittedTask, latestRun, isStreamFinal } from "./task-mapper";
+import { statusToA2AState } from "./task-mapper";
+import type { RunVM } from "../incidents";
 
 type Emit = (data: unknown) => void;
 
 const POLL_MS = 1500;
 const MAX_TICKS = 200; // ≈5분 상한(P2 에서 operator watch 로 대체)
-const MAX_MISSES = 3; // getRunStatus 가 연속 null 일 때 일시 장애 내성(이만큼 후에야 -32001)
+const MAX_MISSES = 3; // 조회가 연속 null 일 때 일시 장애 내성(이만큼 후에야 -32001)
+
+// Issue 레벨 종료 phase — 이 경우에만 contextId 스트림을 닫는다(latest Run 이 failed 여도 재시도 중이면 열어둠).
+const ISSUE_TERMINAL = new Set(["Succeeded", "Failed", "Cancelled"]);
 
 export function sseResponse(
   producer: (emit: Emit) => Promise<void>,
@@ -91,16 +97,19 @@ function timeoutEvent(taskId: string, contextId: string, rpcId: unknown) {
 }
 
 const aborted = (signal?: AbortSignal) => signal?.aborted === true;
+// 동일 상태 중복 emit 방지용 시그니처(state·step·phase·approval).
+const sig = (vm: RunVM) => `${vm.status}|${vm.step}|${vm.phase}|${vm.approval ?? ""}`;
 
-// HuginnRun(task.id) 을 종료 상태까지 폴링하며 JSON-RPC SSE 결과를 emit.
+// HuginnRun(task.id) 을 종료 상태까지 폴링. 스펙: 첫 프레임은 Task, 이후 status-update(변화 시에만).
 export async function streamTask(taskId: string, rpcId: unknown, emit: Emit, signal?: AbortSignal) {
   try {
     let misses = 0;
-    let contextId = taskId; // 마지막으로 관측한 Run 의 contextId(=issue) — timeout 이벤트에 정확히 채우려고 유지.
+    let first = true;
+    let last = "";
+    let contextId = taskId;
     for (let i = 0; i < MAX_TICKS && !aborted(signal); i++) {
       const vm = await getRunStatus(taskId);
       if (!vm) {
-        // 일시 조회 실패 내성 — 연속 MAX_MISSES 회 null 일 때만 '없음'으로 종료.
         if (++misses >= MAX_MISSES) {
           emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `task '${taskId}' 없음` } });
           return;
@@ -109,10 +118,19 @@ export async function streamTask(taskId: string, rpcId: unknown, emit: Emit, sig
         continue;
       }
       misses = 0;
-      const ev = runVmToStatusUpdate(vm);
-      contextId = ev.contextId;
-      emit({ jsonrpc: "2.0", id: rpcId, result: ev });
-      if (ev.final) return;
+      contextId = vm.issue ?? taskId;
+      if (first) {
+        // 스펙: 구독 시 첫 이벤트는 현재 상태의 Task 스냅샷.
+        emit({ jsonrpc: "2.0", id: rpcId, result: runVmToTask(vm) });
+        first = false;
+        last = sig(vm);
+        if (isStreamFinal(statusToA2AState(vm.status))) return;
+      } else if (sig(vm) !== last) {
+        last = sig(vm);
+        const ev = runVmToStatusUpdate(vm);
+        emit({ jsonrpc: "2.0", id: rpcId, result: ev });
+        if (ev.final) return;
+      }
       await sleep(POLL_MS, signal);
     }
     if (!aborted(signal)) emit(timeoutEvent(taskId, contextId, rpcId));
@@ -121,30 +139,40 @@ export async function streamTask(taskId: string, rpcId: unknown, emit: Emit, sig
   }
 }
 
-// HuginnIssue(contextId) 의 최신 Run 을 종료까지 폴링하며 emit(위임 직후 Run 미생성 구간 포함).
+// HuginnIssue(contextId) 폴링. 첫 프레임 Task, 이후 status-update(변화 시). 종료는 Issue 레벨(재시도 동안 열어둠).
 // app 스코프 강제: 이 Issue 에 속한 Run 중 r.app === app 인 것만 본다(라우트의 tasks/get 과 동일 패턴).
 export async function streamIssue(issueName: string, app: string, rpcId: unknown, emit: Emit, signal?: AbortSignal) {
   try {
-    // submitted 합성 이벤트는 '아직 Run 이 없을 때' 한 번만 — 이미 진행/종료된 Run 을 재구독할 때
-    // 매번 submitted 로 시작하면 상태가 역행(working→submitted)한다. 첫 tick 결과로 결정한다.
-    let emittedSubmitted = false;
+    let misses = 0;
+    let first = true;
+    let last = "";
     for (let i = 0; i < MAX_TICKS && !aborted(signal); i++) {
       const issue = await getIssueRuns(issueName);
-      // Issue 가 사라졌으면(삭제) 5분 폴링하지 말고 즉시 종료(스트림 진입 전 존재 확인했으므로 null=삭제).
       if (!issue) {
-        emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `context '${issueName}' 없음` } });
-        return;
+        // null=삭제 또는 일시 조회 실패 — 연속 MAX_MISSES 회일 때만 종료(streamTask 와 동일 내성).
+        if (++misses >= MAX_MISSES) {
+          emit({ jsonrpc: "2.0", id: rpcId, error: { code: -32001, message: `context '${issueName}' 없음` } });
+          return;
+        }
+        await sleep(POLL_MS, signal);
+        continue;
       }
+      misses = 0;
       const latest = latestRun((issue.runs ?? []).filter((r) => r.app === app));
-      if (latest) {
-        const ev = runVmToStatusUpdate(latest);
-        emit({ jsonrpc: "2.0", id: rpcId, result: ev });
-        if (ev.final) return;
-      } else if (!emittedSubmitted) {
-        // Run 이 아직 없음 → submitted Task 1회만.
-        emit({ jsonrpc: "2.0", id: rpcId, result: issueToSubmittedTask(issueName, app) });
-        emittedSubmitted = true;
+      // 종료성은 Issue.phase 로 판정 — latest Run 이 failed 여도 Issue 가 Running(재시도 backoff)이면 닫지 않는다.
+      const issueDone = ISSUE_TERMINAL.has(issue.phase);
+
+      if (first) {
+        // 스펙: 첫 프레임은 Task 스냅샷. Run 이 있으면 그 Task, 없으면 submitted Task.
+        emit({ jsonrpc: "2.0", id: rpcId, result: latest ? runVmToTask(latest) : issueToSubmittedTask(issueName, app) });
+        first = false;
+        last = latest ? sig(latest) : "submitted";
+      } else if (latest && sig(latest) !== last) {
+        last = sig(latest);
+        emit({ jsonrpc: "2.0", id: rpcId, result: runVmToStatusUpdate(latest) });
       }
+      // awaiting(input-required) Run 또는 Issue 종료 시 스트림을 닫는다.
+      if ((latest && statusToA2AState(latest.status) === "input-required") || issueDone) return;
       await sleep(POLL_MS, signal);
     }
     if (!aborted(signal)) emit(timeoutEvent(issueName, issueName, rpcId));

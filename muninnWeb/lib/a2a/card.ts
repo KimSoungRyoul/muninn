@@ -50,7 +50,8 @@ export function huginnAgentToAgentCard(cr: any, baseUrl: string): A2AAgentCard {
       pushNotifications: false, // PoC 미구현 — 설계 §6.1
       stateTransitionHistory: false, // Task.history 미채움 — 구현 전까지 false 로 현실 반영
     },
-    defaultInputModes: ["text/plain", "application/json"],
+    // 입력은 현재 text part 만 처리한다(textFromMessage) — 지원하지 않는 application/json 을 광고하지 않는다.
+    defaultInputModes: ["text/plain"],
     defaultOutputModes: ["text/plain", "application/json"],
     securitySchemes: {
       "muninn-sa": { type: "http", scheme: "bearer", description: "서비스 계정 / OAuth bearer 토큰" },
@@ -61,8 +62,8 @@ export function huginnAgentToAgentCard(cr: any, baseUrl: string): A2AAgentCard {
   };
 }
 
-// host 헤더 형식 검증(영숫자·점·하이픈·옵션 포트). 인젝션된 값이 Agent Card url 로 반영되는 것을 막는다.
-const HOST_RE = /^[a-zA-Z0-9.-]+(:[0-9]{1,5})?$/;
+// host 헤더 형식 검증(영숫자·점·하이픈·옵션 포트 1-65535). 인젝션된 값이 Agent Card url 로 반영되는 것을 막는다.
+const HOST_RE = /^[a-zA-Z0-9.-]+(:([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?$/;
 
 // 요청에서 외부 base URL 추정. 운영에선 A2A_PUBLIC_BASE_URL(신뢰 가능한 고정값)을 우선한다.
 // env 가 없으면 프록시 헤더/host 를 쓰되 형식 검증으로 host 헤더 인젝션을 차단한다.

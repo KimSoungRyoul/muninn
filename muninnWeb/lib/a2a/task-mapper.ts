@@ -26,7 +26,8 @@ const TERMINAL: ReadonlySet<A2ATaskState> = new Set<A2ATaskState>([
   "canceled",
   "rejected",
 ]);
-export function isTerminal(state: A2ATaskState): boolean {
+// 완전 종료(terminal). 스트림 종료 판정 isStreamFinal 의 보조 — 모듈 로컬(공개 불필요).
+function isTerminal(state: A2ATaskState): boolean {
   return TERMINAL.has(state);
 }
 
@@ -40,11 +41,12 @@ export function isStreamFinal(state: A2ATaskState): boolean {
 
 // K8s list 는 순서를 보장하지 않으므로(재시도 시 attempt-2 Run 등) startedAt 내림차순으로 최신 Run 을 고른다.
 // startedAt 미설정(아직 Job 미기동 = 가장 최근 생성된 attempt)은 가장 최신으로 취급해야 하므로 future sentinel 로 치환한다.
+// 센티넬 동률(미기동 attempt 다수)은 id(operator 의 -a<N> 단조 접미사 포함)로 2차 정렬해 결정성을 확보한다.
 const NOT_STARTED = "9999-12-31T23:59:59Z";
 export function latestRun(runs: RunVM[] | undefined | null): RunVM | null {
   if (!runs?.length) return null;
   const key = (r: RunVM) => r.startedAt ?? NOT_STARTED;
-  return [...runs].sort((a, b) => key(b).localeCompare(key(a)))[0];
+  return [...runs].sort((a, b) => key(b).localeCompare(key(a)) || (b.id ?? "").localeCompare(a.id ?? ""))[0];
 }
 
 // HuginnRun(VM) → A2A Task. contextId = HuginnIssue(없으면 run id 로 대체).
@@ -53,7 +55,7 @@ export function runVmToTask(vm: RunVM): A2ATask {
     kind: "task",
     id: vm.id,
     contextId: vm.issue ?? vm.id,
-    status: { state: statusToA2AState(vm.status) },
+    status: { state: statusToA2AState(vm.status), ...(vm.startedAt ? { timestamp: vm.startedAt } : {}) },
     metadata: {
       app: vm.app,
       phase: vm.phase,
@@ -95,7 +97,7 @@ export function runVmToStatusUpdate(vm: RunVM): A2AStatusUpdateEvent {
     kind: "status-update",
     taskId: vm.id,
     contextId: vm.issue ?? vm.id,
-    status: { state },
+    status: { state, ...(vm.startedAt ? { timestamp: vm.startedAt } : {}) },
     final: isStreamFinal(state),
     metadata: { app: vm.app, phase: vm.phase, step: vm.step, cost: vm.cost, approval: vm.approval },
   };

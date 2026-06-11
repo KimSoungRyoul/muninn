@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRunStatus, getIssueRuns, delegateIncident, rejectRun } from "@/lib/incidents";
 import type { RunVM } from "@/lib/incidents";
 import * as k8s from "@/lib/k8s";
-import { runVmToTask, issueToSubmittedTask, latestRun } from "@/lib/a2a/task-mapper";
+import { runVmToTask, issueToSubmittedTask, latestRun, statusToA2AState } from "@/lib/a2a/task-mapper";
 import { sseResponse, streamTask, streamIssue } from "@/lib/a2a/stream";
 import { a2aServerEnabled, a2aAuthOk, a2aDisabled, a2aUnauthorized } from "@/lib/a2a/gate";
 import { RPC } from "@/lib/a2a/types";
@@ -28,6 +28,12 @@ function rpcOk(id: unknown, result: unknown) {
   return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result });
 }
 
+// 위임 목표(goal) 길이 상한 — 무제한 텍스트가 HuginnIssue CR 에 그대로 들어가는 것을 막는다(etcd 부하·남용 방지).
+const MAX_GOAL = 8 * 1024;
+
+// Issue 레벨 종료 phase — latest Run 이 failed 여도 Issue 가 비종료(재시도 backoff)면 작업 세션은 살아있다.
+const ISSUE_TERMINAL_STATUS = new Set(["Succeeded", "Failed", "Cancelled"]);
+
 // params.id/params.taskId 는 K8s 리소스명으로 쓰이므로 비문자열/빈값을 거른다.
 function strParam(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
@@ -42,19 +48,27 @@ function textFromMessage(msg: any): string {
     .trim();
 }
 
+// 위임용 goal 추출 + 검증: 비어있으면 null(에러), 상한 초과면 'too-long' 신호.
+function goalFromMessage(msg: any): { goal?: string; error?: "empty" | "too-long" } {
+  const goal = textFromMessage(msg);
+  if (!goal) return { error: "empty" };
+  if (goal.length > MAX_GOAL) return { error: "too-long" };
+  return { goal };
+}
+
 // Issue(contextId)가 정말 이 :app 소속인지 검증한다. getIssueRuns 는 agentRef 를 노출하지 않고,
 // Run 이 0개인 submitted 구간엔 run.app 으로 소속을 판별할 수 없으므로 Issue CR 의 spec.agentRef 를 직접 본다.
-// 반환: app 소속이면 { runs(이 app 의 Run 들) }, 아니면 null(=스코프 밖, 존재 노출 방지).
-async function getIssueScoped(issueName: string, app: string): Promise<{ runs: RunVM[] } | null> {
+// 반환: app 소속이면 { runs(이 app 의 Run 들), phase(Issue 종료성 판단용) }, 아니면 null(=스코프 밖, 존재 노출 방지).
+async function getIssueScoped(issueName: string, app: string): Promise<{ runs: RunVM[]; phase: string } | null> {
   const issue = await getIssueRuns(issueName);
   if (!issue) return null;
   const appRuns = (issue.runs ?? []).filter((r) => r.app === app);
-  if (appRuns.length) return { runs: appRuns };
+  if (appRuns.length) return { runs: appRuns, phase: issue.phase };
   if (issue.runs?.length) return null; // Run 이 있는데 전부 다른 app → 스코프 밖
   // Run 0개(submitted window) → Issue CR 의 agentRef 로 소속 확인(run.app 으로는 판별 불가).
   try {
     const cr = await k8s.getHuginnIssue(k8s.DEFAULT_NAMESPACE, issueName);
-    return cr?.spec?.agentRef === app ? { runs: [] } : null;
+    return cr?.spec?.agentRef === app ? { runs: [], phase: issue.phase } : null;
   } catch {
     return null;
   }
@@ -82,11 +96,12 @@ async function dispatch(req: NextRequest, app: string, body: JsonRpcRequest): Pr
   try {
     switch (method) {
       case "message/send": {
-        const goal = textFromMessage(p.message);
-        if (!goal) return rpcError(id, RPC.INVALID_PARAMS, "message.parts 에 text 가 필요합니다");
+        const g = goalFromMessage(p.message);
+        if (g.error === "empty") return rpcError(id, RPC.INVALID_PARAMS, "message.parts 에 text 가 필요합니다");
+        if (g.error === "too-long") return rpcError(id, RPC.INVALID_PARAMS, `goal 이 너무 깁니다(최대 ${MAX_GOAL}자)`);
         const issuingUser =
           typeof p.message?.metadata?.user === "string" ? p.message.metadata.user : "a2a-client";
-        const res = await delegateIncident({ app, goal, source: "manual", issuingUser });
+        const res = await delegateIncident({ app, goal: g.goal!, source: "manual", issuingUser });
         if (!res.ok) {
           const code = res.reason === "agent-not-found" ? RPC.TASK_NOT_FOUND : RPC.INTERNAL_ERROR;
           return rpcError(id, code, `위임 실패: ${res.reason}`);
@@ -112,35 +127,49 @@ async function dispatch(req: NextRequest, app: string, body: JsonRpcRequest): Pr
       case "tasks/cancel": {
         const taskId = strParam(p.id ?? p.taskId);
         if (!taskId) return rpcError(id, RPC.INVALID_PARAMS, "params.id(=task id, 문자열) 필요");
-        const vm = await resolveRun(taskId, app);
-        if (!vm) {
+        // Run 직접 해석 + (contextId 인 경우) Issue 종료성 판단을 위해 둘 다 확인한다.
+        const directVm = await getRunStatus(taskId);
+        const vm = directVm?.app === app ? directVm : null;
+        const scoped = vm ? null : await getIssueScoped(taskId, app);
+        const resolved = vm ?? latestRun(scoped?.runs);
+        if (!resolved) {
           // Issue 는 이 app 소속이나 Run 이 아직 없음 = submitted 구간 → not-cancelable(없음 아님).
-          const scoped = await getIssueScoped(taskId, app);
           if (scoped) return rpcError(id, RPC.TASK_NOT_CANCELABLE, `task '${taskId}' 는 아직 Run 미생성(submitted) 구간`);
           return rpcError(id, RPC.TASK_NOT_FOUND, `task/context '${taskId}' 없음`);
         }
-        if (vm.status === "succeeded" || vm.status === "failed" || vm.status === "cancelled")
-          return rpcError(id, RPC.TASK_NOT_CANCELABLE, `task '${taskId}' 는 이미 종료 상태(${vm.status})`);
-        // AwaitingApproval 이면 거절(approval=Rejected 가 의미 있음), 그 외(running/queued)는 suspend 만 —
-        // 비-awaiting Run 에 approval=Rejected 를 쓰는 상태 오염을 피한다.
-        if (vm.status === "awaiting") {
-          const res = await rejectRun(vm.id, "canceled via A2A", "a2a-client");
+        // 종료성 판단: contextId 로 해석됐고 Issue 가 아직 비종료(재시도 backoff)면, latest Run 이 failed 여도
+        // 작업 세션은 살아있으므로 취소 가능하다. 단일 Run(직접) 또는 Issue 종료 시에만 not-cancelable.
+        const sessionTerminal = scoped ? ISSUE_TERMINAL_STATUS.has(scoped.phase) : true;
+        const vmTerminal = resolved.status === "succeeded" || resolved.status === "failed" || resolved.status === "cancelled";
+        if (vmTerminal && sessionTerminal)
+          return rpcError(id, RPC.TASK_NOT_CANCELABLE, `task '${taskId}' 는 이미 종료 상태(${resolved.status})`);
+        // AwaitingApproval 이면 거절(approval=Rejected 는 내구적 결정 → 즉시 canceled 표기 정당).
+        // 그 외(running/queued)는 suspend 만 요청하고 실제 phase→Cancelled 전환은 operator 가 비동기로 한다.
+        // 비-awaiting Run 에 approval=Rejected 를 쓰는 상태 오염을 피하고, 종료 전이므로 현재 state 를 유지해
+        // canceled 를 조작하지 않는다(cancelRequested 메타데이터로 수락만 알림).
+        if (resolved.status === "awaiting") {
+          const res = await rejectRun(resolved.id, "canceled via A2A", "a2a-client");
           if (!res.ok) return rpcError(id, RPC.TASK_NOT_CANCELABLE, `취소 실패: ${res.reason}`);
-        } else {
-          try {
-            await k8s.patchRunSpec(vm.namespace, vm.id, { suspend: true });
-          } catch {
-            return rpcError(id, RPC.TASK_NOT_CANCELABLE, "suspend 실패");
-          }
+          return rpcOk(id, {
+            kind: "task",
+            id: resolved.id,
+            contextId: resolved.issue ?? taskId,
+            status: { state: "canceled" },
+            metadata: { priorPhase: resolved.phase },
+          });
         }
-        // cancel 수락 결과는 canceled Task. 실제 phase→Cancelled 전환은 operator 가 비동기로 수행하므로
-        // metadata 로 'suspend 요청됨 + 직전 phase' 를 노출해 동기/비동기 간극을 클라이언트에 알린다.
+        try {
+          await k8s.patchRunSpec(resolved.namespace, resolved.id, { suspend: true });
+        } catch {
+          return rpcError(id, RPC.TASK_NOT_CANCELABLE, "suspend 실패");
+        }
+        // suspend 요청 수락 — 아직 종료 전이므로 현재 state 를 유지하고 cancelRequested 로 진행 중임을 알린다.
         return rpcOk(id, {
           kind: "task",
-          id: vm.id,
-          contextId: vm.issue ?? taskId,
-          status: { state: "canceled" },
-          metadata: { suspendRequested: true, priorPhase: vm.phase },
+          id: resolved.id,
+          contextId: resolved.issue ?? taskId,
+          status: { state: statusToA2AState(resolved.status) },
+          metadata: { cancelRequested: true, priorPhase: resolved.phase },
         });
       }
 
@@ -150,12 +179,17 @@ async function dispatch(req: NextRequest, app: string, body: JsonRpcRequest): Pr
         // (CLAUDE.md) 매 재연결마다 새 HuginnIssue→Job 이 생기는 증폭을 막으려면 클라이언트가 받은 contextId 로 재구독한다.
         const ctx = typeof p.message?.contextId === "string" ? p.message.contextId : "";
         if (ctx) {
+          // 재구독 경로 — goal 텍스트가 함께 오면 조용히 버리지 말고 명시 거절(message/send 와 대칭).
+          if (textFromMessage(p.message))
+            return rpcError(id, RPC.UNSUPPORTED_OPERATION, "contextId 재구독 시 새 goal 은 무시됩니다 — 새 위임은 contextId 없이 보내세요");
           if (!(await getIssueScoped(ctx, app)))
             return rpcError(id, RPC.TASK_NOT_FOUND, `context '${ctx}' 없음`);
           return sseResponse((emit) => streamIssue(ctx, app, id ?? null, emit, req.signal), req.signal);
         }
-        const goal = textFromMessage(p.message);
-        if (!goal) return rpcError(id, RPC.INVALID_PARAMS, "message.parts 에 text 가 필요합니다");
+        const g = goalFromMessage(p.message);
+        if (g.error === "empty") return rpcError(id, RPC.INVALID_PARAMS, "message.parts 에 text 가 필요합니다");
+        if (g.error === "too-long") return rpcError(id, RPC.INVALID_PARAMS, `goal 이 너무 깁니다(최대 ${MAX_GOAL}자)`);
+        const goal = g.goal!;
         const issuingUser =
           typeof p.message?.metadata?.user === "string" ? p.message.metadata.user : "a2a-client";
         const res = await delegateIncident({ app, goal, source: "manual", issuingUser });
@@ -209,9 +243,15 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
     return rpcError(body?.id ?? null, RPC.INVALID_REQUEST, "유효하지 않은 JSON-RPC 요청");
   }
 
-  // JSON-RPC notification(id 멤버 없음)에는 응답하지 않는다 — side effect 만 수행하고 204.
-  // SSE 스트림 응답(text/event-stream)은 notification 의미가 없으므로 그대로 반환한다.
+  // JSON-RPC notification(id 멤버 없음) 처리.
+  // 상태변경·비가역 메서드(message/send·message/stream·tasks/cancel)를 notification 으로 보내면
+  // 위임이 수행되는데 issueName(핸들)을 돌려줄 수 없어 유실·재위임 증폭이 된다 → INVALID_REQUEST 로 거절.
+  // 순수 조회(tasks/get·tasks/resubscribe)만 notification 허용(응답 없이 side-effect 없음 → 사실상 무의미하지만 안전).
   const isNotification = !Object.prototype.hasOwnProperty.call(body, "id");
+  const MUTATING = new Set(["message/send", "message/stream", "tasks/cancel"]);
+  if (isNotification && MUTATING.has(body.method))
+    return rpcError(null, RPC.INVALID_REQUEST, `${body.method} 는 notification(id 없음)으로 호출할 수 없습니다`);
+
   const res = await dispatch(req, params.app, body);
   if (isNotification && (res.headers.get("content-type") ?? "").includes("application/json"))
     return new Response(null, { status: 204 });

@@ -10,7 +10,9 @@ export function a2aServerEnabled(): boolean {
 // 운영에선 bearer→SA/RBAC/workspace 매핑으로 확장(설계 §7) — 현재는 형식 검사(존재 강제)까지.
 export function a2aAuthOk(req: Request): boolean {
   if (process.env.MUNINN_A2A_AUTH_DISABLED === "1") return true;
-  return (req.headers.get("authorization") ?? "").toLowerCase().startsWith("bearer ");
+  // "Bearer " 뒤에 비어있지 않은 토큰이 있어야 통과(빈 토큰 "Bearer " 거부). PoC 는 존재만 검사, 운영은 토큰 검증 확장.
+  const m = /^bearer\s+(\S.*)$/i.exec(req.headers.get("authorization") ?? "");
+  return !!m && m[1].trim().length > 0;
 }
 
 // 인증 실패는 A2A 스펙대로 HTTP 401 + WWW-Authenticate 로 신호한다(JSON-RPC 에러코드가 아님).
