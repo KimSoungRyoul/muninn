@@ -132,7 +132,9 @@ Grafana 터널은 **LLM 이 클라우드에 있어** 로컬 FS/셸로 손을 뻗
 
 ## 7. 인증·보안
 
-- **Agent Card `securitySchemes` = bearer**(SA 토큰/OAuth). `/a2a` 진입 시 검증 후에만 `delegateIncident`. Grafana 교훈("`CLI auth tokens` 가 Cloud 전용이라 셀프호스트 데모 불가")을 1급으로 반영 — 인증을 처음부터 셀프호스트 친화로.
+- **fail-closed 기본값**: 서버 라우트(`/a2a/agents/{app}`)는 `MUNINN_A2A_ENABLED=1` 게이트로 **기본 비활성** — 무인증 비가역 위임이 배포 즉시 노출되는 fail-open 을 막는다. 인증은 기본 bearer 필수이고 로컬 dev 만 `MUNINN_A2A_AUTH_DISABLED=1` 로 명시적 우회.
+- **Agent Card `securitySchemes` = bearer**(SA 토큰/OAuth). `/a2a` 진입 시 검증 후에만 `delegateIncident`. Grafana 교훈("`CLI auth tokens` 가 Cloud 전용이라 셀프호스트 데모 불가")을 1급으로 반영 — 인증을 처음부터 셀프호스트 친화로. (PoC 는 형식 검사까지, 운영은 토큰→SA/RBAC/workspace 매핑.)
+- **클라이언트(`send_task_to_a2a_agent`) SSRF 가드**: `A2A_ALLOWED_HOSTS` allowlist 또는 https 강제 + 메타데이터/링크로컬 IP 차단. 가드 통과 URL 에만 bearer 첨부(토큰 유출 방지).
 - **A2A caller → K8s RBAC/workspace 매핑**: 토큰 클레임 → HuginnAgent `workspaceId`. 크로스 워크스페이스는 명시적 허용 필요.
 - **guardrails**(`maxIterations→max_turns`, `maxCostUsd→max_budget_usd`) = 위임 작업 한도 = 터널 deny-list 의 대응물. HuginnIssue spec 에 상속(`inheritedGuardrails`).
 - **push 콜백 URL**: 허용 도메인 화이트리스트 + 페이로드 서명(SSRF/스푸핑 방지).

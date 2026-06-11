@@ -34,9 +34,16 @@ function textFromMessage(msg: any): string {
     .trim();
 }
 
-// PoC 인증: MUNINN_A2A_REQUIRE_AUTH=1 이면 bearer 필수. 운영에선 토큰→SA/RBAC 매핑(설계 §7).
+// 서버 A2A 라우트 활성화 게이트 — 기본 비활성(fail-closed). client-tool(코파일럿 클라이언트)과 동일 플래그라
+// "A2A 기능 전체 on/off" 로 일관된다. 배포 즉시 무인증 위임이 라이브가 되는 fail-open 을 막는다.
+function a2aServerEnabled(): boolean {
+  return process.env.MUNINN_A2A_ENABLED === "1";
+}
+
+// 인증 게이트(fail-closed): 기본 bearer 필수. 로컬 dev 는 MUNINN_A2A_AUTH_DISABLED=1 로 명시적 우회.
+// 운영에선 bearer→SA/RBAC/workspace 매핑으로 확장(설계 §7) — 현재는 형식 검사(존재 강제)까지.
 function authOk(req: NextRequest): boolean {
-  if (process.env.MUNINN_A2A_REQUIRE_AUTH !== "1") return true;
+  if (process.env.MUNINN_A2A_AUTH_DISABLED === "1") return true;
   return (req.headers.get("authorization") ?? "").toLowerCase().startsWith("bearer ");
 }
 
@@ -53,7 +60,10 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
   const { id, method } = body;
   const p: any = body.params ?? {};
 
-  if (!authOk(req)) return rpcError(id, RPC.AUTH_REQUIRED, "인증 필요(bearer)");
+  // fail-closed: 서버 라우트는 기본 비활성. 비가역 위임을 무인증으로 노출하지 않는다.
+  if (!a2aServerEnabled())
+    return rpcError(id, RPC.UNSUPPORTED_OPERATION, "A2A 서버 라우트 비활성 — MUNINN_A2A_ENABLED=1 필요");
+  if (!authOk(req)) return rpcError(id, RPC.AUTH_REQUIRED, "인증 필요(Authorization: Bearer)");
 
   try {
     switch (method) {
@@ -88,13 +98,16 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
         if (!taskId) return rpcError(id, RPC.INVALID_PARAMS, "params.id(=task id) 필요");
         const res = await rejectRun(taskId, "canceled via A2A", "a2a-client");
         if (!res.ok) return rpcError(id, RPC.TASK_NOT_CANCELABLE, `취소 실패: ${res.reason}`);
+        // A2A cancel 결과는 항상 canceled Task 여야 한다. rejectRun 은 approval=Rejected + spec.suspend 만 쓰고
+        // phase→Cancelled 전환은 operator 가 비동기로 하므로, 지금 phase 를 그대로 노출하면 working/input-required 가
+        // 새어나가 cancel 시맨틱을 위반한다. 따라서 state 를 canceled 로 강제하고 직전 phase 는 metadata 로 노출.
         const vm = await getRunStatus(taskId);
-        return rpcOk(
-          id,
-          vm
-            ? runVmToTask(vm)
-            : { kind: "task", id: taskId, contextId: taskId, status: { state: "canceled" } },
-        );
+        const task = vm
+          ? runVmToTask(vm)
+          : { kind: "task" as const, id: taskId, contextId: taskId, status: { state: "canceled" as const } };
+        task.status = { state: "canceled" };
+        if (vm) task.metadata = { ...(task.metadata ?? {}), suspendRequested: true, priorPhase: vm.phase };
+        return rpcOk(id, task);
       }
 
       case "message/stream": {

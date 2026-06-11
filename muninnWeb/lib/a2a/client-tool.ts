@@ -10,6 +10,31 @@ function mid(): string {
   return `m_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// SSRF/토큰유출 가드: 임의 URL 로 bearer 를 흘리지 않는다.
+// - A2A_ALLOWED_HOSTS(쉼표구분 host 또는 host:port)가 설정되면 그 목록만 허용(로컬 데모는 여기에 localhost:4010 추가).
+// - 미설정이면 메타데이터/링크로컬 IP 차단 + https 강제(실수로 사설망/클라우드 메타데이터로 토큰 전송 방지).
+// strict=false 라 discriminated union 내로잉이 안 되므로 { url?, reason? } 형태로 반환(url 있으면 통과).
+function urlGuard(raw: string): { url?: URL; reason?: string } {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { reason: "invalid-url" };
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return { reason: "scheme-not-allowed" };
+  const allow = (process.env.A2A_ALLOWED_HOSTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (allow.length) {
+    if (allow.includes(url.host) || allow.includes(url.hostname)) return { url };
+    return { reason: "host-not-allowlisted" };
+  }
+  const h = url.hostname;
+  if (h === "169.254.169.254" || h.startsWith("169.254.") || h === "metadata.google.internal")
+    return { reason: "metadata-ip-blocked" };
+  if (url.protocol !== "https:")
+    return { reason: "https-required (set A2A_ALLOWED_HOSTS to allow http/loopback)" };
+  return { url };
+}
+
 export const sendTaskToA2AAgentTool = defineTool({
   name: "send_task_to_a2a_agent",
   description:
@@ -46,10 +71,18 @@ export const sendTaskToA2AAgentTool = defineTool({
         },
       },
     };
+    // 가드 통과한 URL 에만 요청/토큰 첨부(SSRF·토큰유출 방지).
+    const guard = urlGuard(agentUrl);
+    if (!guard.url)
+      return {
+        error: "a2a-url-rejected",
+        reason: guard.reason,
+        note: "A2A_ALLOWED_HOSTS 로 대상 호스트를 허용하거나 https URL 을 사용하세요.",
+      };
     const bearer = token ?? process.env.A2A_BEARER;
     let res: Response;
     try {
-      res = await fetch(agentUrl, {
+      res = await fetch(guard.url, {
         method: "POST",
         headers: {
           "content-type": "application/json",
