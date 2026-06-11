@@ -22,17 +22,12 @@ function urlGuard(raw: string): { url?: URL; reason?: string } {
     return { reason: "invalid-url" };
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return { reason: "scheme-not-allowed" };
+  // fail-closed: allowlist 미설정이면 전부 거부한다. "기본 blocklist" 는 loopback/RFC1918/IPv6/DNS rebinding 을
+  // 빠짐없이 막기 어려워(토큰 첨부 fetch 이므로 SSRF 표면이 크다) allowlist 를 명시적으로 요구한다.
   const allow = (process.env.A2A_ALLOWED_HOSTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (allow.length) {
-    if (allow.includes(url.host) || allow.includes(url.hostname)) return { url };
-    return { reason: "host-not-allowlisted" };
-  }
-  const h = url.hostname;
-  if (h === "169.254.169.254" || h.startsWith("169.254.") || h === "metadata.google.internal")
-    return { reason: "metadata-ip-blocked" };
-  if (url.protocol !== "https:")
-    return { reason: "https-required (set A2A_ALLOWED_HOSTS to allow http/loopback)" };
-  return { url };
+  if (!allow.length) return { reason: "no-allowlist — A2A_ALLOWED_HOSTS 로 대상 호스트를 명시하세요." };
+  if (allow.includes(url.host) || allow.includes(url.hostname)) return { url };
+  return { reason: "host-not-allowlisted" };
 }
 
 export const sendTaskToA2AAgentTool = defineTool({
@@ -89,9 +84,15 @@ export const sendTaskToA2AAgentTool = defineTool({
           ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         },
         body: JSON.stringify(body),
+        // 느리거나 멈춘 peer 가 서버 도구 실행을 무한정 잡지 않도록 상한(20s).
+        signal: AbortSignal.timeout(20_000),
       });
     } catch (err) {
-      return { error: "a2a-unreachable", detail: err instanceof Error ? err.message : String(err) };
+      const isTimeout = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      return {
+        error: isTimeout ? "a2a-timeout" : "a2a-unreachable",
+        detail: err instanceof Error ? err.message : String(err),
+      };
     }
     const json: any = await res.json().catch(() => null);
     if (!res.ok || !json) return { error: "a2a-request-failed", status: res.status };

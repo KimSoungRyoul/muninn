@@ -48,7 +48,7 @@ export function huginnAgentToAgentCard(cr: any, baseUrl: string): A2AAgentCard {
     capabilities: {
       streaming: true,
       pushNotifications: false, // PoC 미구현 — 설계 §6.1
-      stateTransitionHistory: true,
+      stateTransitionHistory: false, // Task.history 미채움 — 구현 전까지 false 로 현실 반영
     },
     defaultInputModes: ["text/plain", "application/json"],
     defaultOutputModes: ["text/plain", "application/json"],

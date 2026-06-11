@@ -6,6 +6,7 @@
 // 미구현(PoC): message/stream · tasks/resubscribe(SSE) · pushNotificationConfig → P2/P3(설계 §4/§6.1).
 import { NextRequest, NextResponse } from "next/server";
 import { delegateIncident, getRunStatus, getIssueRuns, rejectRun } from "@/lib/incidents";
+import type { RunVM } from "@/lib/incidents";
 import { runVmToTask, issueToSubmittedTask } from "@/lib/a2a/task-mapper";
 import { sseResponse, streamTask, streamIssue } from "@/lib/a2a/stream";
 import { RPC } from "@/lib/a2a/types";
@@ -47,6 +48,15 @@ function authOk(req: NextRequest): boolean {
   return (req.headers.get("authorization") ?? "").toLowerCase().startsWith("bearer ");
 }
 
+// task.id 가 Run 이름이면 그 Run, contextId(Issue 이름)이면 그 Issue 의 최신 Run 으로 해석한다.
+// message/send 가 위임 직후 contextId(issueName)를 task.id 로 돌려주므로, 후속 호출이 그 id 로 와도 일관 동작.
+async function resolveRun(idOrContext: string): Promise<RunVM | null> {
+  const vm = await getRunStatus(idOrContext);
+  if (vm) return vm;
+  const issue = await getIssueRuns(idOrContext);
+  return issue?.runs[issue.runs.length - 1] ?? null;
+}
+
 export async function POST(req: NextRequest, { params }: { params: { app: string } }) {
   let body: JsonRpcRequest;
   try {
@@ -85,29 +95,32 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
         const taskId: string = p.id ?? p.taskId;
         if (!taskId) return rpcError(id, RPC.INVALID_PARAMS, "params.id(=task id) 필요");
         // 먼저 HuginnRun 으로 시도, 아니면 HuginnIssue(contextId)로 — 최신 Run 을 Task 로.
+        // Run 미생성 구간(위임 직후)엔 Issue 가 있어도 Run 이 없으므로 submitted Task 를 돌려준다.
         const vm = await getRunStatus(taskId);
         if (vm) return rpcOk(id, runVmToTask(vm));
         const issue = await getIssueRuns(taskId);
         if (!issue) return rpcError(id, RPC.TASK_NOT_FOUND, `task/context '${taskId}' 없음`);
         const latest = issue.runs[issue.runs.length - 1];
-        return rpcOk(id, latest ? runVmToTask(latest) : issueToSubmittedTask(taskId, ""));
+        return rpcOk(id, latest ? runVmToTask(latest) : issueToSubmittedTask(taskId, params.app));
       }
 
       case "tasks/cancel": {
         const taskId: string = p.id ?? p.taskId;
         if (!taskId) return rpcError(id, RPC.INVALID_PARAMS, "params.id(=task id) 필요");
-        const res = await rejectRun(taskId, "canceled via A2A", "a2a-client");
+        // 존재 확인 후 실제 Run id 에만 rejectRun 한다. 없는 id 로 부르면 rejectRun→patchRunStatus 가
+        // k8s 404 를 던져 INTERNAL_ERROR(-32603)로 새므로, 먼저 resolveRun 으로 해석해 TASK_NOT_FOUND 를 준다.
+        const vm = await resolveRun(taskId);
+        if (!vm) return rpcError(id, RPC.TASK_NOT_FOUND, `task/context '${taskId}' 없음(또는 취소할 Run 없음)`);
+        const res = await rejectRun(vm.id, "canceled via A2A", "a2a-client");
         if (!res.ok) return rpcError(id, RPC.TASK_NOT_CANCELABLE, `취소 실패: ${res.reason}`);
-        // A2A cancel 결과는 항상 canceled Task 여야 한다. rejectRun 은 approval=Rejected + spec.suspend 만 쓰고
-        // phase→Cancelled 전환은 operator 가 비동기로 하므로, 지금 phase 를 그대로 노출하면 working/input-required 가
-        // 새어나가 cancel 시맨틱을 위반한다. 따라서 state 를 canceled 로 강제하고 직전 phase 는 metadata 로 노출.
-        const vm = await getRunStatus(taskId);
-        const task = vm
-          ? runVmToTask(vm)
-          : { kind: "task" as const, id: taskId, contextId: taskId, status: { state: "canceled" as const } };
-        task.status = { state: "canceled" };
-        if (vm) task.metadata = { ...(task.metadata ?? {}), suspendRequested: true, priorPhase: vm.phase };
-        return rpcOk(id, task);
+        // cancel 결과는 항상 canceled Task(phase→Cancelled 전환은 operator 가 비동기). 직전 phase 는 metadata.
+        return rpcOk(id, {
+          kind: "task",
+          id: vm.id,
+          contextId: vm.issue ?? taskId,
+          status: { state: "canceled" },
+          metadata: { suspendRequested: true, priorPhase: vm.phase },
+        });
       }
 
       case "message/stream": {
@@ -128,7 +141,13 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
       case "tasks/resubscribe": {
         const taskId: string = p.id ?? p.taskId;
         if (!taskId) return rpcError(id, RPC.INVALID_PARAMS, "params.id(=task id) 필요");
-        return sseResponse((emit) => streamTask(taskId, id ?? null, emit, req.signal), req.signal);
+        // taskId 가 Run 이면 streamTask, contextId(Issue)면 streamIssue 로 분기한다.
+        // message/send 가 task.id=issueName 을 돌려주므로, 그 id 로 재구독해도 -32001 이 아니라 정상 스트림.
+        const vm = await getRunStatus(taskId);
+        if (vm) return sseResponse((emit) => streamTask(taskId, id ?? null, emit, req.signal), req.signal);
+        const issue = await getIssueRuns(taskId);
+        if (issue) return sseResponse((emit) => streamIssue(taskId, params.app, id ?? null, emit, req.signal), req.signal);
+        return rpcError(id, RPC.TASK_NOT_FOUND, `task/context '${taskId}' 없음`);
       }
 
       default:
