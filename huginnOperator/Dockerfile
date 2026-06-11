@@ -1,5 +1,6 @@
 # Build the manager binary
-FROM golang:1.25 AS builder
+# go.mod 의 go 1.26 을 만족해야 한다(go mod download/build 가 toolchain 검사) — 빌더 이미지를 맞춘다.
+FROM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
