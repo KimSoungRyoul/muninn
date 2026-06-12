@@ -95,6 +95,19 @@ function isLabelSafe(v: string): boolean {
   return v.length <= 63 && LABEL_VALUE_RE.test(v);
 }
 
+// approval.state 의 표시값을 lazy 계산한다. 만료 자동집행 데몬이 없어 CR 의 approval.state 는
+// 만료 후에도 "Pending" 으로 남으므로, expiresAt 경과 시 노출값만 "Expired" 로 계산해 반환한다.
+// (CR 은 패치하지 않는다 — 표시 계산만.) 이러면 runner 폴링이 진짜 만료를 관측해
+// terminalKind="expired" 분기가 살아난다. loadApprovableRun 의 expiresAt 가드와 일관.
+function approvalState(st: any): string | null {
+  const state: string | null = st?.approval?.state ?? null;
+  if (state === "Pending") {
+    const expiresAt = st?.approval?.expiresAt;
+    if (expiresAt && Date.parse(expiresAt) <= Date.now()) return "Expired";
+  }
+  return state;
+}
+
 function runView(cr: any): RunVM {
   const st = cr?.status ?? {};
   const labels = cr?.metadata?.labels ?? {};
@@ -109,7 +122,7 @@ function runView(cr: any): RunVM {
     output: st.output ?? null,
     issue: cr?.spec?.issueRef ?? null,
     namespace: cr?.metadata?.namespace ?? ns(),
-    approval: st.approval?.state ?? null,
+    approval: approvalState(st),
     // 거절 사유 표면화(관측성): reasons[].detail 우선, 없으면 자기류 reason 필드(rejectRun 이 둘 다 기록).
     approvalReason: st.approval?.reason ?? st.approval?.reasons?.[0]?.detail ?? null,
     approvalDecidedBy: st.approval?.decidedBy ?? null,

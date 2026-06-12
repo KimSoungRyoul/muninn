@@ -15,6 +15,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  // 미인증 외부 read 차단(리뷰 MEDIUM): 콘솔 read(same-origin GET)는 허용, 머신/외부는 토큰 필수.
+  // dev 모드(인증 미설정)에서는 requireAuth 가 null 을 반환해 그대로 통과한다.
+  const denied = await requireAuth(req, { allowConsoleRead: true });
+  if (denied) return denied;
   const sp = req.nextUrl.searchParams;
   const scope = sp.get("scope") ?? undefined; // global | app
   const appId = sp.get("app") ?? undefined;

@@ -74,8 +74,11 @@ jobs:
           exit-code: "0"
 
       # PR Security 탭에 추세를 남긴다(category 로 이미지별 분리). 스캔이 실패해도 always() 로 업로드.
+      # fork PR 은 GITHUB_TOKEN 이 read-only 로 강등돼 upload-sarif 가 403 으로 실패하므로
+      # continue-on-error 로 외부 기여 PR 체크가 red 되는 것을 막는다(업로드는 same-repo/main 에서만 성공).
       - name: Upload trivy SARIF to code-scanning
         if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
         with:
           sarif_file: trivy-web.sarif

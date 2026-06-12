@@ -143,7 +143,8 @@
           "properties": {
             "issuer": { "type": "string" },
             "audience": { "type": "string" },
-            "jwksUri": { "type": "string" }
+            "jwksUri": { "type": "string" },
+            "operatorGroup": { "type": "string" }
           }
         },
         "ingress": {

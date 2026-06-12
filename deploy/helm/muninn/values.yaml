@@ -160,6 +160,11 @@ web:
     audience: ""
     # JWKS 엔드포인트. 비우면 issuer 의 /.well-known/jwks.json 으로 자동 디스커버리.
     jwksUri: ""
+    # 운영자 group claim 강제(MUNINN_OIDC_OPERATOR_GROUP). 설정 시 approve/reject(운영자 경로)는
+    # 이 group 을 가진 검증된 OIDC 토큰만 허용한다(lib/auth.ts requireOperator/hasOperatorClaim).
+    # ⚠️ 비우면 운영자 게이트의 group 강제가 no-op 이라, 인증된 아무 SSO 사용자나 승인/거절할 수 있다.
+    # 보안 강조 환경에서는 반드시 설정할 것(예: muninn-operators).
+    operatorGroup: ""
 
   ingress:
     enabled: false
@@ -224,7 +229,7 @@ agent:
   # 승인 루프(HITL, CONTRACT §3) — runner.py 가 읽는 env. PR/위험작업 직전 승인을 받고 폴링한다:
   #   MUNINN_REQUIRE_APPROVAL=1     승인 게이트 활성(미설정 시 guardrails.requireApproval 폴백, 기본 off)
   #   MUNINN_APPROVAL_POLL_SECONDS  approval.state 폴링 간격(기본 10초)
-  #   MUNINN_APPROVAL_TIMEOUT       대기 한도 초; 초과 시 Expired 로 정상 중단(기본 1800초)
+  #   MUNINN_APPROVAL_TIMEOUT       대기 한도 초; 초과 시 aborted 로 정상 중단(기본 5400초)
   # 현재 operator 는 이 셋을 helm values 에서 받아 Job 에 전달하는 경로가 없다(operator 프로세스
   # env 또는 CR guardrails 로 제어). 별도 전달 경로가 생기면 여기 values 로 노출한다.
 

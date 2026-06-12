@@ -264,9 +264,11 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 			Labels:    issueChildLabels(issue, agent),
 		},
 		Spec: muninniov1beta1.HuginnRunSpec{
-			IssueRef:                issue.Name,
-			Attempt:                 attempt,
-			TimeoutSeconds:          3600,
+			IssueRef: issue.Name,
+			Attempt:  attempt,
+			// activeDeadline: 승인 게이트가 켜진 Run 은 7200s(승인 timeout 90m + 작업예산)로 상향해
+			// 60~90m 사이 승인이 60m activeDeadline 에 SIGKILL 당하는 모순을 막는다(CONTRACT §C-HITL).
+			TimeoutSeconds:          runTimeoutSeconds(agent),
 			TTLSecondsAfterFinished: 86400,
 			JobTemplate:             buildJobTemplate(agent, issue, memEndpoint, apiEndpoint),
 		},

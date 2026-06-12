@@ -55,7 +55,30 @@ const (
 	defaultMemoryEndpoint = "http://muninn-memory.muninn.svc:8080"
 	defaultAPIEndpoint    = "http://muninn-api.muninn.svc:8080"
 	defaultAPIBaseURL     = "https://muninn-api.platform.local"
+
+	// approvalTimeoutSeconds: HITL 승인 게이트의 권위 timeout(초). web 의 승인 TTL(incidents.ts
+	// approvalTtlMinutes 기본 90m)·runner._approval_timeout_seconds 기본(5400)과 정합하는 단일 소스다
+	// (CONTRACT §C-HITL). operator 가 이 값을 MUNINN_APPROVAL_TIMEOUT env 로 주입해 runner 가 동일 값을
+	// 쓰게 하고, requireApproval=true Run 의 Job activeDeadline 도 이 값 이상으로 잡는다.
+	approvalTimeoutSeconds int64 = 5400
+	// defaultRunTimeoutSeconds: 승인 게이트가 없는 일반 Run 의 Job activeDeadline(=60m).
+	defaultRunTimeoutSeconds int64 = 3600
+	// approvalRunTimeoutSeconds: requireApproval=true Run 의 Job activeDeadline(=120m).
+	// 승인 timeout(90m) + 승인 후 실제 작업 예산(약 30m) 이상이어야, 운영자가 60~90m 사이 승인해도
+	// Pod 가 activeDeadline 로 SIGKILL 당하지 않는다(CONTRACT §C-HITL, 리뷰 HIGH). 즉
+	// activeDeadline >= approvalTimeout + 작업예산 을 보장한다.
+	approvalRunTimeoutSeconds int64 = 7200
 )
+
+// runTimeoutSeconds 는 Run 의 Job activeDeadlineSeconds(=Spec.TimeoutSeconds)를 결정한다.
+// agent 의 PR 정책이 승인 게이트를 켜면(requireApprovalOnWorkflowChange) 승인 대기(최대 90m)가
+// 60m activeDeadline 에 SIGKILL 당하는 모순을 막기 위해 7200s 로 상향한다(CONTRACT §C-HITL).
+func runTimeoutSeconds(agent *muninniov1beta1.HuginnAgent) int64 {
+	if pr := agent.Spec.Source.PR; pr != nil && pr.RequireApprovalOnWorkflowChange {
+		return approvalRunTimeoutSeconds
+	}
+	return defaultRunTimeoutSeconds
+}
 
 // pvcNameForAgent 은 앱별 격리 PVC 이름(§5.5 MVP=A).
 func pvcNameForAgent(agentName string) string {
@@ -97,6 +120,11 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 		{Name: "MUNINN_TEAM_SETTINGS_REF", Value: "configmap/muninn-team-settings"},
 		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d,"requireApproval":%t}`,
 			g.MaxIterations, g.MaxCostUsd, g.MaxTokens, requireApproval)},
+		// MUNINN_APPROVAL_TIMEOUT: HITL 승인 게이트 timeout 의 단일 소스(초). web TTL·runner 기본과 정합시켜
+		// runner._approval_timeout_seconds 가 동일 값을 쓰게 한다(CONTRACT §C-HITL). requireApproval 여부와
+		// 무관하게 항상 주입 — 게이트가 켜지면(MUNINN_REQUIRE_APPROVAL/guardrails) 이 값으로 폴링 timeout 을 잡고,
+		// 같은 값 이상으로 잡힌 Job activeDeadline(runTimeoutSeconds) 안에 들어오도록 한다.
+		{Name: "MUNINN_APPROVAL_TIMEOUT", Value: fmt.Sprintf("%d", approvalTimeoutSeconds)},
 		{Name: "MUNINN_MEMORY_ENDPOINT", Value: memoryEndpoint},
 		{Name: "MUNINN_API_ENDPOINT", Value: apiEndpoint},
 		// 인증: env(Secret)로만(§5.1, §6.2). API 키 또는 OAuth 토큰 중 하나면 충분 →

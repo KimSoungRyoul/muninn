@@ -326,6 +326,11 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId, runVm, onDecided }: a
       {/* Approval panel (only when awaiting) */}
       {isAwaiting && <ApprovalPanel runId={runId || run.id} requestedAt={runVm?.startedAt || run.started} onDecided={onDecided}/>}
 
+      {/* 거절 결과 — 승인 대기가 아니고 운영자가 거절한 Run 이면 사유·결정자를 표면화(관측성, 리뷰 LOW). */}
+      {!isAwaiting && runVm?.approval === "Rejected" && (
+        <RejectedNotice reason={runVm?.approvalReason} decidedBy={runVm?.approvalDecidedBy}/>
+      )}
+
       {/* Top stats row */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
         <HmCard>
@@ -423,6 +428,22 @@ function escDiffHtml(lines: Array<{ k: string; t: string }>): string {
   return lines.map((l) => `<span class="${l.k}">${esc(l.t)}</span>`).join("\n");
 }
 
+// 거절된 Run 의 사유·결정자 표면화(관측성, 리뷰 LOW) — runView 가 채운 approvalReason/approvalDecidedBy 소비처.
+function RejectedNotice({ reason, decidedBy }: { reason?: string | null; decidedBy?: string | null }) {
+  return (
+    <div className="hm-approval" style={{borderColor:"var(--danger-50, #c0392b)"}}>
+      <div className="hm-approval-head">
+        <Icon name="close" size={16} style={{color:"var(--danger-50, #c0392b)"}}/>
+        <span className="ttl">거절됨 — 실행이 중단되었습니다</span>
+      </div>
+      <div style={{fontFamily:"var(--font-sans)", fontSize:13, color:"var(--on-surface)", marginTop:8}}>
+        <div>거절 사유: <strong>{reason && reason.trim() ? reason : "(사유 미기재)"}</strong></div>
+        {decidedBy && <div style={{marginTop:4, color:"var(--on-surface-muted)"}}>결정자: {decidedBy}</div>}
+      </div>
+    </div>
+  );
+}
+
 // runId, requestedAt(만료 계산), 그리고 선택적으로 실제 PR/diff(prTitle/diffLines). 미제공 시 데모 데이터 배지.
 // onDecided: 승인/거절 성공 후 부모가 상태를 갱신하도록 콜백.
 function ApprovalPanel({ runId, requestedAt, prTitle, diffLines, reasons, onDecided }: any) {
@@ -449,6 +470,13 @@ function ApprovalPanel({ runId, requestedAt, prTitle, diffLines, reasons, onDeci
     setSubmitting(kind);
     setError(null);
     try {
+      // 인증 모델(lib/auth.ts): approve/reject 는 requireOperator 라우트다.
+      //   - dev / 정적 토큰만 / OIDC_OPERATOR_GROUP 미설정 환경: same-origin 콘솔 fetch 가 그대로 통과한다(현행 완화).
+      //   - **MUNINN_OIDC_OPERATOR_GROUP 강제 환경**: 콘솔 우회가 차단되므로(2회차 CRITICAL fix), 이 fetch 는
+      //     운영자 OIDC(SSO) JWT 를 `Authorization: Bearer` 로 실어야 403 을 받지 않는다.
+      // TODO(콘솔 SSO): 운영자 그룹 강제 배포에서 콘솔이 OIDC 토큰을 얻는 경로(세션 쿠키→토큰 교환 또는
+      //   브라우저 OIDC 세션의 access token)를 배선하고, 아래 headers 에 `Authorization: Bearer <token>` 을 추가한다.
+      //   본 PR 범위 밖(콘솔 SSO 미구현) — 그룹 미강제 환경에서는 토큰 없이 동작한다.
       const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/${kind}`, {
         method: "POST",
         headers: { "content-type": "application/json" },

@@ -314,6 +314,22 @@ def _poll_approval_once() -> dict | None:
     return _http_json("GET", f"{api.rstrip('/')}/api/runs/{run}")
 
 
+def _get_run_deadline(deadline: float | None = None) -> dict | None:
+    """GET /api/runs/{run} 1회 — SIGTERM grace 예산(deadline) 내로 캡(브리프 항목1).
+
+    취소(CancelledError) 경로에서 terminal 보고 *전* approval.state 를 확인할 때 쓴다.
+    재시도 없이(retries=0) 단일 시도로, deadline 을 _http_json 에 넘겨 per-attempt timeout 을
+    잔여 grace 예산 이하로 캡한다 — terminal 보고가 grace 안에 끝날 여지를 남긴다.
+    """
+    api = _env("MUNINN_API_ENDPOINT")
+    run = _env("MUNINN_RUN_NAME")
+    if not api or not run:
+        return None
+    return _http_json(
+        "GET", f"{api.rstrip('/')}/api/runs/{run}", retries=0, deadline=deadline
+    )
+
+
 def _approval_poll_seconds() -> float:
     try:
         return max(1.0, float(os.getenv("MUNINN_APPROVAL_POLL_SECONDS", "10") or 10))
@@ -322,9 +338,14 @@ def _approval_poll_seconds() -> float:
 
 
 def _approval_timeout_seconds() -> float:
-    # 기본 5400s(90m) — web API 의 승인 TTL(incidents.ts approvalTtlMinutes 기본 90m)과 일치시킨다
-    # (브리프 항목4). 더 짧게 끝내면 운영자가 31~90m 사이 승인해도 에이전트가 이미 사라져
-    # Run 만 Approved 로 전이되는 모순이 생긴다. operator 가 동일 값을 env 로 주입하면 단일 소스가 된다.
+    # 단일 소스 규약(브리프 항목3, C-HITL): operator 가 web 의 TTL 권위값
+    # (MUNINN_APPROVAL_TTL_MINUTES*60)을 agent Job env 의 MUNINN_APPROVAL_TIMEOUT 으로 주입하면
+    # runner 폴링 타임아웃이 web 의 만료 차단과 정합한다 → 단일 소스. runner 는 이미 이 env 를
+    # 읽는다(아래). operator 가 주입하지 않는 환경에서는 이 기본 5400s(90m)가 web 의
+    # approvalTtlMinutes 기본 90m 과 *우연히* 일치할 뿐인 독립 상수다 — operator 가 web TTL 을
+    # 30m 로 낮춰도 미주입이면 runner 는 여전히 90m 폴링하므로, 보안 환경은 operator 주입에 의존하라.
+    # (더 짧게 끝내면 운영자가 TTL 내 승인해도 에이전트가 이미 사라져 Run 만 Approved 로 전이되는
+    #  모순이 생긴다 — 브리프 항목4.)
     try:
         return max(1.0, float(os.getenv("MUNINN_APPROVAL_TIMEOUT", "5400") or 5400))
     except (TypeError, ValueError):
@@ -344,7 +365,9 @@ def _gate_terminal_kind(gate_outcome: str) -> str:
     """승인 게이트 outcome → web report route 의 terminalKind 화이트리스트 매핑(CONTRACT §C4).
 
       rejected(…)      → "rejected"
-      expired          → "expired"
+      expired          → "expired"  (※ 현재 web 이 Expired 를 자동 표면화하지 않아 게이트가
+                          이 outcome 을 내지 못한다 — gate_approval 의 Expired 분기 주석 참조.
+                          매핑은 web 수정 시 살아나도록 유지.)
       approval-timeout → "aborted"  (운영자가 끝내 결정 안 함 = 능동 거절이 아닌 중단)
     그 외(이론상 도달 불가)는 빈 문자열 → terminalKind 미전송(web 은 기존 동작 유지).
     """
@@ -683,6 +706,12 @@ async def run_live() -> int:
                 log(f"거절됨(Rejected){f': {detail}' if detail else ''} → 정상 중단")
                 return f"rejected: {detail}" if detail else "rejected"
             if state == "Expired":
+                # 도달 경고(브리프 항목2, MEDIUM): 현재 web 은 CR status.approval.state 를
+                # "Expired" 로 자동 패치하지 않으므로(만료는 approve/reject 호출 시 차단 사유로만
+                # 반환, runView 도 lazy 표면화 안 함) 이 분기는 **현 구현에서 도달 불가**다.
+                # 실질 만료 경로는 runner 자체 wall-clock(_approval_timeout_seconds) 의
+                # "approval-timeout"→terminalKind="aborted" 다. 분기는 의도적으로 유지한다 —
+                # web 이 만료를 Expired 로 lazy 표면화하도록 고치면(후속) 즉시 살아난다.
                 log("승인 만료(Expired) → 정상 중단")
                 return "expired"
             # Pending/None(미파싱) → 계속 폴링. 타임아웃 경과 시 정상 중단.
@@ -745,8 +774,47 @@ async def run_live() -> int:
         is_error = True
         log("WARN: 실행이 취소됨(SIGTERM/timeout) — terminal 보고 전송(grace 제한)")
         deadline = time.monotonic() + _sigterm_report_budget_seconds()
+        # 거절 선점 해소(브리프 항목1, finalSeverity HIGH): reject 는 operator 가
+        # spec.suspend=true→SIGTERM 으로 runner 의 10s 승인 폴링을 거의 항상 선점한다. 그래서
+        # 운영자 거절이 여기 CancelledError 경로로 들어와 terminalKind 없이 failed=True 로 보고되면
+        # web report route 가 incidentStatus="failed" 로 오기록한다(거절≠실패). 이를 막기 위해
+        # terminal 보고 *전* 1회 GET /api/runs/{run} 로 approval.state 를 확인한다:
+        #   * "Rejected" → terminalKind="rejected"(failed=False) — 능동 거절로 정확히 기록.
+        #   * 그 외/조회 실패 → 기존 aborted(failed=True) 폴백(보고 보장은 유지).
+        # GET 은 grace 예산(deadline) 안에서 끝나도록 deadline 을 _http_json 에 넘겨 per-attempt
+        # timeout 을 잔여로 캡한다(_poll_approval_once 가 아니라 deadline-aware 경로를 직접 호출).
+        terminal_kind = ""
+        cancel_failed = True
+        cancel_reason = "cancelled"
+        cancel_outcome = ""
+        try:
+            cancel_run_obj = await asyncio.shield(
+                asyncio.to_thread(_get_run_deadline, deadline)
+            )
+            cancel_state = _parse_approval_state(cancel_run_obj)
+            if cancel_state == "Rejected":
+                detail = _approval_detail(cancel_run_obj)
+                terminal_kind = "rejected"
+                cancel_failed = False
+                cancel_reason = ""
+                cancel_outcome = f"rejected: {detail}" if detail else "rejected"
+                log(f"취소 직전 조회: approval.state=Rejected → terminalKind=rejected(거절 기록){f': {detail}' if detail else ''}")
+            elif cancel_state:
+                log(f"취소 직전 조회: approval.state={cancel_state!r} → 거절 아님, aborted 폴백")
+            else:
+                log("취소 직전 조회: approval.state 미파싱/조회 실패 → aborted 폴백")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # 조회 실패는 보고 보장을 깨지 않게 폴백.
+            log(f"WARN: 취소 직전 approval 조회 실패(무시) → aborted 폴백: {exc}")
         await asyncio.shield(
-            send_final(failed=True, abort_reason="cancelled", report_deadline=deadline)
+            send_final(
+                failed=cancel_failed,
+                abort_reason=cancel_reason,
+                outcome_override=cancel_outcome,
+                terminal_kind=terminal_kind,
+                report_deadline=deadline,
+            )
         )
         raise
     except Exception as exc:

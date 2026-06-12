@@ -4,6 +4,7 @@
 
 import { NextRequest } from "next/server";
 import { ok, badRequest, serverError } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { dbEnabled, recall } from "@/lib/db";
 import { workspaceFromRequest } from "@/lib/workspace";
 
@@ -11,6 +12,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
+  // 미인증 외부 read 차단(리뷰 MEDIUM): 머신(agent-runtime)은 토큰 필수, 콘솔(same-origin)은 우회 허용.
+  // recall 은 POST(상태변경 메서드)이므로 기본 콘솔 우회로 충분하다(allowConsoleRead 불필요).
+  const denied = await requireAuth(req);
+  if (denied) return denied;
   if (!dbEnabled()) return ok({ count: 0, items: [], note: "db-disabled" });
   let body: any;
   try {

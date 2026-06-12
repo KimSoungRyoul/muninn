@@ -76,6 +76,8 @@ func TestBuildJobTemplate(t *testing.T) {
 	// requireApproval=true 는 agent.Spec.Source.PR.RequireApprovalOnWorkflowChange 에서 직렬화된 것(HITL 트리거 배선).
 	for _, tc := range []struct{ name, want string }{
 		{"MUNINN_GUARDRAILS", `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000,"requireApproval":true}`},
+		// MUNINN_APPROVAL_TIMEOUT: HITL 승인 timeout 단일 소스(초) — web TTL·runner 기본(5400)과 정합(CONTRACT §C-HITL).
+		{"MUNINN_APPROVAL_TIMEOUT", "5400"},
 		{"MUNINN_SOUL_REF", "configmap/soul-ai-router-svc"},
 		{"MUNINN_EVENT_PAYLOAD_REF", "secret/issue-1-event"},
 		{"MUNINN_GOAL", "diagnose"},
@@ -115,6 +117,31 @@ func TestBuildJobTemplateRequireApprovalDefault(t *testing.T) {
 	want := `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000,"requireApproval":false}`
 	if e.Value != want {
 		t.Errorf("MUNINN_GUARDRAILS = %q, want %q", e.Value, want)
+	}
+}
+
+// TestRunTimeoutSeconds 는 승인 게이트 유무에 따른 Job activeDeadline(=Run.Spec.TimeoutSeconds) 상향을
+// 검증한다(CONTRACT §C-HITL, 리뷰 HIGH). requireApproval=true 면 승인 timeout(90m)+작업예산 이상(7200s)으로,
+// 아니면 기본 3600s(60m)여야 한다 — 60~90m 사이 승인이 activeDeadline 에 SIGKILL 당하는 모순 방지.
+func TestRunTimeoutSeconds(t *testing.T) {
+	agent, _ := testFixtures() // PR.RequireApprovalOnWorkflowChange = true
+	if got := runTimeoutSeconds(agent); got != approvalRunTimeoutSeconds {
+		t.Errorf("requireApproval=true: timeout = %d, want %d", got, approvalRunTimeoutSeconds)
+	}
+	// 승인 timeout(env) 이상이어야 SIGKILL 모순이 닫힌다.
+	if approvalRunTimeoutSeconds < approvalTimeoutSeconds {
+		t.Errorf("approvalRunTimeoutSeconds(%d) 는 approvalTimeoutSeconds(%d) 이상이어야 함",
+			approvalRunTimeoutSeconds, approvalTimeoutSeconds)
+	}
+
+	agent.Spec.Source.PR = nil // 승인 게이트 off
+	if got := runTimeoutSeconds(agent); got != defaultRunTimeoutSeconds {
+		t.Errorf("PR 정책 없음: timeout = %d, want %d", got, defaultRunTimeoutSeconds)
+	}
+
+	agent.Spec.Source.PR = &muninniov1beta1.PRPolicy{RequireApprovalOnWorkflowChange: false}
+	if got := runTimeoutSeconds(agent); got != defaultRunTimeoutSeconds {
+		t.Errorf("requireApproval=false: timeout = %d, want %d", got, defaultRunTimeoutSeconds)
 	}
 }
 

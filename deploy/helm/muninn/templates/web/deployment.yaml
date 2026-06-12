@@ -28,7 +28,7 @@ spec:
       serviceAccountName: {{ include "muninn.web.serviceAccountName" . }}
       # 토큰 마운트는 SA 생성 여부와 분리한다 — 기존 SA(create=false) 사용 시에도 in-cluster K8s
       # 자격이 있어야 k8sEnabled()가 통과한다(아니면 조용히 mock 폴백). 기본 true.
-      automountServiceAccountToken: {{ .Values.web.serviceAccount.automount | default true }}
+      automountServiceAccountToken: {{ .Values.web.serviceAccount.automount }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -86,6 +86,13 @@ spec:
             {{- if .Values.web.oidc.jwksUri }}
             - name: MUNINN_OIDC_JWKS_URI
               value: {{ .Values.web.oidc.jwksUri | quote }}
+            {{- end }}
+            {{- if .Values.web.oidc.operatorGroup }}
+            # 설정 시 approve/reject(운영자 경로)는 이 group claim 을 가진 OIDC 토큰만 허용한다
+            # (lib/auth.ts requireOperator/hasOperatorClaim). 미설정이면 운영자 게이트가 일반 인증으로
+            # 완화된다 — 즉 group 강제가 no-op 이므로, 보안 강조 환경에서는 반드시 설정할 것.
+            - name: MUNINN_OIDC_OPERATOR_GROUP
+              value: {{ .Values.web.oidc.operatorGroup | quote }}
             {{- end }}
             {{- end }}
             # Muninn API 인증 토큰(lib/auth.ts). agent(runner.py)·operator 와 동일 토큰이어야 한다.
