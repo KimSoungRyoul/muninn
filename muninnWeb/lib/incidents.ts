@@ -331,6 +331,11 @@ export async function getRunStatus(runId: string): Promise<RunVM | null> {
 }
 
 // ---- 위임: 운영자 프롬프트 → HuginnIssue CR 생성(설계 §3.2/§4.2) ----
+
+// 위임 goal 길이 상한 — 무제한 텍스트가 HuginnIssue CR 에 그대로 들어가는 것을 막는다(etcd 부하·남용 방지).
+// 모든 위임 진입점(A2A 라우트·copilot delegate_incident·A2A 클라이언트 도구)이 이 값을 공유한다(이슈 #44).
+export const MAX_GOAL_LENGTH = 8 * 1024;
+
 export interface DelegateInput {
   app: string; // HuginnAgent name (=Application)
   goal: string;

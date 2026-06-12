@@ -6,7 +6,7 @@ import { ok, notFound, serverError } from "@/lib/api";
 import { getApplicationCr, listApplications } from "@/lib/incidents";
 import { k8sEnabled } from "@/lib/k8s";
 import { huginnAgentToAgentCard, baseUrlFromRequest } from "@/lib/a2a/card";
-import { a2aServerEnabled, a2aAuthOk, a2aDisabled, a2aUnauthorized } from "@/lib/a2a/gate";
+import { a2aServerEnabled, a2aRequireAuth, a2aDisabled } from "@/lib/a2a/gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ app: stri
   // POST 와 동일 게이트(fail-closed) — 광고한 능력(streaming 등)과 실제 활성 상태를 일치시키고 무인증 노출 방지.
   // 인증 실패는 A2A 스펙대로 HTTP 401, 비활성은 404.
   if (!a2aServerEnabled()) return a2aDisabled();
-  if (!a2aAuthOk(req)) return a2aUnauthorized();
+  const denied = await a2aRequireAuth(req);
+  if (denied) return denied;
   try {
     const params = await props.params; // Next 15: params 는 Promise
     const baseUrl = baseUrlFromRequest(req);

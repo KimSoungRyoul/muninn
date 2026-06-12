@@ -4,6 +4,7 @@
 
 import { defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
+import { MAX_GOAL_LENGTH } from "../incidents";
 import type { JsonRpcRequest } from "./types";
 
 function mid(): string {
@@ -38,12 +39,13 @@ export const sendTaskToA2AAgentTool = defineTool({
     "**되돌릴 수 없을 수 있으니** 먼저 사용자 동의를 받고 confirmed=true 로 호출하라(미설정 시 확인 요청만 반환).",
   parameters: z.object({
     agentUrl: z.string().url().describe("대상 A2A 에이전트 JSON-RPC 엔드포인트(Agent Card 의 url)"),
-    goal: z.string().describe("위임할 작업/목표(자연어)"),
+    goal: z.string().max(MAX_GOAL_LENGTH).describe("위임할 작업/목표(자연어)"),
     contextId: z.string().optional().describe("기존 작업 맥락을 이어가려면 contextId(=상대 에이전트의 task context)"),
-    token: z.string().optional().describe("대상 인증 bearer 토큰(없으면 env A2A_BEARER 사용)"),
+    // 인증 토큰은 의도적으로 파라미터가 아니다 — 모델 파라미터로 받으면 토큰이 LLM 컨텍스트(대화·로그)에
+    // 노출된다(이슈 #44). 다른 server tool 과 동일하게 자격은 env(A2A_BEARER)에서만 읽는다.
     confirmed: z.boolean().optional().describe("사용자 동의 시 true. 미설정/false 면 실행하지 않고 확인 요청 반환."),
   }),
-  execute: async ({ agentUrl, goal, contextId, token, confirmed }) => {
+  execute: async ({ agentUrl, goal, contextId, confirmed }) => {
     if (!goal || !agentUrl) return { error: "bad_input", note: "agentUrl 과 goal 은 필수입니다." };
     if (!confirmed) {
       return {
@@ -77,7 +79,7 @@ export const sendTaskToA2AAgentTool = defineTool({
         reason: guard.reason,
         note: "A2A_ALLOWED_HOSTS 로 대상 호스트를 허용하거나 https URL 을 사용하세요.",
       };
-    const bearer = token ?? process.env.A2A_BEARER;
+    const bearer = process.env.A2A_BEARER;
     let res: Response;
     try {
       res = await fetch(guard.url, {
