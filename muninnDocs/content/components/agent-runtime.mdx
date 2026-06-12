@@ -1,0 +1,81 @@
+import { Callout } from 'nextra/components'
+
+# huginnAgentRuntime
+
+각 에이전트 실행(`HuginnRun` → K8s Job/Pod)이 돌아가는 **컨테이너 이미지**. `HuginnAgent.spec.agent.image` 에 이 이미지를 지정하면, Operator 가 이벤트마다 `HuginnIssue → HuginnRun → Job` 을 만들고 이 이미지로 Claude Agent SDK 루프를 실행한다.
+
+`runner.py` 가 `claude-agent-sdk`(Python)를 구동하고, SDK 는 `PATH` 의 `claude` CLI 를 subprocess 로 띄운다 — 따라서 이미지에 npm CLI 와 Python SDK 가 **둘 다** 필요하다. 그 외 `kubectl`, `helm`, `argocd`, `gh`, `git`, `jq`, `yq`, `curl` 등이 포함된다.
+
+이미지 좌표: `ghcr.io/kimsoungryoul/muninn/agent-runtime` (멀티아치 `linux/amd64`, `linux/arm64`).
+
+## non-root 로 실행되는 이유
+
+`claude` CLI 가 root 에서 `--dangerously-skip-permissions` 를 거부하므로 컨테이너는 **non-root**(`node`, 베이스 이미지의 uid 1000)로 실행된다. Operator 가 `runAsNonRoot` / `fsGroup` / capability 드롭을 부여한다.
+
+## `~/.claude` 마운트 경로 계약
+
+`~/.claude` 는 `/home/node/.claude` 다. 이 경로는 Operator 의 `claudeMountPath` 와 일치해야 한다 — Operator 가 앱별 PVC 를 이 경로에 마운트한다.
+
+## 엔트리포인트: `claude_skill.sh`
+
+```
+claude_skill.sh [run|selftest|<cmd>]
+```
+
+| 모드 | 동작 |
+|------|------|
+| `run`(기본) | 컨텍스트/인증 준비 후 `runner.py` live 실행 |
+| `selftest` | API 호출 없이 툴·SDK 배선만 검증하고 `exit 0`(kind/CI QA) |
+| 그 외 | 인자를 그대로 `exec`(디버깅) |
+
+### SELFTEST 센티넬
+
+오프라인 검증은 다음 중 하나로 활성화된다:
+
+- `selftest` 인자
+- `MUNINN_SELFTEST=1`
+- `ANTHROPIC_API_KEY=SELFTEST` — CRD env 가 고정이라 Operator 경로에서 실제 API 키 없이 파이프라인 QA 를 돌릴 때 사용
+
+## Guardrail 매핑
+
+`MUNINN_GUARDRAILS`(JSON) 가 Claude Agent SDK 옵션으로 매핑된다:
+
+| guardrail | SDK 옵션 |
+|-----------|----------|
+| `maxIterations` | `max_turns` |
+| `maxCostUsd` | `max_budget_usd` |
+| `maxTokens` | SDK 필드 없음 — 플랫폼이 추적 |
+
+## 인증 env 계약
+
+<Callout type="info">
+인증 키는 **PVC 가 아니라 env(K8s Secret)로만** 주입한다. 자격증명을 이미지·매니페스트에 절대 넣지 마라.
+</Callout>
+
+- `ANTHROPIC_API_KEY` 와 `CLAUDE_CODE_OAUTH_TOKEN` 은 `agent-secrets` Secret 에서 주입되며 둘 다 `optional` — 런타임은 **최소 하나** 필요하다.
+- `GITHUB_PAT` 는 앱의 `source.secretRef` Secret(키 `token`, **별도** Secret)에서 주입된다.
+
+그 외 주입 컨텍스트: `MUNINN_GOAL`(필수), `MUNINN_GUARDRAILS`, 프롬프트/정책 ConfigMap 참조(`MUNINN_GLOBAL_SYSTEM_PROMPT_REF` / `MUNINN_TEAM_SETTINGS_REF` / `MUNINN_SOUL_REF`), 이벤트 Secret 참조(`MUNINN_EVENT_PAYLOAD_REF`), recall/보고 엔드포인트(`MUNINN_MEMORY_ENDPOINT` / `MUNINN_API_ENDPOINT`), `MUNINN_PERMISSION_MODE`(기본 `bypassPermissions`).
+
+## 빌드 / 테스트
+
+```bash
+cd huginnAgentRuntime
+
+make image      # 이미지 빌드
+make selftest   # 오프라인 tool+SDK 배선 점검 (make test 동일)
+```
+
+라이브 실행 예시(토큰은 절대 이미지/커밋에 넣지 말 것):
+
+```bash
+podman run --rm \
+  -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+  -e MUNINN_GOAL="Reply with HUGINN_OK" \
+  -e MUNINN_GUARDRAILS='{"maxIterations":2}' \
+  huginn-agent-runtime:dev
+```
+
+CI 는 [.github/workflows/agent-runtime-image.yml](https://github.com/KimSoungRyoul/muninn/blob/main/.github/workflows/agent-runtime-image.yml) 로 publish 한다(PR=빌드만, main/tag=multi-arch push). 베이스 이미지(`node:24-bookworm-slim`)는 digest 로 핀되고 도구 버전은 Dockerfile `ARG` 로 핀되어 체크섬으로 검증된다.
+
+kind 기반 E2E 절차는 [/components/operator](/components/operator)의 `make run-kind` 흐름과 [huginnAgentRuntime/README.md](https://github.com/KimSoungRyoul/muninn/blob/main/huginnAgentRuntime/README.md) 참고.

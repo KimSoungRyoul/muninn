@@ -1,0 +1,273 @@
+# CRD 예제
+
+`muninn.io/v1beta1` API 그룹의 세 CR(HuginnAgent / HuginnIssue / HuginnRun) 예제 전문이다. 원본은 저장소의 [docs/design/examples/](https://github.com/KimSoungRyoul/muninn/blob/main/docs/design/examples) 에 있으며, 주석의 `§` 표기는 설계 문서 섹션을 가리킨다. 각 CRD 의 개념·필드 의미는 [CRD 개념](/concepts/crds)을 참고한다.
+
+## HuginnAgent
+
+운영 대상 1개를 지키는 에이전트 정의(도메인상 "Application")다. Muninn UI 의 "새 Application 등록" 위저드가 이 spec 으로 직렬화되며, source(GitHub)·trigger·guardrails·bindings·identity·agent 설정을 담는다.
+
+원본: [docs/design/examples/huginnagent.yaml](https://github.com/KimSoungRyoul/muninn/blob/main/docs/design/examples/huginnagent.yaml)
+
+```yaml
+# HuginnAgent — 운영 대상 1개를 지키는 에이전트 정의(설계서 §3.1, 도메인상 "Application").
+# Muninn UI 의 "새 Application 등록" 위저드가 이 spec 으로 직렬화된다.
+# 아키텍처 그림의 "Huginn Custom Resource (Application 들로 한번에 생성)" 에 해당.
+# (네이밍: 그림의 kind: huggin → 정식 철자 Huginn + 'Agent' 용어로 HuginnAgent 로 확정.)
+apiVersion: muninn.io/v1beta1
+kind: HuginnAgent
+metadata:
+  name: ai-router-svc            # UI 검증 규칙: ^[a-z0-9-]+$ (webhook 가 재검증)
+  namespace: ns-ai-platform         # workspace = namespace 단일 진실원천(§3.1) — webhook 가 workspaceId==namespace 강제
+  labels:
+    muninn.io/workspace: ns-ai-platform  # defaulting webhook 가 spec.workspaceId 로 자동 주입(selector 보조 라벨)
+spec:
+  workspaceId: ns-ai-platform       # ★ 1급 필드(required, immutable). metadata.namespace 와 동일해야 함(webhook+CEL 이중 검증)
+  displayName: "AI Router Service"
+  description: "추론 서비스 (Triton Inference Server)"
+  kind: triton                      # triton | fastapi | airflow | other
+  output: pull_request              # pull_request | github_issue
+
+  # --- Source: GitHub 은 모든 앱에 자동 연결(필수) ---
+  source:
+    provider: github
+    repo: acme/ai-router-svc
+    defaultBranch: main
+    pr:
+      draft: true                   # 항상 draft 로 생성(강제)
+      labels: [huginn, automated]
+      requireApprovalOnWorkflowChange: true
+      approvalTriggers:             # 승인 필수 조건 정책화(§6.4)
+        onDependencyChange: true
+        onLargeDiff: { lines: 200 }
+        onWorkflowChange: true
+        onGuardrailNearLimit: { percent: 60 }
+    secretRef: gh-ai-pat            # fine-grained PAT(특정 repo, PR 생성만; §6.2)
+
+  # --- Trigger ---
+  trigger:
+    severityThreshold: warning      # info | warning | error | critical
+
+  # --- Guardrails ---
+  guardrails:
+    maxIterations: 12               # → SDK max_turns
+    maxCostUsd: 5                   # → SDK max_budget_usd (cost 는 예상치)
+    dailyRunCap: 50                 # 24h 슬라이딩 윈도우 Run 상한
+
+  # --- Bindings: 에이전트가 사용할 Platform Tool (MCP 서버). 모든 Issue 의 기본값 source ---
+  bindings:
+    deployment:
+      argocd: { instance: production-argocd }
+    observability:
+      grafana: { instance: platform-grafana, config: { dashboardUid: abc123 } }
+      loki:    { instance: prod-loki, config: { defaultQuery: '{app="ai-router-svc"}' } }
+      tempo:   { instance: prod-tempo, config: { defaultService: ai-router-svc } }
+      metrics: { backend: mimir, instance: prod-mimir,
+                 config: { defaultFilter: '{kubernetes_app="ai-router-svc"}' } }
+    registry:
+      harbor:  { instance: harbor-prod }
+
+  # --- Identity: 관측 신호 ↔ 워크로드 매핑(Issue 로 상속) ---
+  identity:
+    otelServiceName: ai-router-svc
+    k8sNamespace: ns-ai-platform
+    k8sLabels: { app: ai-router-svc }
+
+  # --- Agent ---
+  agent:
+    runtime: claude-code
+    soulRef: soul-ai-router-svc  # SOUL.md(ConfigMap). Run 생성 시 MUNINN_SOUL_REF 로 주입
+    image: ghcr.io/kimsoungryoul/muninn/agent-runtime:0.1.0  # huginnAgentRuntime/ 이미지(GitHub Packages)
+
+status:
+  webhookUrl: https://muninn-api.platform.local/hooks/ai-router-svc   # Operator 발급(§4.5)
+  phase: Ready                      # Pending | Ready | Degraded
+  activeIssues: 2                 # Operator 가 reconcile 마다 계산(§8.4)
+  lastEventAt: "2026-06-03T14:33:40+09:00"
+  memoryCount: { app: 3, globalShared: 3 }
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: WebhookRegistered
+      message: "webhook URL 발급 및 PVC/SA 보장 완료"
+      lastTransitionTime: "2026-06-03T09:00:00+09:00"
+```
+
+## HuginnIssue
+
+이벤트 페이로드 1건당 1개 생성되는 CR 이다. Muninn API(Gateway)가 dedup 통과 후 K8s API 에 생성하고 Operator 의 watch 가 감지하며, Application(HuginnAgent)에서 guardrails·bindings·identity 를 상속받는다. `retryPolicy.maxRuns` 는 attempt 별 Run 생성 상한이다(Job `backoffLimit` 이 아님).
+
+원본: [docs/design/examples/huginnissue.yaml](https://github.com/KimSoungRyoul/muninn/blob/main/docs/design/examples/huginnissue.yaml)
+
+```yaml
+# HuginnIssue — 이벤트 페이로드 1건당 1개.
+# Muninn API(Gateway)가 dedup 통과 후 K8s API 에 생성하고, Operator 의 watch 가 감지한다(§2.2).
+# 아키텍처 그림의 "Huginn Issue (그림 표기 hugginSession → 정식 HuginnIssue)" 에 해당.
+apiVersion: muninn.io/v1beta1
+kind: HuginnIssue
+metadata:
+  name: issue-e3f8a91-01
+  namespace: ns-ai-platform
+  labels:
+    muninn.io/agent: ai-router-svc
+    muninn.io/workspace: ns-ai-platform   # workspace = namespace(§3.1). selector 보조 라벨
+    muninn.io/event-fingerprint: PodCrashLooping
+  ownerReferences:
+    - apiVersion: muninn.io/v1beta1
+      kind: HuginnAgent
+      name: ai-router-svc
+      uid: 00000000-0000-0000-0000-000000000000  # 부모 HuginnAgent 의 .metadata.uid (필수). 직접 apply 시엔 이 블록 생략 권장 — Muninn API/Operator 가 보강한다.
+      controller: true              # cascade GC (Operator 가 누락 시 보강)
+spec:
+  agentRef: ai-router-svc
+
+  # --- 정규화된 event payload(§4.3). 원본 alert 는 Secret issue-e3f8a91-01-event 에 보존 ---
+  event:
+    id: e_3f8a91
+    source: grafana                 # enum: grafana | airflow | argocd | manual
+    severity: critical
+    fingerprint: PodCrashLooping    # dedup key (alertmanager fingerprint)
+    title: "Pod restarting · payload > 4MB OOM"   # sanitize 적용(§6.5)
+    receivedAt: "2026-06-03T14:32:10+09:00"
+    payloadSecretRef: issue-e3f8a91-01-event       # 원본 JSON(민감정보 가능)
+    payload:                        # 정규화 요약(축약)
+      alertname: PodCrashLooping
+      namespace: ns-ai-platform
+      pod: ai-router-svc-7d9f-x2k
+      reason: OOMKilled
+
+  goal: "PodCrashLooping 이벤트를 진단하고 output 정책(pull_request)에 따라 처리한다."
+
+  # --- Application 에서 상속(Operator 가 복사). Phase 2 에서 이슈 override 허용 ---
+  inheritedGuardrails:
+    maxIterations: 12
+    maxCostUsd: 5
+  inheritedBindings:                # Application.spec.bindings 스냅샷
+    deployment: { argocd: { instance: production-argocd } }
+    observability:
+      loki:    { instance: prod-loki }
+      tempo:   { instance: prod-tempo }
+      metrics: { backend: mimir, instance: prod-mimir }
+    registry: { harbor: { instance: harbor-prod } }
+  identity:
+    otelServiceName: ai-router-svc
+    k8sNamespace: ns-ai-platform
+
+  retryPolicy:
+    maxRuns: 3                      # attempt 별 Run 생성 상한(Issue controller). Job backoffLimit 아님 — Job 은 backoffLimit=0 고정(operator-design §2.1, 핵심 계약 #2).
+    backoff: exponential
+
+status:
+  phase: Running                    # Pending | Running | AwaitingApproval | Succeeded | Failed | Cancelled
+  runRefs: [run-82c0f1a]
+  dedupCount: 17                    # 같은 fingerprint 누적(그림의 dedup: 17; §4.4)
+  outcome: null                     # 완료 시 "PR #842" / "Issue #143"
+  approval: null                    # AwaitingApproval 시 Run 승인 메타 집계(§6.4)
+  conditions:
+    - type: Reconciled
+      status: "True"
+      reason: RunCreated
+      message: "run-82c0f1a 생성됨"
+      lastTransitionTime: "2026-06-03T14:32:12+09:00"
+```
+
+## HuginnRun
+
+이슈 내부의 실제 에이전트 실행 1회를 나타낸다. Operator 가 이 CR 에 대응하는 K8s Job(→ Pod)을 만들며, retry 마다 새 Run 이 생성된다. `jobTemplate` 은 full PodSpec 이 아니라 큐레이트된 실행 recipe 이고, Run controller 가 고정 필드를 더해 실제 PodSpec 으로 확장한다.
+
+원본: [docs/design/examples/huginnrun.yaml](https://github.com/KimSoungRyoul/muninn/blob/main/docs/design/examples/huginnrun.yaml)
+
+```yaml
+# HuginnRun — 이슈 내부의 실제 에이전트 실행 1회.
+# Operator 가 이 CR 에 대응하는 K8s Job(→ Pod)을 만든다. retry 마다 새 Run 이 생성된다.
+# 아키텍처 그림의 "Huginn Run" + "claude_skill.sh" 박스에 해당.
+apiVersion: muninn.io/v1beta1
+kind: HuginnRun
+metadata:
+  name: run-82c0f1a
+  namespace: ns-ai-platform
+  ownerReferences:
+    - apiVersion: muninn.io/v1beta1
+      kind: HuginnIssue
+      name: issue-e3f8a91-01
+      uid: 00000000-0000-0000-0000-000000000000  # 부모 HuginnIssue 의 .metadata.uid (필수). 직접 apply 시엔 이 블록 생략 권장 — Operator 가 보강한다.
+      controller: true              # cascade GC
+spec:
+  issueRef: issue-e3f8a91-01
+  attempt: 1
+
+  # --- 실행 한도(MVP 는 K8s Job 으로 매핑; §3.3) ---
+  timeoutSeconds: 3600              # → Job.spec.activeDeadlineSeconds
+  ttlSecondsAfterFinished: 86400    # → Job.spec.ttlSecondsAfterFinished (24h)
+  # Job.backoffLimit=0 강제(operator-design §2.1): Pod-level 재시도 없음(에이전트 비멱등).
+  # 재시도는 Issue controller 가 새 attempt Run(run-...-a2)으로 수행, 상한=retryPolicy.maxRuns.
+  # suspend: true 면 Operator 가 Job 삭제 + phase=Cancelled(취소/거절 전파; operator-design §2.3).
+
+  # jobTemplate: 큐레이트된 실행 recipe(full PodSpec 미임베드 → CRD 슬림).
+  # Run controller 가 Job 생성 시 고정 필드(restartPolicy=Never, containerName=agent,
+  # volumeMount /home/node/.claude, claudePVCName→volume, 비-root securityContext)를 더해 full PodSpec 으로 확장한다.
+  jobTemplate:
+    image: ghcr.io/kimsoungryoul/muninn/agent-runtime:0.1.0  # huginnAgentRuntime/ 이미지(GitHub Packages)
+    command: ["/usr/local/bin/claude_skill.sh"]
+    serviceAccountName: huginn-agent          # 자기 namespace Secret/CM 만 read(§6.1)
+    claudePVCName: pvc-claude-ai-router-svc # ~/.claude 로 마운트할 앱별 격리 PVC(§5.5)
+    resources:
+      requests: { cpu: "500m", memory: "512Mi" }
+      limits:   { cpu: "2000m", memory: "2Gi" }
+    env:
+      # --- claude_skill.sh 주입 컨텍스트(§5.1) ---
+      - name: MUNINN_GOAL
+        value: "PodCrashLooping 이벤트를 진단하고 output 정책(pull_request)에 따라 처리한다."
+      - name: MUNINN_GLOBAL_SYSTEM_PROMPT_REF
+        value: configmap/muninn-global-prompt
+      - name: MUNINN_TEAM_SETTINGS_REF
+        value: configmap/muninn-team-settings
+      - name: MUNINN_SOUL_REF                  # HuginnAgent.spec.agent.soulRef 에서 전파
+        value: configmap/soul-ai-router-svc
+      - name: MUNINN_EVENT_PAYLOAD_REF
+        value: secret/issue-e3f8a91-01-event
+      - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd/maxTokens → SDK max_turns/max_budget_usd 등
+        value: '{"maxIterations":12,"maxCostUsd":5,"maxTokens":100000}'
+      # Muninn API/Memory 는 별도 서비스가 아니라 muninnWeb 한 앱이 겸한다(메인 스펙 §0, goal §9).
+      # operator 는 helm 이 주입한 MUNINN_*_ENDPOINT(= muninn-web Service)를 그대로 Job 에 전달한다.
+      - name: MUNINN_MEMORY_ENDPOINT
+        value: http://muninn-web.muninn.svc:3030
+      - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)
+        value: http://muninn-web.muninn.svc:3030
+      # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2). API 키/OAuth 토큰 중 하나면 충분(둘 다 optional) ---
+      - name: ANTHROPIC_API_KEY
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key, optional: true } }
+      - name: CLAUDE_CODE_OAUTH_TOKEN   # Pro/Max/team OAuth 인증 대안
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: claude-code-oauth-token, optional: true } }
+      - name: MUNINN_API_TOKEN          # 런타임이 Muninn API(보고/승인/메모리) 호출을 인증하는 Bearer 토큰(§5.6). agent-secrets 의 muninn-api-token 키.
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: muninn-api-token, optional: true } }
+      - name: GITHUB_PAT
+        valueFrom: { secretKeyRef: { name: gh-ai-pat, key: token } }
+
+status:
+  phase: Running                    # Queued | Pending | Running | AwaitingApproval | Succeeded | Failed | Cancelled
+  step: 4                           # 현재 실행 중 Step 의 ix(1부터)
+  maxStep: 12                       # = guardrails.maxIterations
+  cost: "0.18"                      # ResultMessage.total_cost_usd 기반 예상치(CRD 타입=string — float 모호성 회피)
+  maxCostUsd: 5                     # 이슈 상속값 복사(영속화)
+  tokens: 47120
+  maxTokens: 100000
+  startedAt: "2026-06-03T14:32:14+09:00"
+  finishedAt: null                  # 종료 시 Pod 보고 → Operator 가 duration_s 계산(§5.6)
+  recalledMemoryIds:                # API recall-report 로 보고(id+score+근거). score 는 CRD 타입=string(float 모호성 회피)
+    - { id: m1, score: "0.91", reason: "텍스트 ts_rank_cd 상위" }
+    - { id: m2, score: "0.84" }
+    - { id: m3, score: "0.78" }
+  output: null                      # 완료 시 "PR #842" / "Issue #143"
+  approval: null                    # AwaitingApproval 시 {reasons,state,requestedAt,expiresAt,decidedBy}(§6.4)
+  conditions:
+    - type: PodScheduled
+      status: "True"
+      reason: Started
+      lastTransitionTime: "2026-06-03T14:32:14+09:00"
+```
+
+## 더 보기
+
+- 각 CRD 의 필드 의미와 status 소유권 규칙 — [CRD 개념](/concepts/crds)
+- Run 의 상태 전이 — [Run 라이프사이클](/concepts/run-lifecycle)
+- Operator 시맨틱 원문 — [operator-design](/design/operator-design)

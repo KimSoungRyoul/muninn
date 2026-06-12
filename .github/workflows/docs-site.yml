@@ -1,0 +1,91 @@
+# muninnDocs(Nextra 4 정적 문서 사이트) CI/CD — 빌드 + GitHub Pages 배포.
+#   - PR: 빌드(타입체크 게이트)만. main 푸시: 빌드 후 GitHub Pages 로 배포.
+#   - 정적 export(out/) + pagefind 검색 인덱스(postbuild). 프로젝트 페이지
+#     (https://<owner>.github.io/muninn/)라 NEXT_PUBLIC_BASE_PATH=/muninn 으로 빌드한다.
+#   - docs/design/** 과 루트 아키텍처 PNG 는 빌드 시 content/ 로 동기화되므로 트리거 경로에 포함.
+#   - 저장소 Settings → Pages 의 Source 가 "GitHub Actions"(build_type=workflow)여야 한다.
+# uses 는 커밋 SHA 로 핀(태그 주석 병기). github-actions Dependabot 이 SHA 핀 갱신을 자동화한다.
+name: docs-site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - muninnDocs/**
+      - docs/design/**
+      - muninnAgentPlatform_architecture.png
+      - .github/workflows/docs-site.yml
+  pull_request:
+    paths:
+      - muninnDocs/**
+      - docs/design/**
+      - muninnAgentPlatform_architecture.png
+      - .github/workflows/docs-site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: muninnDocs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # pnpm/action-setup: 레포 루트엔 package.json 이 없어(앱 루트=muninnDocs) packageManager
+      #   자동탐지가 실패한다 → version 을 명시한다(muninnDocs/package.json 의 pnpm@9.12.0 과 일치).
+      #   setup-node 의 cache:pnpm 보다 먼저 와야 함.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          version: 9.12.0
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: muninnDocs/pnpm-lock.yaml
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (static export + pagefind)
+        run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_BASE_PATH: /muninn
+
+      # 배포 아티팩트는 main 푸시에서만 올린다(PR 은 빌드 게이트 역할만).
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: muninnDocs/out
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # Pages 배포
+      id-token: write # OIDC 검증(deploy-pages 요구)
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # 배포는 절대 중간 취소하지 않는다(반쯤 배포된 사이트 방지) — GitHub 공식 권고.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

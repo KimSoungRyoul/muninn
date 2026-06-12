@@ -1,0 +1,20 @@
+# Muninn DevOps Agent Platform
+
+인프라 알림(Grafana/Airflow/ArgoCD)이 Claude 에이전트를 깨워 문제를 진단하고 **PR/Issue 를 여는** 이벤트 기반 플랫폼이다. Kubernetes 위에서 CRD(`muninn.io/v1beta1`)와 오퍼레이터로 Claude 에이전트 실행을 오케스트레이션하며, 오딘의 두 까마귀에서 이름을 딴 두 평면 — **Huginn**(사고, Agent Plane: 이벤트 수신 → 에이전트 실행 → PR/Issue 생성)과 **Muninn**(기억, Memory Plane + 콘솔: 지식 recall/store, 운영자 UI/API, metaDB) — 으로 구성된다.
+
+![Muninn 아키텍처](./muninn-architecture.png)
+
+## 핵심 구성
+
+독립적으로 빌드되는 3개 컴포넌트 + 권위 있는 설계서로 이루어진 모노레포다.
+
+- **[Huginn Operator](/components/operator)** — `HuginnAgent` / `HuginnIssue` / `HuginnRun` CRD 라이프사이클을 소유하는 K8s 오퍼레이터 (Go, kubebuilder/controller-runtime)
+- **[Agent Runtime](/components/agent-runtime)** — 에이전트 실행 1회마다 K8s Job 으로 도는 컨테이너 이미지 (`claude_skill.sh` + Python `claude-agent-sdk`)
+- **[muninnWeb](/components/web)** — 운영자 콘솔 + Muninn API(게이트웨이·메모리) + CopilotKit 코파일럿 (Next.js, App Router)
+
+Operator 는 **Job 만 생성**한다. 에이전트 프로세스와 Muninn API 가 진행 상황을 `HuginnRun.status` 에 되써 보고한다.
+
+## 다음 단계
+
+- [시작하기](/getting-started) — `make run-local` 한 줄로 로컬 풀스택 기동
+- [설계 문서](/design) — 권위 있는 스펙. 코드 주석이 `§` 섹션 번호로 인용한다.

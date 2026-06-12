@@ -1,0 +1,93 @@
+import { Callout } from 'nextra/components'
+
+# 명령어 모음
+
+저장소의 Makefile 타깃을 디렉토리별로 정리한다. 루트와 하위 프로젝트는 `build · image · lint · test · help` 라는 일관 어휘를 공유하고, 루트 Makefile 이 하위 프로젝트로 위임한다.
+
+<Callout type="info">
+**CONTAINER_TOOL 기본값 차이** — 루트·muninnWeb·huginnAgentRuntime Makefile 은 `podman` 이 기본이지만, `huginnOperator/Makefile` 은 kubebuilder 스캐폴드라서 `docker` 가 기본이다. operator 타깃을 podman 으로 쓰려면 `CONTAINER_TOOL=podman` 을 명시한다 (예: `make run-kind CONTAINER_TOOL=podman`).
+</Callout>
+
+## 루트 (`Makefile`)
+
+kind + Helm 로컬 풀스택과 하위 프로젝트 위임 타깃. 원본: [Makefile](https://github.com/KimSoungRyoul/muninn/blob/main/Makefile)
+
+| 타깃 | 설명 |
+|------|------|
+| `run-local` | kind 생성 → 이미지 3종 빌드/적재 → metaDB(postgres) → helm install — 플랫폼 전체를 클러스터 안에 기동 |
+| `images` | 세 컨테이너 이미지(operator/web/agent-runtime) 로컬 빌드 |
+| `status` | 로컬 풀스택 리소스 상태 (deploy/svc/pod + HuginnAgent/HuginnIssue/HuginnRun) |
+| `down` (= `kind-delete`) | kind 클러스터 삭제(로컬 풀스택 정리) |
+| `build` | operator 바이너리 + web(next build) 빌드 |
+| `lint` | 세 프로젝트 린트 |
+| `test` | operator 단위/envtest + runtime selftest(오프라인) |
+| `helm-install` | chart 설치/업그레이드(로컬 이미지 + metaDB 배선) |
+| `helm-uninstall` | chart 만 제거(클러스터·CRD 보존) |
+| `help` | 도움말 출력 |
+
+코파일럿/agent 까지 동작시키려면 `CLAUDE_CODE_OAUTH_TOKEN=... make run-local` 로 토큰을 넘긴다. `run-local` 은 operator 까지 helm 으로 클러스터 *안* 에 배포한다는 점에서, operator 를 host `go run` 으로 클러스터 *밖* 에서 돌리는 `huginnOperator/make run-kind` 와 다르다. 자세한 절차는 [Quickstart](/deployment/quickstart)와 [Helm 배포](/deployment/helm)를 참고한다.
+
+## huginnOperator/
+
+kubebuilder 표준 타깃. 전체 목록은 `make help`. 원본: [huginnOperator/Makefile](https://github.com/KimSoungRyoul/muninn/blob/main/huginnOperator/Makefile)
+
+| 타깃 | 설명 |
+|------|------|
+| `manifests` | CRD·RBAC·Webhook 매니페스트 생성 — `api/*_types.go` 나 `+kubebuilder` 마커 수정 후 필수 |
+| `generate` | DeepCopy 등 생성 코드(`zz_generated.*`) 재생성 |
+| `run` | operator 를 host 에서 실행 — 로컬에선 `ENABLE_WEBHOOKS=false` |
+| `run-kind` | kind 생성 + CRD 설치 + agent-runtime 이미지 적재 후 operator 를 host 에서 실행(webhook off) |
+| `test-e2e` | 격리된 e2e — 별도 kind 클러스터(`huginnoperator-test-e2e`) 생성/삭제, `CONTAINER_TOOL` 무시 |
+| `docker-build` | manager 이미지 빌드(`image` 는 이 타깃의 별칭) |
+
+`run-kind` 후에는 별도 셸에서 인증 Secret 과 예제 CR 을 적용한다(namespace `ns-huginn-e2e`):
+
+```bash
+kubectl -n ns-huginn-e2e create secret generic agent-secrets \
+  --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+kubectl apply -f ../huginnAgentRuntime/examples/kind-e2e.yaml
+```
+
+## huginnAgentRuntime/
+
+산출물이 컨테이너 이미지뿐이라 `build`=`image`, `test`=`selftest` 별칭이다. 원본: [huginnAgentRuntime/Makefile](https://github.com/KimSoungRyoul/muninn/blob/main/huginnAgentRuntime/Makefile)
+
+| 타깃 | 설명 |
+|------|------|
+| `image` (= `build`) | agent-runtime 이미지 빌드 |
+| `selftest` (= `test`) | 오프라인 tool+SDK 배선 점검 — API 호출 없음 |
+| `lint` | hadolint 설치 시 Dockerfile 린트, 없으면 스킵 |
+| `push` | 이미지 push(보통 CI 가 수행 — 로컬 수동 push 용) |
+
+이미지 publish 는 CI(`.github/workflows/agent-runtime-image.yml`)가 담당한다 — PR 은 빌드만, main/tag 는 multi-arch push. 이미지 계약은 [Agent Runtime](/components/agent-runtime) 참고.
+
+## muninnWeb/
+
+Next.js 콘솔 + Muninn API. 포트 3030, 패키지 매니저는 pnpm. 원본: [muninnWeb/Makefile](https://github.com/KimSoungRyoul/muninn/blob/main/muninnWeb/Makefile)
+
+| 타깃 | 설명 |
+|------|------|
+| `install` | 의존성 설치(frozen lockfile) |
+| `dev` | 개발 서버(`http://localhost:3030`) |
+| `build` | 프로덕션 빌드(= tsc 타입체크 게이트) |
+| `lint` | next lint |
+| `test` | `build` 별칭 — 별도 단위 테스트 없음 |
+| `image` | muninn-web 이미지 빌드(Next.js standalone) |
+
+<Callout type="warning">
+`make dev` 실행 중에 `make build` 를 돌리지 말 것 — `.next` 가 손상된다 (muninnDocs 도 동일).
+</Callout>
+
+코파일럿 동작에는 `CLAUDE_CODE_OAUTH_TOKEN` 또는 `ANTHROPIC_API_KEY` 가 필요하다. 자세한 구성은 [Web 콘솔](/components/web) 참고.
+
+## muninnDocs/
+
+이 문서 사이트(Nextra 4, 정적 export → GitHub Pages). 포트 3031. 원본: [muninnDocs/Makefile](https://github.com/KimSoungRyoul/muninn/blob/main/muninnDocs/Makefile)
+
+| 타깃 | 설명 |
+|------|------|
+| `dev` | 개발 서버(`http://localhost:3031`) — 검색(pagefind)은 build 산출물에서만 동작 |
+| `build` | 정적 export 빌드(`out/`) + pagefind 검색 인덱스 생성 |
+| `build-pages` | GitHub Pages 와 동일한 basePath(`/muninn`)로 빌드 — 배포 전 QA 용 |
+| `serve` | 빌드 산출물(`out/`) 로컬 서빙 — QA 용 |
+| `sync` | `docs/design/` → `content/design/` 동기화(빌드/개발 전 자동 실행됨) |
