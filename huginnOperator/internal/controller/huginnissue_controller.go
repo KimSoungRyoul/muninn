@@ -197,9 +197,10 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{RequeueAfter: wait}, nil
 			}
 			next := latest.Spec.Attempt + 1
-			// 직전 attempt 의 Claude 세션을 이어받는다(§5.5 resume). sessionId 는 Agent→API 소유라
-			// 에이전트가 보고 전에 죽었으면 비어 있고, 그 경우 새 세션으로 시작한다.
-			if err := r.createRun(ctx, &issue, &agent, next, latest.Status.SessionID); err != nil {
+			// 가장 최근에 보고된 Claude 세션을 이어받는다(§5.5 resume, 리뷰 LOW-1). 직전 attempt 가
+			// 세션 보고 전에 죽었어도(init 전 크래시 등) 그 이전 attempt 의 transcript 는 PVC 에 남아
+			// 있으므로 뒤에서부터 첫 non-empty sessionId 를 고른다. 전부 비면 새 세션.
+			if err := r.createRun(ctx, &issue, &agent, next, lastSessionID(runs)); err != nil {
 				return ctrl.Result{}, err
 			}
 			log.Info("재시도 Run 생성", "attempt", next)
@@ -347,6 +348,18 @@ func issueChildLabels(issue *muninniov1beta1.HuginnIssue, agent *muninniov1beta1
 		out[LabelFingerprint] = issue.Spec.Event.Fingerprint
 	}
 	return out
+}
+
+// lastSessionID 는 attempt 오름차순 정렬된 runs 에서 가장 최근의 non-empty sessionId 를 반환한다(§5.5).
+// sessionId 는 Agent→API 소유라 init 전에 죽은 attempt 는 비어 있다 — 그 경우 한 단계 더 거슬러
+// 올라가 살아 있는 세션 체인을 잇는다(리뷰 LOW-1). 전부 비면 빈 문자열(새 세션).
+func lastSessionID(runs []muninniov1beta1.HuginnRun) string {
+	for i := len(runs) - 1; i >= 0; i-- {
+		if sid := runs[i].Status.SessionID; sid != "" {
+			return sid
+		}
+	}
+	return ""
 }
 
 func runNames(runs []muninniov1beta1.HuginnRun) []string {

@@ -127,6 +127,36 @@ class ExtractSessionIdTest(unittest.TestCase):
         self.assertEqual(runner._extract_session_id(types.SimpleNamespace(data="not-a-dict")), "")
 
 
+class HasTranscriptTest(unittest.TestCase):
+    """_has_transcript 의 resume preflight(§5.5, 리뷰 MEDIUM-1) — transcript 가 없으면
+    새 세션으로 폴백해 깨진 resume 으로 attempt(retry budget)를 태우지 않는다."""
+
+    def setUp(self):
+        import tempfile
+
+        self.home = tempfile.mkdtemp(prefix="claude-home-")
+        self.addCleanup(__import__("shutil").rmtree, self.home, ignore_errors=True)
+
+    def _write_transcript(self, project: str, sid: str) -> None:
+        d = os.path.join(self.home, "projects", project)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{sid}.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write("{}\n")
+
+    def test_existing_transcript_found(self):
+        self._write_transcript("-workspace", "sid-live")
+        self.assertTrue(runner._has_transcript("sid-live", claude_home=self.home))
+
+    def test_missing_transcript_yields_false(self):
+        # PVC 재생성/transcript 정리 시나리오 — preflight 가 False 면 호출부가 resume 을 끈다.
+        self._write_transcript("-workspace", "sid-other")
+        self.assertFalse(runner._has_transcript("sid-gone", claude_home=self.home))
+
+    def test_empty_session_or_empty_home(self):
+        self.assertFalse(runner._has_transcript("", claude_home=self.home))
+        self.assertFalse(runner._has_transcript("sid-x", claude_home=self.home))
+
+
 class ApprovalDetailTest(unittest.TestCase):
     def test_decidedby_and_reason_joined(self):
         run_obj = {"approval": {"decidedBy": "alice", "reason": "위험"}}

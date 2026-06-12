@@ -16,6 +16,7 @@ claude_skill.sh 가 컨텍스트(env)를 준비한 뒤 이 모듈을 exec 한다
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import os
 import shutil
@@ -424,6 +425,19 @@ def build_options(max_turns: int, max_budget_usd: float | None = None, resume_se
     return ClaudeAgentOptions(**opts)
 
 
+def _has_transcript(session_id: str, claude_home: str | None = None) -> bool:
+    """resume 대상 세션의 transcript 가 ~/.claude/projects/ 하위에 실재하는지 검사한다(§5.5).
+
+    preflight 인 이유(리뷰 MEDIUM-1): transcript 가 없으면(PVC 재생성, transcript 정리 등)
+    claude CLI 가 --resume 단계에서 에러로 죽어 attempt 가 단 한 턴도 못 돌고 Failed 가 된다 —
+    retry budget(maxRuns) 1회가 통째로 증발한다. 없으면 호출부가 새 세션으로 폴백한다.
+    """
+    if not session_id:
+        return False
+    home = claude_home or os.path.expanduser("~/.claude")
+    return bool(glob.glob(os.path.join(home, "projects", "*", f"{session_id}.jsonl")))
+
+
 def _extract_session_id(message) -> str:
     """SDK 메시지에서 Claude 세션 ID 를 추출한다(없으면 빈 문자열).
 
@@ -594,7 +608,11 @@ async def run_live() -> int:
     max_cost = g.get("maxCostUsd")
     max_budget = float(max_cost) if max_cost else None  # 0/None=무제한(가드레일이 명시한 경우)
     # 재시도 attempt(같은 Issue)면 operator 가 직전 attempt 의 세션 ID 를 주입한다(§5.5).
+    # transcript 미발견 시 새 세션 폴백(리뷰 MEDIUM-1) — 깨진 resume 으로 attempt 를 태우지 않는다.
     resume_id = _env("MUNINN_RESUME_SESSION_ID")
+    if resume_id and not _has_transcript(resume_id):
+        log(f"WARN: resume 대상 transcript 미발견(session={resume_id}) → 새 세션으로 시작")
+        resume_id = ""
     options = build_options(max_turns=max_turns, max_budget_usd=max_budget, resume_session_id=resume_id)
 
     # SIGTERM(pod 축출/timeout 시 kubelet 이 보냄) → 현재 task 를 cancel 해 CancelledError 경로로

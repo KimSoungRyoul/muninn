@@ -94,7 +94,10 @@ func withResumeSession(jt muninniov1beta1.JobTemplate, sessionID string) muninni
 	if sessionID == "" {
 		return jt
 	}
-	jt.Env = append(jt.Env, corev1.EnvVar{Name: "MUNINN_RESUME_SESSION_ID", Value: sessionID})
+	// Env 는 새 backing array 로 복사 후 append(리뷰 LOW-2) — 호출자가 같은 JobTemplate 을
+	// 재사용해도 이 helper 가 호출자 쪽 slice 를 변형하지 않는다.
+	jt.Env = append(append([]corev1.EnvVar(nil), jt.Env...),
+		corev1.EnvVar{Name: "MUNINN_RESUME_SESSION_ID", Value: sessionID})
 	return jt
 }
 

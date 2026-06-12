@@ -127,6 +127,33 @@ func TestWithResumeSession(t *testing.T) {
 	}
 }
 
+// TestLastSessionID 는 재시도 시 resume 할 세션 선택 규칙을 고정한다(§5.5, 리뷰 LOW-1):
+// attempt 오름차순에서 뒤에서부터 첫 non-empty sessionId — 직전 attempt 가 init 전에 죽어
+// 세션을 못 남겼어도 그 이전 attempt 의 세션 체인을 잇고, 전부 비면 새 세션("").
+func TestLastSessionID(t *testing.T) {
+	mkRun := func(attempt int32, sid string) muninniov1beta1.HuginnRun {
+		var r muninniov1beta1.HuginnRun
+		r.Spec.Attempt = attempt
+		r.Status.SessionID = sid
+		return r
+	}
+	cases := []struct {
+		name string
+		runs []muninniov1beta1.HuginnRun
+		want string
+	}{
+		{"빈 목록", nil, ""},
+		{"전부 미보고", []muninniov1beta1.HuginnRun{mkRun(1, ""), mkRun(2, "")}, ""},
+		{"직전 attempt 우선", []muninniov1beta1.HuginnRun{mkRun(1, "sid-1"), mkRun(2, "sid-2")}, "sid-2"},
+		{"직전 미보고 → 한 단계 폴백", []muninniov1beta1.HuginnRun{mkRun(1, "sid-1"), mkRun(2, "")}, "sid-1"},
+	}
+	for _, tc := range cases {
+		if got := lastSessionID(tc.runs); got != tc.want {
+			t.Errorf("%s: lastSessionID = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestBuildJobTemplateRequireApprovalDefault 은 PR 정책이 없거나 false 면 requireApproval:false 로
 // 직렬화됨을 검증한다(HITL 트리거 기본 off — CONTRACT §C1).
 func TestBuildJobTemplateRequireApprovalDefault(t *testing.T) {

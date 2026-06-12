@@ -392,7 +392,10 @@ SDK `query()` 가 반환하는 `AsyncIterator<Message>` 를 Muninn `Step` 으로
 runner 가 SDK `resume` 옵션으로 직전 진단 컨텍스트에서 계속한다. **resume 범위는 Issue 내 attempt
 간으로 한정** — Issue 간 연속성은 메모리(recall + `~/.claude/CLAUDE.md`)가 담당한다(컨텍스트 오염 방지).
 attempt 간 pod 겹침은 없으므로(Issue controller 가 직전 Run 의 터미널 phase 확인 후에만 다음 attempt
-생성) 동일 세션 이어쓰기가 안전하다.
+생성) 동일 세션 이어쓰기가 안전하다. 폴백 2중화: ① controller 는 attempt 역순으로 첫 non-empty
+sessionId 를 고른다(직전이 init 전에 죽어도 세션 체인 유지), ② runner 는 transcript 부재 시
+(PVC 재생성 등) resume 을 끄고 새 세션으로 시작한다 — 둘 다 깨진 resume 으로 retry budget 을
+소모하지 않기 위한 것.
 
 ### 5.6 Run 완료 & 보고 경로
 Pod 가 종료(Succeeded/Failed/Cancelled)할 때:
