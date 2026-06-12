@@ -124,7 +124,12 @@ export async function streamTask(taskId: string, rpcId: unknown, emit: Emit, sig
         emit({ jsonrpc: "2.0", id: rpcId, result: runVmToTask(vm) });
         first = false;
         last = sig(vm);
-        if (isStreamFinal(statusToA2AState(vm.status))) return;
+        // 이미 종료 상태(완료된 Run 재구독 등)면 Task 만 보내고 끝내지 말고, 종료 status-update(final:true)를
+        // 한 번 더 emit 한 뒤 닫는다 — 클라이언트가 정상 종료와 하드 끊김을 구분하도록(streamIssue 와 대칭).
+        if (isStreamFinal(statusToA2AState(vm.status))) {
+          emit({ jsonrpc: "2.0", id: rpcId, result: { ...runVmToStatusUpdate(vm), final: true } });
+          return;
+        }
       } else if (sig(vm) !== last) {
         last = sig(vm);
         const ev = runVmToStatusUpdate(vm);
