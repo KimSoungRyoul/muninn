@@ -112,7 +112,7 @@ muninnWeb 가 게이트웨이/레지스트리이므로 여기에:
 - `types.ts` — A2A 최소 타입(AgentCard, Task, TaskState, Message, Part, JSON-RPC 봉투).
 - `task-mapper.ts` — `statusToA2AState` / `runVmToTask` / `runVmToStatusUpdate` / `latestRun` / `isStreamFinal` (순수 함수).
 - `card.ts` — `huginnAgentToAgentCard(cr, baseUrl)` (순수 변환).
-- `gate.ts` — `a2aServerEnabled` / `a2aAuthOk` + 401/404 응답 헬퍼.
+- `gate.ts` — `a2aServerEnabled` / `a2aRequireAuth`(`lib/auth.ts` `requireAuth` 위임) + 401/404 응답 헬퍼.
 - `stream.ts` — SSE 브리지(첫 프레임 Task, 이후 status-update; Issue 종료성으로 final 판정).
 - `client-tool.ts` — `send_task_to_a2a_agent` defineTool (V1).
 
@@ -120,7 +120,7 @@ muninnWeb 가 게이트웨이/레지스트리이므로 여기에:
 - `card/route.ts` (GET) → Agent Card.
 - `route.ts` (POST) → JSON-RPC 디스패처.
 
-**재사용(변경 최소)** — `lib/incidents.ts`(`delegateIncident`/`getRunStatus`/`getIssueRuns`/`approveRun`/`rejectRun`), `lib/k8s.ts`(watch/patch). **소규모 편집** — `lib/copilot-tools.ts` 에 플래그 게이트로 `send_task_to_a2a_agent` 추가.
+**재사용(변경 최소)** — `lib/incidents.ts`(`delegateIncident`/`getRunStatus`/`getIssueRuns`/`rejectRun`), `lib/k8s.ts`(watch/patch). `approveRun` 은 **재사용하지 않는다** — 승인은 콘솔 전용(운영자 OIDC, `muninn-devops-agent-platform.md §6.6`)이고 A2A 는 승인 경로를 노출하지 않는다(`tasks/cancel` 의 거절만 운영자 수준 인증으로 허용). **소규모 편집** — `lib/copilot-tools.ts` 에 플래그 게이트로 `send_task_to_a2a_agent` 추가.
 
 ## 6. 역방향 터널은? — muninn 에선 대부분 불필요
 
@@ -134,8 +134,10 @@ Grafana 터널은 **LLM 이 클라우드에 있어** 로컬 FS/셸로 손을 뻗
 
 ## 7. 인증·보안
 
-- **fail-closed 기본값**: 서버 라우트(`/a2a/agents/{app}`)는 `MUNINN_A2A_ENABLED=1` 게이트로 **기본 비활성** — 무인증 비가역 위임이 배포 즉시 노출되는 fail-open 을 막는다. 인증은 기본 bearer 필수이고 로컬 dev 만 `MUNINN_A2A_AUTH_DISABLED=1` 로 명시적 우회.
-- **Agent Card `securitySchemes` = bearer**(SA 토큰/OAuth). `/a2a` 진입 시 검증 후에만 `delegateIncident`. Grafana 교훈("`CLI auth tokens` 가 Cloud 전용이라 셀프호스트 데모 불가")을 1급으로 반영 — 인증을 처음부터 셀프호스트 친화로. (PoC 는 형식 검사까지, 운영은 토큰→SA/RBAC/workspace 매핑.)
+- **fail-closed 기본값**: 서버 라우트(`/a2a/agents/{app}`)는 `MUNINN_A2A_ENABLED=1` 게이트로 **기본 비활성** — 무인증 비가역 위임이 배포 즉시 노출되는 fail-open 을 막는다.
+- **인증은 muninn API 와 단일 체계**(`lib/auth.ts` `requireAuth` 위임, 이슈 #44): 정적 토큰(`MUNINN_API_TOKEN`) 상수시간 비교 또는 OIDC JWT(JWKS) 검증. A2A 는 머신 경로라 same-origin 콘솔 우회 없음(토큰 필수). dev 모드(인증 env 미설정)는 나머지 API 와 동일하게 허용+경고 — 별도 우회 플래그는 두지 않는다.
+- **`tasks/cancel` 은 운영자 수준**(`requireOperator`): awaiting Run 의 cancel 은 `rejectRun`(승인 거절)과 동일 효과이므로, 콘솔 `/api/runs/[id]/approve|reject` 의 운영자 격리(OIDC operator group 강제 시 운영자 JWT 만 통과)를 A2A 도 그대로 따른다.
+- **Agent Card `securitySchemes` = bearer**(SA 토큰/OAuth). `/a2a` 진입 시 검증 후에만 `delegateIncident`. Grafana 교훈("`CLI auth tokens` 가 Cloud 전용이라 셀프호스트 데모 불가")을 1급으로 반영 — 인증을 처음부터 셀프호스트 친화로. (운영 확장: 토큰 클레임→SA/RBAC/workspace 매핑.)
 - **클라이언트(`send_task_to_a2a_agent`) SSRF 가드(fail-closed)**: `A2A_ALLOWED_HOSTS` allowlist 에 있는 호스트만 허용(미설정 시 전면 거부). 가드 통과 URL 에만 bearer 첨부(토큰 유출 방지), 30x redirect 추종 금지(`redirect:"error"`).
 - **인증 실패는 HTTP 401**(+`WWW-Authenticate`), 서버 비활성은 404 — A2A 스펙이 인증을 HTTP 전송 계층에서 신호하므로 JSON-RPC 에러코드를 쓰지 않는다.
 - **A2A caller → K8s RBAC/workspace 매핑**: 토큰 클레임 → HuginnAgent `workspaceId`. 크로스 워크스페이스는 명시적 허용 필요.
@@ -159,19 +161,19 @@ Grafana 터널은 **LLM 이 클라우드에 있어** 로컬 FS/셸로 손을 뻗
 
 ## 8.1 후속(Future) — muninn CLI + Claude 플러그인 (언급만)
 
-A2A 서버(V2)가 서면 그 위에 **muninn CLI**(grafana-assistant-cli 대응 thin A2A 클라이언트)와 이를 **MCP 다리**로 감싼 **Claude 플러그인**(원격 위임을 Claude Code 서브에이전트처럼 사용)을 얹을 수 있다. 단 Claude 는 A2A 를 직접 말하지 않으므로 **MCP→A2A 브리지**가 필요하고, A2A task(장시간·HITL 중단)는 **동기 서브에이전트가 아니라 비동기 위임 핸들**(`delegate`/`get_task`/`approve`)로 모델링해야 한다. 본 문서 범위 밖 — 별도 설계로 다룬다.
+A2A 서버(V2)가 서면 그 위에 **muninn CLI**(grafana-assistant-cli 대응 thin A2A 클라이언트)와 이를 **MCP 다리**로 감싼 **Claude 플러그인**(원격 위임을 Claude Code 서브에이전트처럼 사용)을 얹을 수 있다. 단 Claude 는 A2A 를 직접 말하지 않으므로 **MCP→A2A 브리지**가 필요하고, A2A task(장시간·HITL 중단)는 **동기 서브에이전트가 아니라 비동기 위임 핸들**(`delegate`/`get_task`/`approve`)로 모델링해야 한다. ⚠ 이 중 `approve` 핸들은 현행 원칙과 충돌한다 — 승인은 **콘솔 전용**(운영자 OIDC, `requireOperator`)이고 A2A/코파일럿은 승인 경로를 노출하지 않는다(§7). CLI/플러그인이 승인을 다루려면 콘솔 전용 격리 원칙의 재검토를 포함한 별도 보안 설계가 선행돼야 한다. 본 문서 범위 밖 — 별도 설계로 다룬다.
 
 ## 9. PoC(V1) 사용법
 
-`muninnWeb/lib/a2a/README.md` 참고. 서버 라우트는 `MUNINN_A2A_ENABLED=1` 필요(미설정 시 404), 인증은 기본
-`Authorization: Bearer` 필수(로컬은 `MUNINN_A2A_AUTH_DISABLED=1` 로 우회). 요약:
+`muninnWeb/lib/a2a/README.md` 참고. 서버 라우트는 `MUNINN_A2A_ENABLED=1` 필요(미설정 시 404). 인증은 muninn API
+와 동일(`MUNINN_API_TOKEN` 또는 OIDC JWT Bearer) — 로컬 dev 는 인증 env 미설정이면 dev 모드로 허용된다(§7). 요약:
 ```bash
-# 서버: MUNINN_A2A_ENABLED=1 MUNINN_A2A_AUTH_DISABLED=1 pnpm dev   (로컬 dev)
+# 서버: MUNINN_A2A_ENABLED=1 pnpm dev   (로컬 dev — MUNINN_API_TOKEN/OIDC 미설정 시 인증 dev 모드)
 
 # 1) Agent Card 조회 (k8s 연결 시 실제 HuginnAgent, 아니면 mock)
 curl -s localhost:3030/a2a/agents/payments-api/card | jq
 
-# 2) A2A message/send 로 위임 (JSON-RPC). 운영에선 -H 'authorization: Bearer <SA토큰>' 추가
+# 2) A2A message/send 로 위임 (JSON-RPC). 운영에선 -H 'authorization: Bearer <MUNINN_API_TOKEN 또는 OIDC JWT>' 추가
 curl -s localhost:3030/a2a/agents/payments-api \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"message/send",
