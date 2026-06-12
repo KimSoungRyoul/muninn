@@ -150,7 +150,7 @@ type ApprovalStatus struct {
 
 // HuginnRunStatus defines the observed state of HuginnRun.
 // 필드 소유권(operator-design §2.2): Operator = phase/startedAt/finishedAt/duration/jobName/caps/conditions,
-// Agent→API = step/cost/tokens/recalledMemoryIds/output, API = AwaitingApproval 전이/approval.
+// Agent→API = step/cost/tokens/recalledMemoryIds/output/sessionId, API = AwaitingApproval 전이/approval.
 type HuginnRunStatus struct {
 	// +optional
 	Phase RunPhase `json:"phase,omitempty"`
@@ -166,6 +166,11 @@ type HuginnRunStatus struct {
 	RecalledMemoryIDs []RecalledMemory `json:"recalledMemoryIds,omitempty"`
 	// +optional
 	Output string `json:"output,omitempty"`
+	// sessionId: 이 Run 의 Claude Code 세션 ID. 같은 Issue 의 다음 attempt 가
+	// MUNINN_RESUME_SESSION_ID 로 이어받아(resume) 직전 진단 컨텍스트를 재사용한다(§5.5).
+	// resume 범위는 Issue 내 attempt 간으로 한정 — Issue 간 연속성은 메모리(recall)가 담당.
+	// +optional
+	SessionID string `json:"sessionId,omitempty"`
 
 	// --- Operator 소유(생성 시 세션 상속 복사 / lifecycle) ---
 	// +optional

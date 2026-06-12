@@ -10,12 +10,14 @@
   * _parse_approval_state / _approval_detail: 거절 선점(항목1) 조회가 의존하는 방어적 파싱
   * send_final patch 의 terminalKind 화이트리스트(임의 문자열 차단) — 보고 페이로드 빌더를
     runner 의 실제 분기와 동일하게 재현해 계약 형태를 고정한다.
+  * _extract_session_id: 세션 resume 배선(§5.5)이 의존하는 SDK 메시지 duck-typing 파싱
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -97,6 +99,32 @@ class ParseApprovalStateTest(unittest.TestCase):
         self.assertIsNone(runner._parse_approval_state({"approval": ""}))
         self.assertIsNone(runner._parse_approval_state({"approval": {"state": ""}}))
         self.assertIsNone(runner._parse_approval_state("not-a-dict"))
+
+
+class ExtractSessionIdTest(unittest.TestCase):
+    """_extract_session_id 의 duck-typing 계약(§5.5) — SDK 메시지 형태 둘 다 커버한다."""
+
+    def test_attribute_form_result_message(self):
+        # ResultMessage 형태: session_id 속성.
+        msg = types.SimpleNamespace(session_id="0a1b2c3d-e4f5")
+        self.assertEqual(runner._extract_session_id(msg), "0a1b2c3d-e4f5")
+
+    def test_data_dict_form_init_message(self):
+        # init SystemMessage 형태: data dict 의 session_id 키.
+        msg = types.SimpleNamespace(data={"session_id": "init-sid", "tools": []})
+        self.assertEqual(runner._extract_session_id(msg), "init-sid")
+
+    def test_attribute_takes_precedence_over_data(self):
+        msg = types.SimpleNamespace(session_id="attr-sid", data={"session_id": "data-sid"})
+        self.assertEqual(runner._extract_session_id(msg), "attr-sid")
+
+    def test_missing_or_invalid_yields_empty(self):
+        # 없음/빈 값/비문자열 → 빈 문자열(캡처 안 함, 다음 메시지에서 재시도).
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace()), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(session_id="")), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(session_id=123)), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(data={"other": 1})), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(data="not-a-dict")), "")
 
 
 class ApprovalDetailTest(unittest.TestCase):

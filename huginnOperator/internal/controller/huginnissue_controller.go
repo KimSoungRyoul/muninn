@@ -124,9 +124,9 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	runs := runList.Items
 	sort.Slice(runs, func(i, j int) bool { return runs[i].Spec.Attempt < runs[j].Spec.Attempt })
 
-	// 최초 Run 생성.
+	// 최초 Run 생성(resume 없음 — 새 세션).
 	if len(runs) == 0 {
-		if err := r.createRun(ctx, &issue, &agent, 1); err != nil {
+		if err := r.createRun(ctx, &issue, &agent, 1, ""); err != nil {
 			return ctrl.Result{}, err
 		}
 		log.Info("최초 Run 생성", "attempt", 1)
@@ -197,7 +197,9 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{RequeueAfter: wait}, nil
 			}
 			next := latest.Spec.Attempt + 1
-			if err := r.createRun(ctx, &issue, &agent, next); err != nil {
+			// 직전 attempt 의 Claude 세션을 이어받는다(§5.5 resume). sessionId 는 Agent→API 소유라
+			// 에이전트가 보고 전에 죽었으면 비어 있고, 그 경우 새 세션으로 시작한다.
+			if err := r.createRun(ctx, &issue, &agent, next, latest.Status.SessionID); err != nil {
 				return ctrl.Result{}, err
 			}
 			log.Info("재시도 Run 생성", "attempt", next)
@@ -252,8 +254,10 @@ func (r *HuginnIssueReconciler) suspendRuns(ctx context.Context, issue *muninnio
 	return nil
 }
 
+// createRun 은 attempt 번째 HuginnRun 을 만든다. resumeSessionID 가 있으면(재시도 attempt 한정)
+// MUNINN_RESUME_SESSION_ID env 로 주입해 runner 가 직전 attempt 의 Claude 세션을 resume 한다(§5.5).
 func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1beta1.HuginnIssue,
-	agent *muninniov1beta1.HuginnAgent, attempt int32) error {
+	agent *muninniov1beta1.HuginnAgent, attempt int32, resumeSessionID string) error {
 	memEndpoint := orDefault(r.MemoryEndpoint, defaultMemoryEndpoint)
 	apiEndpoint := orDefault(r.APIEndpoint, defaultAPIEndpoint)
 
@@ -270,7 +274,7 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 			// 60~90m 사이 승인이 60m activeDeadline 에 SIGKILL 당하는 모순을 막는다(CONTRACT §C-HITL).
 			TimeoutSeconds:          runTimeoutSeconds(agent),
 			TTLSecondsAfterFinished: 86400,
-			JobTemplate:             buildJobTemplate(agent, issue, memEndpoint, apiEndpoint),
+			JobTemplate:             withResumeSession(buildJobTemplate(agent, issue, memEndpoint, apiEndpoint), resumeSessionID),
 		},
 	}
 	if err := controllerutil.SetControllerReference(issue, run, r.Scheme); err != nil {

@@ -92,6 +92,7 @@ HuginnRunReconciler
 | `maxStep`, `maxCostUsd`, `maxTokens` | Operator(생성 시 1회) | 이슈 상속 복사(maxStep=maxIterations) |
 | `recalledMemoryIds` | **API**(recall-report, §5.6) | 에이전트 보고 |
 | `output`(PR/Issue) | **Agent→API** | 발행 결과 |
+| `sessionId`(Claude 세션) | **Agent→API** | 스트림 init/Result 메시지(§5.5 resume). 다음 attempt 가 `MUNINN_RESUME_SESSION_ID` 로 이어받는다 |
 | `conditions[]` | Operator(전이 사유) + API(승인 사유) | — |
 
 **충돌 회피 메커니즘**: 두 writer 모두 **status subresource 만** 패치하고, 각자 **자기 필드만** 패치(JSON Merge Patch/SSA field manager 분리). Operator 는 진행 메트릭(step/cost/...)을 **절대 0 으로 덮어쓰지 않는다**(reconcile 시 해당 필드는 read-only 취급). 이를 위해 Operator 의 Run reconcile 은 status 패치 시 `phase/startedAt/finishedAt/conditions` 만 갱신하는 부분 패치를 사용.
@@ -125,6 +126,11 @@ HuginnRunReconciler
   `MUNINN_MEMORY_ENDPOINT`/`MUNINN_API_ENDPOINT`(= muninnWeb, operator env 로 설정), 자격(Secret), SOUL/payload 참조.
 - **Run 단위**(`runScopedEnv`, Job 생성 시 — Run 이름이 확정되는 시점): `MUNINN_RUN_NAME`, `MUNINN_ISSUE_NAME`,
   `MUNINN_AGENT_NAME`(= app, 메모리 scope), `MUNINN_NAMESPACE`, `MUNINN_WORKSPACE`(멀티테넌시 경계 — `muninn.io/workspace` 라벨 우선, 누락 시 `run.Namespace` 폴백; runner.py 가 메모리 store/recall 에 동봉해 테넌트 간 기억 누수 차단), `MUNINN_ATTEMPT`, `MUNINN_PR_MODE`(기본 `dry-run`).
+
+재시도 attempt(N≥2)에는 Issue controller 가 Run 생성 시 직전 attempt 의 `status.sessionId` 를
+`MUNINN_RESUME_SESSION_ID` 로 jobTemplate.env 에 덧붙인다(`withResumeSession`, §5.5) — runner 가
+이 값으로 직전 Claude 세션을 resume 해 진단 컨텍스트를 이어받는다. 비어 있으면(직전 attempt 가
+세션 보고 전에 죽음) 새 세션으로 시작한다.
 
 에이전트(runner.py)는 이 env 로 **회상→보고→기억화**를 수행한다(보고 계약은 `muninn-goal-conversational-delegation.md` §8):
 `POST {MUNINN_MEMORY_ENDPOINT}/api/memories/recall`(위임 직전 회상) → `POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report`

@@ -85,6 +85,19 @@ func pvcNameForAgent(agentName string) string {
 	return "pvc-claude-" + agentName
 }
 
+// withResumeSession 은 직전 attempt 의 Claude Code 세션을 잇는 env 를 JobTemplate 에 덧붙인다(§5.5).
+// sessionID 는 직전(실패한) Run 의 status.sessionId(Agent→API 소유)다. 세션 transcript 는 앱별
+// ~/.claude PVC 에 남아 있고 모든 Run 의 cwd(/workspace)가 동일하므로 같은 프로젝트로 resume 된다.
+// resume 범위는 같은 Issue 의 attempt 간으로 한정한다 — Issue 간 컨텍스트 오염을 막고,
+// 사건 간 연속성은 메모리(recall/CLAUDE.md)가 담당한다. 비면(에이전트가 보고 전에 죽음) 새 세션.
+func withResumeSession(jt muninniov1beta1.JobTemplate, sessionID string) muninniov1beta1.JobTemplate {
+	if sessionID == "" {
+		return jt
+	}
+	jt.Env = append(jt.Env, corev1.EnvVar{Name: "MUNINN_RESUME_SESSION_ID", Value: sessionID})
+	return jt
+}
+
 // defaultAgentResources 는 권장 기본 리소스(§5.1).
 func defaultAgentResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{

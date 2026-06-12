@@ -386,6 +386,14 @@ SDK `query()` 가 반환하는 `AsyncIterator<Message>` 를 Muninn `Step` 으로
 
 **MVP = A(앱별 PVC) 또는 B**. 동일 앱의 동시 Run 은 Claude session 디렉토리를 `~/.claude/run/{runId}` 로 분리해 충돌을 줄인다.
 
+**세션 resume (구현됨)**: PVC 에 남는 Claude 세션 transcript(`~/.claude/projects/…`)를 같은 Issue 의
+재시도 attempt 가 이어받는다. runner 가 스트림에서 세션 ID 를 잡는 즉시 `status.sessionId`(Agent→API
+소유)로 보고하고, Issue controller 가 다음 attempt Run 에 `MUNINN_RESUME_SESSION_ID` 로 주입하면
+runner 가 SDK `resume` 옵션으로 직전 진단 컨텍스트에서 계속한다. **resume 범위는 Issue 내 attempt
+간으로 한정** — Issue 간 연속성은 메모리(recall + `~/.claude/CLAUDE.md`)가 담당한다(컨텍스트 오염 방지).
+attempt 간 pod 겹침은 없으므로(Issue controller 가 직전 Run 의 터미널 phase 확인 후에만 다음 attempt
+생성) 동일 세션 이어쓰기가 안전하다.
+
 ### 5.6 Run 완료 & 보고 경로
 Pod 가 종료(Succeeded/Failed/Cancelled)할 때:
 1. `recall-report`: `POST /runs/{id}/recall-report` 로 `recalledMemoryIds[{id,score,recall_time}]` 전송(직접 CR PATCH 대신 **API 경유** 권장 — RBAC 단순화).

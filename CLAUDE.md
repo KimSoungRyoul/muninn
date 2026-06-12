@@ -22,12 +22,12 @@
 
 **Status 필드 소유권 (`HuginnRunStatus`) — 위반 금지** (`operator-design.md §2.2`). 세 writer 로 나뉜다:
 - **Operator**: `phase` / `startedAt` / `finishedAt` / `durationSeconds` / `jobName` / caps / `conditions`
-- **Agent→API**: `step` / `cost` / `tokens` / `recalledMemoryIds` / `output`
+- **Agent→API**: `step` / `cost` / `tokens` / `recalledMemoryIds` / `output` / `sessionId`
 - **API**: `AwaitingApproval` 전이 + `approval`
 
 오퍼레이터는 다른 writer 의 필드를 덮어쓰지 않도록 status 를 `r.Status().Patch(ctx, run, client.MergeFrom(base))` 로만 쓴다(전체 update 금지). muninnWeb 의 `lib/k8s.ts` 도 같은 이유로 merge-patch 를 쓴다. 양쪽 모두에서 이를 유지하라.
 
-**재시도는 pod 레벨이 아니다.** Job 은 `backoffLimit=0` 으로 생성된다. 재시도는 `HuginnIssue` 컨트롤러가 *새 attempt* `HuginnRun` 을 만드는 방식이며, `retryPolicy.maxRuns` 로 backoff 와 함께 제한된다. 에이전트 실행은 non-idempotent 이므로 pod restart 를 절대 다시 켜지 마라.
+**재시도는 pod 레벨이 아니다.** Job 은 `backoffLimit=0` 으로 생성된다. 재시도는 `HuginnIssue` 컨트롤러가 *새 attempt* `HuginnRun` 을 만드는 방식이며, `retryPolicy.maxRuns` 로 backoff 와 함께 제한된다. 에이전트 실행은 non-idempotent 이므로 pod restart 를 절대 다시 켜지 마라. 재시도 attempt 는 직전 attempt 의 `status.sessionId` 를 `MUNINN_RESUME_SESSION_ID` 로 받아 Claude 세션을 resume 한다(같은 Issue 내로 한정 — 앱별 `~/.claude` PVC 의 transcript 재사용, §5.5).
 
 **`JobTemplate` 은 전체 PodSpec 이 아니라 큐레이팅된 슬림 subset 이다** (`huginnrun_types.go`). 전체 `corev1.PodSpec` 을 넣으면 CRD OpenAPI 스키마(~590KB)가 256KB client-side-apply 어노테이션 한계를 넘는다. `buildJobTemplate`(helpers.go)이 Agent+Issue 로 슬림 recipe 를 채우고, `expandPodSpec`(huginnrun_controller.go)이 고정 필드(restartPolicy=Never, 컨테이너 이름, `~/.claude` 마운트, non-root securityContext)를 더해 실제 PodSpec 을 만든다.
 
