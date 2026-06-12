@@ -47,13 +47,38 @@ const (
 	agentSecretName   = "agent-secrets" // 인증 키 소스(§5.1)
 	anthropicKeyName  = "anthropic-api-key"
 	oauthTokenKeyName = "claude-code-oauth-token" // OAuth 인증 대안(Pro/Max/team)
+	// muninnAPITokenKeyName: 런타임이 Muninn API(보고/승인/메모리)를 인증할 토큰. agent-secrets 의 키.
+	muninnAPITokenKeyName = "muninn-api-token"
 
 	serviceAccountName = "huginn-agent" // 자기 namespace Secret/CM 만 read(§6.1)
 
 	defaultMemoryEndpoint = "http://muninn-memory.muninn.svc:8080"
 	defaultAPIEndpoint    = "http://muninn-api.muninn.svc:8080"
 	defaultAPIBaseURL     = "https://muninn-api.platform.local"
+
+	// approvalTimeoutSeconds: HITL 승인 게이트의 권위 timeout(초). web 의 승인 TTL(incidents.ts
+	// approvalTtlMinutes 기본 90m)·runner._approval_timeout_seconds 기본(5400)과 정합하는 단일 소스다
+	// (CONTRACT §C-HITL). operator 가 이 값을 MUNINN_APPROVAL_TIMEOUT env 로 주입해 runner 가 동일 값을
+	// 쓰게 하고, requireApproval=true Run 의 Job activeDeadline 도 이 값 이상으로 잡는다.
+	approvalTimeoutSeconds int64 = 5400
+	// defaultRunTimeoutSeconds: 승인 게이트가 없는 일반 Run 의 Job activeDeadline(=60m).
+	defaultRunTimeoutSeconds int64 = 3600
+	// approvalRunTimeoutSeconds: requireApproval=true Run 의 Job activeDeadline(=120m).
+	// 승인 timeout(90m) + 승인 후 실제 작업 예산(약 30m) 이상이어야, 운영자가 60~90m 사이 승인해도
+	// Pod 가 activeDeadline 로 SIGKILL 당하지 않는다(CONTRACT §C-HITL, 리뷰 HIGH). 즉
+	// activeDeadline >= approvalTimeout + 작업예산 을 보장한다.
+	approvalRunTimeoutSeconds int64 = 7200
 )
+
+// runTimeoutSeconds 는 Run 의 Job activeDeadlineSeconds(=Spec.TimeoutSeconds)를 결정한다.
+// agent 의 PR 정책이 승인 게이트를 켜면(requireApprovalOnWorkflowChange) 승인 대기(최대 90m)가
+// 60m activeDeadline 에 SIGKILL 당하는 모순을 막기 위해 7200s 로 상향한다(CONTRACT §C-HITL).
+func runTimeoutSeconds(agent *muninniov1beta1.HuginnAgent) int64 {
+	if pr := agent.Spec.Source.PR; pr != nil && pr.RequireApprovalOnWorkflowChange {
+		return approvalRunTimeoutSeconds
+	}
+	return defaultRunTimeoutSeconds
+}
 
 // pvcNameForAgent 은 앱별 격리 PVC 이름(§5.5 MVP=A).
 func pvcNameForAgent(agentName string) string {
@@ -80,11 +105,26 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 	memoryEndpoint, apiEndpoint string) muninniov1beta1.JobTemplate {
 
 	g := issue.Spec.InheritedGuardrails
+	// HITL 진입 트리거(CONTRACT §C1, 리뷰 HIGH): agent 의 PR 정책
+	// source.pr.requireApprovalOnWorkflowChange 를 MUNINN_GUARDRAILS JSON 의
+	// "requireApproval" 키로 직렬화한다. runner._require_approval() 가 이 키를 읽어
+	// 위험작업 직전 승인 게이트를 켠다 — operator 만 이 키를 채우면 HITL 루프가 실제 작동한다.
+	// (CRD 필드명 requireApprovalOnWorkflowChange ↔ runner 키 requireApproval 의 경계는 여기서 고정.)
+	requireApproval := false
+	if pr := agent.Spec.Source.PR; pr != nil {
+		requireApproval = pr.RequireApprovalOnWorkflowChange
+	}
 	env := []corev1.EnvVar{
 		{Name: "MUNINN_GOAL", Value: issue.Spec.Goal},
 		{Name: "MUNINN_GLOBAL_SYSTEM_PROMPT_REF", Value: "configmap/muninn-global-prompt"},
 		{Name: "MUNINN_TEAM_SETTINGS_REF", Value: "configmap/muninn-team-settings"},
-		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d}`, g.MaxIterations, g.MaxCostUsd, g.MaxTokens)},
+		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d,"requireApproval":%t}`,
+			g.MaxIterations, g.MaxCostUsd, g.MaxTokens, requireApproval)},
+		// MUNINN_APPROVAL_TIMEOUT: HITL 승인 게이트 timeout 의 단일 소스(초). web TTL·runner 기본과 정합시켜
+		// runner._approval_timeout_seconds 가 동일 값을 쓰게 한다(CONTRACT §C-HITL). requireApproval 여부와
+		// 무관하게 항상 주입 — 게이트가 켜지면(MUNINN_REQUIRE_APPROVAL/guardrails) 이 값으로 폴링 timeout 을 잡고,
+		// 같은 값 이상으로 잡힌 Job activeDeadline(runTimeoutSeconds) 안에 들어오도록 한다.
+		{Name: "MUNINN_APPROVAL_TIMEOUT", Value: fmt.Sprintf("%d", approvalTimeoutSeconds)},
 		{Name: "MUNINN_MEMORY_ENDPOINT", Value: memoryEndpoint},
 		{Name: "MUNINN_API_ENDPOINT", Value: apiEndpoint},
 		// 인증: env(Secret)로만(§5.1, §6.2). API 키 또는 OAuth 토큰 중 하나면 충분 →
@@ -100,6 +140,15 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 			SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
 				Key:                  oauthTokenKeyName,
+				Optional:             ptr.To(true),
+			},
+		}},
+		// MUNINN_API_TOKEN: 런타임이 Muninn API(보고/승인/메모리) 호출을 인증하는 토큰(§5.6).
+		// 인증 키와 동일 패턴(agent-secrets, optional) — 미배포 환경에서도 Pod 가 뜨도록 optional.
+		{Name: "MUNINN_API_TOKEN", ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
+				Key:                  muninnAPITokenKeyName,
 				Optional:             ptr.To(true),
 			},
 		}},

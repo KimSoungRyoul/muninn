@@ -26,7 +26,9 @@ spec:
       # muninn-web 는 Muninn API 다 — HuginnIssue 생성·HuginnRun 보고/승인 패치로 K8s API 를 호출한다.
       # 따라서 SA + 토큰 마운트가 필요(web/rbac.yaml 의 Role 로 huginn* 한정 권한).
       serviceAccountName: {{ include "muninn.web.serviceAccountName" . }}
-      automountServiceAccountToken: {{ .Values.web.serviceAccount.create }}
+      # 토큰 마운트는 SA 생성 여부와 분리한다 — 기존 SA(create=false) 사용 시에도 in-cluster K8s
+      # 자격이 있어야 k8sEnabled()가 통과한다(아니면 조용히 mock 폴백). 기본 true.
+      automountServiceAccountToken: {{ .Values.web.serviceAccount.automount }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -67,6 +69,41 @@ spec:
             # CR 이 사는 namespace(lib/k8s.ts DEFAULT_NAMESPACE). 기본=릴리스 namespace.
             - name: MUNINN_NAMESPACE
               value: {{ .Values.web.namespaceOverride | default .Release.Namespace | quote }}
+            # 멀티테넌시(CONTRACT §2): 워크스페이스=네임스페이스. 요청에 헤더 x-muninn-workspace/
+            # ?workspace= 가 없을 때의 폴백(lib/workspace.ts·lib/db.ts). 기본=릴리스 namespace.
+            - name: MUNINN_WORKSPACE
+              value: {{ .Values.web.workspace | default .Release.Namespace | quote }}
+            {{- if .Values.web.oidc.issuer }}
+            # OIDC(CONTRACT §1): 사람용 콘솔 경로(운영자 승인/거절/위임)는 운영자 SSO JWT 를
+            # JWKS 로 검증한다(lib/auth.ts). issuer 가 설정되면 활성 — JWKS_URI 미설정 시
+            # issuer 의 .well-known/jwks.json 으로 디스커버리. audience 는 토큰 aud 검증용.
+            - name: MUNINN_OIDC_ISSUER
+              value: {{ .Values.web.oidc.issuer | quote }}
+            {{- if .Values.web.oidc.audience }}
+            - name: MUNINN_OIDC_AUDIENCE
+              value: {{ .Values.web.oidc.audience | quote }}
+            {{- end }}
+            {{- if .Values.web.oidc.jwksUri }}
+            - name: MUNINN_OIDC_JWKS_URI
+              value: {{ .Values.web.oidc.jwksUri | quote }}
+            {{- end }}
+            {{- if .Values.web.oidc.operatorGroup }}
+            # 설정 시 approve/reject(운영자 경로)는 이 group claim 을 가진 OIDC 토큰만 허용한다
+            # (lib/auth.ts requireOperator/hasOperatorClaim). 미설정이면 운영자 게이트가 일반 인증으로
+            # 완화된다 — 즉 group 강제가 no-op 이므로, 보안 강조 환경에서는 반드시 설정할 것.
+            - name: MUNINN_OIDC_OPERATOR_GROUP
+              value: {{ .Values.web.oidc.operatorGroup | quote }}
+            {{- end }}
+            {{- end }}
+            # Muninn API 인증 토큰(lib/auth.ts). agent(runner.py)·operator 와 동일 토큰이어야 한다.
+            # 기본은 agent-secrets 의 muninn-api-token 키(operator 가 agent Job 에 주입하는 것과 동일).
+            # 키가 없으면 optional=true 라 빈 값 → web 은 dev 모드(인증 비활성+경고)로 동작한다.
+            - name: MUNINN_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.web.apiToken.existingSecret | default .Values.agent.secrets.name }}
+                  key: {{ .Values.web.apiToken.key | quote }}
+                  optional: true
             {{- if .Values.metaDb.enabled }}
             # 메모리 metaDB 연결 — CNPG(또는 외부 DB)가 만든 Secret 의 uri 키를 DATABASE_URL 로 주입.
             - name: DATABASE_URL

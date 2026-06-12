@@ -2,9 +2,11 @@
 #
 # 설치 권장:
 #   helm install muninn deploy/helm/muninn -n muninn --create-namespace
-# (operator 가 Job 에 주입하는 기본 endpoint 가 `muninn` namespace 를 가정한다 — helpers.go.)
+# operator 가 agent Job 에 주입하는 보고/메모리 endpoint(MUNINN_API_ENDPOINT/MUNINN_MEMORY_ENDPOINT)는
+# web.enabled=true 일 때 chart 가 이 릴리스의 muninn-web Service(<release>-web.<ns>.svc:3030)로 배선한다
+# (operator/deployment.yaml). web.enabled=false 면 operator 는 코드 fallback 을 쓰므로 보고가 동작하지 않는다.
 #
-# PostgreSQL 은 이 chart 가 만들지 않는다. 외부 인스턴스를 `externalPostgresql.*` 로 가리킨다.
+# PostgreSQL 은 이 chart 가 만들지 않는다. 메모리 DB 는 `metaDb.*`(권장: CNPG)로 외부 연결한다.
 
 # 이름 override.
 nameOverride: ""
@@ -88,7 +90,10 @@ operator:
     annotations: {}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Muninn Web 콘솔 (CopilotKit 프로토타입). 데이터는 mock — 영속 백엔드 없음.
+# Muninn Web — 콘솔 + Muninn API(게이트웨이) + 메모리. dual-mode:
+#   - K8s 자격(SA 토큰)이 있으면 실 HuginnIssue/HuginnRun CR 생성·patch(lib/k8s.ts).
+#   - metaDb.enabled=true 면 DATABASE_URL 로 외부 postgres 에 메모리 저장·recall(lib/db.ts).
+#   - 둘 다 없으면 lib/data.ts mock 으로 폴백한다. (CopilotKit 콘솔 포함.)
 # ─────────────────────────────────────────────────────────────────────────────
 web:
   enabled: true
@@ -119,11 +124,47 @@ web:
     create: true
     name: ""
     annotations: {}
+    # SA 토큰 마운트. 이 Deployment 는 in-cluster K8s API 호출이 존재 이유라 기본 true 다.
+    # serviceAccount.create 와 분리한다 — create=false + name=<기존 SA> 조합에서도 토큰이 마운트돼야
+    # k8sEnabled()가 통과한다(아니면 자격 없이 조용히 mock 폴백 → 설정 오류 은폐).
+    automount: true
   rbac:
     create: true
 
+  # Muninn API 인증 토큰(MUNINN_API_TOKEN). 설정되면 web 이 상태변경 라우트(보고·승인·위임·webhook)에
+  # Authorization: Bearer <token> 를 요구한다(lib/auth.ts). 런타임 agent(runner.py)·operator 가 보내는
+  # 토큰과 동일해야 한다 — operator 는 agent-secrets 의 muninn-api-token 키를 agent Job 에 주입하므로,
+  # 같은 Secret/키를 web 에도 가리키는 것이 기본값이다(미설정 시 web 은 dev 모드로 인증 비활성+경고).
+  apiToken:
+    # 토큰을 담은 Secret 이름. 비우면 agent.secrets.name(agent-secrets)을 쓴다.
+    existingSecret: ""
+    key: muninn-api-token
+
   # CR 이 사는 namespace(MUNINN_NAMESPACE). 비우면 릴리스 namespace 를 쓴다.
   namespaceOverride: ""
+
+  # 멀티테넌시(CONTRACT §2): 워크스페이스 = K8s 네임스페이스. 요청 컨텍스트(헤더
+  # x-muninn-workspace / ?workspace= / body.workspace)에서 workspace 를 결정하고,
+  # 없으면 이 값(MUNINN_WORKSPACE)으로 폴백한다(lib/workspace.ts·lib/db.ts). 메모리
+  # recall/store/list 가 이 workspace 로 필터된다. 비우면 릴리스 namespace 를 쓴다.
+  workspace: ""
+
+  # OIDC(CONTRACT §1) — 사람용 콘솔 경로(운영자 승인/거절/위임)의 JWT 검증(lib/auth.ts).
+  # issuer 가 설정되면 활성화되어 Bearer JWT 를 JWKS 로 검증(issuer/audience/exp)한다.
+  # 에이전트→API 경로는 계속 정적 토큰(apiToken)을 쓴다 — JWT 실패 시 정적 토큰으로 폴백.
+  # 셋 다 비우면 OIDC 비활성(정적 토큰만; 그것도 없으면 dev 모드 경고).
+  oidc:
+    # OIDC issuer URL (예: https://login.example.com/realms/muninn). 비우면 OIDC off.
+    issuer: ""
+    # 토큰 aud 클레임 검증 값. 비우면 audience 검증 생략.
+    audience: ""
+    # JWKS 엔드포인트. 비우면 issuer 의 /.well-known/jwks.json 으로 자동 디스커버리.
+    jwksUri: ""
+    # 운영자 group claim 강제(MUNINN_OIDC_OPERATOR_GROUP). 설정 시 approve/reject(운영자 경로)는
+    # 이 group 을 가진 검증된 OIDC 토큰만 허용한다(lib/auth.ts requireOperator/hasOperatorClaim).
+    # ⚠️ 비우면 운영자 게이트의 group 강제가 no-op 이라, 인증된 아무 SSO 사용자나 승인/거절할 수 있다.
+    # 보안 강조 환경에서는 반드시 설정할 것(예: muninn-operators).
+    operatorGroup: ""
 
   ingress:
     enabled: false
@@ -155,7 +196,10 @@ web:
 # chart 는 Job 이 사용할 ServiceAccount 와 인증 Secret 배선만 준비한다.
 # ─────────────────────────────────────────────────────────────────────────────
 agent:
-  # operator 가 만든 Job pod 이 사용하는 SA (helpers.go: "huginn-agent").
+  # operator 가 만든 Job pod 이 사용하는 SA. ⚠️ 이름은 operator 가 상수로 하드코딩한다
+  # (helpers.go: serviceAccountName="huginn-agent"). 따라서 name 은 사실상 고정 계약이다 —
+  # 다른 값으로 바꾸면 chart 가 쓸모없는 SA 를 만들고 operator 는 huginn-agent 를 별도 자동생성한다.
+  # 오설정 방지를 위해 chart 가 비-기본 name 을 fail-fast 로 막는다(templates/agent/serviceaccount.yaml).
   serviceAccount:
     create: true
     name: huginn-agent
@@ -166,13 +210,28 @@ agent:
     repository: ghcr.io/kimsoungryoul/muninn/agent-runtime
     tag: latest
 
-  # agent-secrets Secret (operator 가 Job env 로 주입: anthropic-api-key / claude-code-oauth-token).
-  # 자격은 절대 커밋 금지(루트 CLAUDE.md "Auth is env(Secret)-only") → chart 가 만들지 않는다.
-  # 런타임에 kubectl 로 직접 생성한다(operator 는 아래 name 으로 참조):
+  # agent-secrets Secret (operator 가 Job env 로 주입: anthropic-api-key / claude-code-oauth-token /
+  #  muninn-api-token). 자격은 절대 커밋 금지(루트 CLAUDE.md "Auth is env(Secret)-only") → chart 가 만들지 않는다.
+  # ⚠️ 이름은 operator 가 상수로 하드코딩한다(helpers.go: agentSecretName="agent-secrets") — 고정 계약이다.
+  # 비-기본 name 으로 바꾸면 operator 가 여전히 agent-secrets 를 참조해 인증 없는 실행이 된다(chart 가 fail-fast).
+  # 런타임에 kubectl 로 직접 생성한다:
   #   kubectl -n muninn create secret generic agent-secrets \
-  #     --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+  #     --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN" \
+  #     --from-literal=muninn-api-token="$(openssl rand -hex 32)"
   secrets:
     name: agent-secrets
+
+  # ─── 멀티테넌시 / 승인 루프 — 참고(operator 가 Job env 로 주입; helm 직접 배선 아님) ───
+  # MUNINN_WORKSPACE(멀티테넌시 경계, CONTRACT §2): 워크스페이스 = K8s 네임스페이스. operator 가
+  #   muninn.io/workspace 라벨(agent→issue→run 전파)을, 누락 시 run.Namespace 를 폴백으로 Job 에
+  #   주입한다(huginnrun_controller.go runScopedEnv). helm 은 이 값을 직접 제어하지 않는다.
+  #
+  # 승인 루프(HITL, CONTRACT §3) — runner.py 가 읽는 env. PR/위험작업 직전 승인을 받고 폴링한다:
+  #   MUNINN_REQUIRE_APPROVAL=1     승인 게이트 활성(미설정 시 guardrails.requireApproval 폴백, 기본 off)
+  #   MUNINN_APPROVAL_POLL_SECONDS  approval.state 폴링 간격(기본 10초)
+  #   MUNINN_APPROVAL_TIMEOUT       대기 한도 초; 초과 시 aborted 로 정상 중단(기본 5400초)
+  # 현재 operator 는 이 셋을 helm values 에서 받아 Job 에 전달하는 경로가 없다(operator 프로세스
+  # env 또는 CR guardrails 로 제어). 별도 전달 경로가 생기면 여기 values 로 노출한다.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CRD 설치 — Helm 의 crds/ 디렉토리로 관리된다.

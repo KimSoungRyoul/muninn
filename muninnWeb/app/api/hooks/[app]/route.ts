@@ -1,20 +1,40 @@
 import { NextRequest } from "next/server";
-import { ok, notFound, serverError, severityGte } from "@/lib/api";
+import { ok, notFound, serverError, severityGte, badRequest } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { APPS, EVENTS } from "@/lib/data";
-import { delegateIncident } from "@/lib/incidents";
+import { delegateIncident, dedupActiveIssue, fingerprintLabelOf, eventFingerprint } from "@/lib/incidents";
 import { k8sEnabled } from "@/lib/k8s";
+import {
+  dbEnabled, recordInboundEvent, markInboundEvent,
+  type InboundEventStatus,
+} from "@/lib/db";
+
+// 허용 source(외부 webhook 발신자). 임의 문자열이 spec.event.source/라벨로 흘러들지 않게 화이트리스트.
+const ALLOWED_SOURCES = new Set(["grafana", "airflow", "argocd"]);
+const ALLOWED_SEVERITY = new Set(["info", "warning", "error", "critical"]);
 
 // 설계 §4.3 정규화 + §4.4 dedup. POST /api/hooks/:app — 외부 모니터링(grafana 등) webhook 수신.
-// 두 트리거 경로 중 webhook 경로(대화형 위임과 1급 동등): 정규화→severity gate→**실제 HuginnIssue 위임**.
+// 두 트리거 경로 중 webhook 경로(대화형 위임과 1급 동등): 정규화→severity gate→dedup→**실제 HuginnIssue 위임**.
 // k8s 미연결(로컬)에서는 시뮬레이션 응답으로 graceful fallback.
-export async function POST(req: NextRequest, { params }: { params: { app: string } }) {
-  const body: any = await req.json().catch(() => ({}));
+//
+// 이벤트 인입 내구성(CONTRACT §5): 정규화 직후 inbound_event 에 즉시 영속하고, 처리 결과(위임/dedup/
+// 실패)를 markInboundEvent 로 갱신한다. 동기 CR 생성(위임)이 실패해도 원본 이벤트가 남아 재처리 가능하다.
+export async function POST(req: NextRequest, props: { params: Promise<{ app: string }> }) {
+  const params = await props.params;
+  const denied = await requireAuth(req);
+  if (denied) return denied;
 
-  const fingerprint = body.fingerprint || body.labels?.alertname || "Unknown";
-  const severity = body.severity || body.labels?.severity || "warning";
-  const title = body.title || body.annotations?.summary || "alert";
-  const source: "grafana" | "airflow" | "argocd" = body.source || "grafana";
-  const slug = String(fingerprint).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const body: any = await req.json().catch(() => ({}));
+  if (!body || typeof body !== "object") return badRequest("invalid JSON body");
+
+  // 입력 정규화 + 검증. fingerprint/title 은 문자열로 강제, source/severity 는 화이트리스트.
+  const fingerprint = String(body.fingerprint || body.labels?.alertname || "Unknown").slice(0, 200);
+  const rawSeverity = String(body.severity || body.labels?.severity || "warning");
+  const severity = (ALLOWED_SEVERITY.has(rawSeverity) ? rawSeverity : "warning") as "info" | "warning" | "error" | "critical";
+  const title = String(body.title || body.annotations?.summary || "alert").slice(0, 200);
+  const rawSource = String(body.source || "grafana");
+  const source: "grafana" | "airflow" | "argocd" = (ALLOWED_SOURCES.has(rawSource) ? rawSource : "grafana") as "grafana" | "airflow" | "argocd";
+  const slug = fingerprint.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   const event = {
     id: "e_" + slug,
@@ -26,8 +46,29 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
     payload: body,
   };
 
+  // 내구성(CONTRACT §5): 처리(severity gate/dedup/위임) 전에 원본 이벤트를 먼저 영속한다.
+  // 기록 실패는 처리를 막지 않는다(best-effort) — DB 미설정/장애 시 in-memory 처리로 진행.
+  let inboundId: number | null = null;
+  if (dbEnabled()) {
+    try {
+      inboundId = await recordInboundEvent({ app: params.app, source, severity, fingerprint, title, payload: body });
+    } catch (e) {
+      console.warn("[hooks] inbound_event 기록 실패(처리는 계속):", e instanceof Error ? e.message : e);
+    }
+  }
+  // 처리 결과로 인입 이벤트 상태를 종결한다(best-effort; 실패해도 응답엔 영향 없음).
+  const mark = async (status: InboundEventStatus, extra?: { issueName?: string | null; failReason?: string | null }) => {
+    if (inboundId == null) return;
+    try {
+      await markInboundEvent(inboundId, { status, ...extra });
+    } catch {
+      // 상태 갱신 실패 — 레코드는 'received' 로 남아 재처리 대상이 된다(유실보다 안전).
+    }
+  };
+
   // severity gate(앱 임계값 MVP="warning").
   if (!severityGte(severity, "warning")) {
+    await mark("below-threshold");
     return ok({ accepted: false, reason: "below-threshold", event, issueId: null, dedupCount: 0 });
   }
 
@@ -45,12 +86,28 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
     });
   }
 
+  // dedup(설계 §4.4) — 동일 event-fingerprint 의 활성 HuginnIssue 가 있으면 새 Issue/Run 생성 대신
+  // 기존 Issue 의 status.dedupCount 를 +1 한다(중복 처리 폭주 방지). delegateIncident 와 동일한
+  // fingerprint 문자열→label-safe 정규화를 거쳐 같은 라벨을 보게 한다.
+  const fp = eventFingerprint(source, `${source}:${slug}`, goal);
+  const fpLabel = fingerprintLabelOf(fp);
+  const dedup = await dedupActiveIssue(params.app, fpLabel);
+  if (dedup.hit) {
+    await mark("deduped", { issueName: dedup.issueName ?? null });
+    return ok({
+      accepted: true, reason: "dedup-hit", event,
+      issueId: dedup.issueName, dedupCount: dedup.dedupCount ?? 0, persisted: true,
+    });
+  }
+
   // 실제 위임 — 대화형 경로와 동일한 delegateIncident(출처만 webhook).
   const res = await delegateIncident({
     app: params.app, goal, source, severity,
     fingerprint: `${source}:${slug}`, title,
   });
   if (!res.ok) {
+    // CR 생성 실패 — 인입 이벤트를 'failed'(+사유)로 마킹해 재처리 가능하게 한다(유실 방지, CONTRACT §5).
+    await mark("failed", { failReason: res.reason ?? "delegate-failed" });
     // 위임 실패는 외부 발신자(Grafana/Alertmanager 등)가 인지·재시도할 수 있도록 비-2xx 로 응답한다.
     // (k8s-disabled 는 위 !k8sEnabled() 분기에서 이미 200 시뮬레이션으로 처리되므로 여기 도달하지 않는다.)
     if (res.reason === "agent-not-found") {
@@ -58,6 +115,7 @@ export async function POST(req: NextRequest, { params }: { params: { app: string
     }
     return serverError(`위임 실패: ${res.reason}`, res.error);
   }
+  await mark("delegated", { issueName: res.issueName ?? null });
   return ok({
     accepted: true, reason: "new", event,
     issueId: res.issueName, namespace: res.namespace, incidentRecorded: res.incidentRecorded, persisted: true,

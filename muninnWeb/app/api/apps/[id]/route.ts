@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { ok, notFound, badRequest } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { APPS, EVENTS, RECENT_RUNS } from "@/lib/data";
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const { id } = params;
   const app: any = APPS.find((a) => a.id === id);
   if (!app) return notFound("application not found");
@@ -15,7 +17,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 // HuginnAgent 설정(에이전트 런타임 + 자격) 수정.
 // 데모 mock: 비영속. 시크릿 '값'은 절대 저장/응답하지 않고, 등록/해제 키만 반영한다(§6.2).
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  // HuginnAgent 설정 수정(상태변경) — 콘솔+머신 둘 다 허용(CONTRACT §C2).
+  const denied = await requireAuth(req);
+  if (denied) return denied;
+  const params = await props.params;
   const { id } = params;
   const app: any = APPS.find((a) => a.id === id);
   if (!app) return notFound("application not found");

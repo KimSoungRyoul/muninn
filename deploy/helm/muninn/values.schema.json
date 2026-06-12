@@ -116,6 +116,37 @@
           "type": "object",
           "properties": { "existingSecret": { "type": "string" } }
         },
+        "apiToken": {
+          "type": "object",
+          "properties": {
+            "existingSecret": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": { "type": "boolean" },
+            "name": { "type": "string" },
+            "annotations": { "type": "object" },
+            "automount": { "type": "boolean" }
+          }
+        },
+        "rbac": {
+          "type": "object",
+          "properties": { "create": { "type": "boolean" } }
+        },
+        "namespaceOverride": { "type": "string" },
+        "workspace": { "type": "string" },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "issuer": { "type": "string" },
+            "audience": { "type": "string" },
+            "jwksUri": { "type": "string" },
+            "operatorGroup": { "type": "string" }
+          }
+        },
         "ingress": {
           "type": "object",
           "properties": {
@@ -159,6 +190,15 @@
       "type": "object",
       "properties": {
         "managedByHelm": { "type": "boolean" }
+      }
+    },
+    "metaDb": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "existingSecret": { "type": "string" },
+        "uriKey": { "type": "string", "minLength": 1 }
       }
     },
     "externalPostgresql": {

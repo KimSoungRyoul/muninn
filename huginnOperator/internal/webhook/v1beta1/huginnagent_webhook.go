@@ -18,6 +18,7 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -47,7 +48,10 @@ func SetupHuginnAgentWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/mutate-muninn-io-v1beta1-huginnagent,mutating=true,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1beta1,name=mhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
+// versions=v1;v1beta1(리뷰 LOW): CRD 는 v1(storage)+v1beta1(served·deprecated) 둘 다 served 이고
+// conversion=None(스키마 1:1 동일)이라, v1 으로 직접 CREATE/UPDATE 하는 요청도 동일 defaulter/validator 를
+// 거쳐야 한다. 한 버전만 등록하면 다른 버전 직행 요청이 admission 을 우회해 workspaceId==namespace 강제가 뚫린다.
+// +kubebuilder:webhook:path=/mutate-muninn-io-v1beta1-huginnagent,mutating=true,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1;v1beta1,name=mhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
 
 // HuginnAgentCustomDefaulter 는 생성/수정 시 기본값을 채운다.
 type HuginnAgentCustomDefaulter struct{}
@@ -66,7 +70,8 @@ func (d *HuginnAgentCustomDefaulter) Default(_ context.Context, obj *muninniov1b
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-muninn-io-v1beta1-huginnagent,mutating=false,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1beta1,name=vhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
+// versions=v1;v1beta1: v1(storage) 직행 CREATE/UPDATE 도 검증을 거치게 한다(위 mutating 마커와 동일 이유).
+// +kubebuilder:webhook:path=/validate-muninn-io-v1beta1-huginnagent,mutating=false,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1;v1beta1,name=vhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
 
 // HuginnAgentCustomValidator 는 HuginnAgent 의 불변/필수 규칙을 검증한다.
 type HuginnAgentCustomValidator struct{}
@@ -108,6 +113,16 @@ func validateAgent(obj *muninniov1beta1.HuginnAgent) error {
 	var errs field.ErrorList
 	if obj.Spec.WorkspaceID == "" {
 		errs = append(errs, field.Required(field.NewPath("spec", "workspaceId"), "workspaceId is required"))
+	}
+	// 멀티테넌시 강제(CONTRACT §2, operator-design §3.1): "워크스페이스 = K8s 네임스페이스".
+	// workspaceId 와 CR 이 사는 metadata.namespace 가 일치해야 한다 — 한 namespace 안에서 다른
+	// workspace 라벨을 단 CR 로 격리 selector(muninn.io/workspace)를 우회하는 것을 막는다.
+	// obj.Namespace 가 비어 있을 수 있는 경로(예: 단위 테스트의 빈 객체)에서는 검사하지 않고,
+	// namespace 가 채워진 실제 admission(API server 가 항상 채움)에서만 일치를 강제한다.
+	if obj.Spec.WorkspaceID != "" && obj.Namespace != "" && obj.Spec.WorkspaceID != obj.Namespace {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec", "workspaceId"), obj.Spec.WorkspaceID,
+			fmt.Sprintf("workspaceId must equal metadata.namespace %q (workspace = namespace)", obj.Namespace)))
 	}
 	if !agentNameRe.MatchString(obj.Name) {
 		errs = append(errs, field.Invalid(

@@ -52,13 +52,17 @@ type JobTemplate struct {
 }
 
 // HuginnRunSpec defines the desired state of HuginnRun.
+// 생성 후 불변(non-idempotent 실행 계약, 핵심 계약 #2): issueRef/attempt/jobTemplate 는
+// Job 생성 후 갱신해도 Pod 에 반영되지 않으므로(controller 는 Job 을 갱신하지 않음) CEL 로 immutable 강제한다.
 type HuginnRunSpec struct {
 	// issueRef: 부모 HuginnIssue 의 metadata.name
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="issueRef is immutable"
 	IssueRef string `json:"issueRef"`
 	// attempt: 1부터. 재시도 시 새 Run(attempt N+1)으로 증가.
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="attempt is immutable"
 	Attempt int32 `json:"attempt"`
 
 	// timeoutSeconds → Job.spec.activeDeadlineSeconds (기본 3600)
@@ -72,7 +76,8 @@ type HuginnRunSpec struct {
 	// +optional
 	TTLSecondsAfterFinished int32 `json:"ttlSecondsAfterFinished,omitempty"`
 
-	// jobTemplate: Pod 실행 recipe
+	// jobTemplate: Pod 실행 recipe. Job 생성 후 불변(갱신해도 Pod 미반영; 위 주석 참고).
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="jobTemplate is immutable"
 	JobTemplate JobTemplate `json:"jobTemplate"`
 
 	// suspend: true 면 Operator 가 Job 을 삭제하고 phase=Cancelled 로 전이(operator-design §2.3).
@@ -135,6 +140,12 @@ type ApprovalStatus struct {
 	ExpiresAt *metav1.Time `json:"expiresAt,omitempty"`
 	// +optional
 	DecidedBy string `json:"decidedBy,omitempty"`
+	// decidedAt: 승인/거절 결정 시각(ISO8601). Muninn API(approve/reject route)가 기록(§6.4).
+	// +optional
+	DecidedAt *metav1.Time `json:"decidedAt,omitempty"`
+	// reason: 거절 사유(reject 시). Muninn API 가 기록(§6.4).
+	// +optional
+	Reason string `json:"reason,omitempty"`
 }
 
 // HuginnRunStatus defines the observed state of HuginnRun.
@@ -184,6 +195,7 @@ type HuginnRunStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:deprecatedversion:warning="muninn.io/v1beta1 is deprecated; migrate to muninn.io/v1"
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=hrun
 // +kubebuilder:printcolumn:name="Issue",type=string,JSONPath=`.spec.issueRef`

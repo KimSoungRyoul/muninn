@@ -6,6 +6,7 @@
 
 import { NextRequest } from "next/server";
 import { ok, created, badRequest } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { delegateIncident, queryIncidents } from "@/lib/incidents";
 
 export const runtime = "nodejs";
@@ -20,6 +21,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // 위임(=비멱등 에이전트 실행 유발) — 상태변경. 콘솔+머신 둘 다 허용(CONTRACT §C2).
+  const denied = await requireAuth(req);
+  if (denied) return denied;
   let body: any;
   try {
     body = await req.json();

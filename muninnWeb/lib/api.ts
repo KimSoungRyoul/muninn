@@ -15,11 +15,24 @@ export function notFound(message = "Not found") {
 export function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
+// 내부 detail 은 클라이언트로 새지 않게 서버 로그로만 남기고, 응답엔 일반 메시지 + correlation id 만 준다.
+// (detail 에는 스택/내부 호스트/RBAC 사유 등 민감 정보가 들어올 수 있다.)
 export function serverError(message: string, detail?: unknown) {
-  return NextResponse.json(
-    { error: message, detail: detail instanceof Error ? detail.message : detail },
-    { status: 500 },
-  );
+  const correlationId = `err_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  if (detail !== undefined) {
+    console.error(`[muninn][serverError][${correlationId}] ${message}`, detail instanceof Error ? detail.stack ?? detail.message : detail);
+  } else {
+    console.error(`[muninn][serverError][${correlationId}] ${message}`);
+  }
+  return NextResponse.json({ error: message, correlationId }, { status: 500 });
+}
+
+export function conflict(message: string, extra?: Record<string, unknown>) {
+  return NextResponse.json({ error: message, ...(extra ?? {}) }, { status: 409 });
+}
+
+export function unauthorized(message = "unauthorized") {
+  return NextResponse.json({ error: message }, { status: 401 });
 }
 
 // ---- API 응답 타입 ----

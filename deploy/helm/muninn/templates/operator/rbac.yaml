@@ -9,8 +9,11 @@ metadata:
   labels:
     {{- include "muninn.operator.labels" . | nindent 4 }}
 rules:
+# pods 만 cluster-wide read(Job pod 관측). configmaps/secrets 의 cluster-wide read 는 제거됐다 —
+# agent 의 SOUL/이벤트 페이로드/인증 Secret 접근은 operator 가 아니라 agent SA 의 namespace 한정 Role
+# (huginnagent_controller.ensureAgentRBAC)이 담당한다(최소권한; 원본 role.yaml 과 동기화).
 - apiGroups: [""]
-  resources: [configmaps, pods, secrets]
+  resources: [pods]
   verbs: [get, list, watch]
 - apiGroups: [""]
   resources: [events]
@@ -33,9 +36,8 @@ rules:
 - apiGroups: [muninn.io]
   resources: [huginnagents/status, huginnissues/status, huginnruns/status]
   verbs: [get, patch, update]
-- apiGroups: [rbac.authorization.k8s.io]
-  resources: [rolebindings, roles]
-  verbs: [create, get, list, patch, watch]
+# 주의: rolebindings/roles 권한은 두지 않는다 — operator 는 agent SA 에 namespace Role 을 더 이상 만들지 않는다
+# (agent 는 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않음). config/rbac/role.yaml 과 동기.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

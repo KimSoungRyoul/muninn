@@ -5,16 +5,23 @@
 // 데이터/상태를 만지는 도구는 전부 여기(server)로 모은다 — mock 이 아니라 실 데이터/위임이다.
 //
 // 설계: muninn-goal-conversational-delegation.md §6(도구 목록). 오케스트레이션 루프:
-//   recall_memory → delegate_incident → get_run_status(폴링) → approve_run → store_memory/summarize.
+//   recall_memory → delegate_incident → get_run_status(폴링) → (운영자 콘솔 승인) → store_memory/summarize.
+//
+// **자율 승인 게이트(리뷰 HIGH)**: 모델이 위험 액션을 사람 확인 없이 자율 실행하면 안 된다.
+//   - delegate_incident: 불가역 위임이라 confirmed=true(사용자 동의)일 때만 실행 — 미설정 시 확인 요청만 반환(아래 게이트).
+//   - approve_run / reject_run: 가장 위험한 사람-결정(예: PR 생성 승인)이라 **코파일럿 server tool 에서 제거**하고
+//     콘솔 전용(/api/runs/[id]/approve|reject + 콘솔 UI)으로 격리한다. 코파일럿은 승인 대기를 안내하고
+//     open_run(frontend tool)으로 해당 run 콘솔로 안내만 하며, 승인/거절은 운영자가 콘솔에서 직접 누른다(HITL).
 
 import { defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
 import { dbEnabled, recall, store, summarize, listIncidents } from "./db";
 import {
   listApplications, getApplicationCr, queryIncidents, listRunsVM, getRunStatus, getIssueRuns,
-  delegateIncident, approveRun, rejectRun,
+  delegateIncident,
 } from "./incidents";
 import { k8sEnabled } from "./k8s";
+import { getCopilotWorkspace } from "./workspace";
 
 const K8S_OFF = { error: "k8s-disabled", note: "이 muninnWeb 인스턴스는 클러스터에 연결돼 있지 않습니다(로컬 dev). 위임/조회는 kind/클러스터 배포에서 동작합니다." };
 const DB_OFF = { error: "db-disabled", note: "메모리(postgres)가 설정되지 않았습니다(DATABASE_URL 미설정). 검색/저장은 DB 연결 시 동작합니다." };
@@ -34,7 +41,8 @@ export const muninnServerTools = [
     }),
     execute: async ({ query, scope, app, k }) => {
       if (!dbEnabled()) return DB_OFF;
-      const rows = await recall(query, { scope, appId: app, k });
+      // 멀티테넌시(§C3/§4): 요청 컨텍스트(ALS)의 workspace 로 격리 — 미설정 시 서버 기본값.
+      const rows = await recall(query, { workspace: getCopilotWorkspace(), scope, appId: app, k });
       return { count: rows.length, items: rows };
     },
   }),
@@ -53,7 +61,8 @@ export const muninnServerTools = [
     execute: async ({ fact, scope, app, tags, sourceRunId }) => {
       if (!dbEnabled()) return DB_OFF;
       if (!fact) return { error: "bad_input", note: "fact 는 필수입니다." };
-      const row = await store({ fact, scope, appId: app ?? null, appName: app ?? null, tags, sourceRunId: sourceRunId ?? null, changedBy: "copilot" });
+      // 멀티테넌시(§C3/§4): 요청 컨텍스트(ALS)의 workspace 로 격리 저장 — 미설정 시 서버 기본값.
+      const row = await store({ fact, workspace: getCopilotWorkspace(), scope, appId: app ?? null, appName: app ?? null, tags, sourceRunId: sourceRunId ?? null, changedBy: "copilot" });
       return { stored: row };
     },
   }),
@@ -191,24 +200,10 @@ export const muninnServerTools = [
       return res ?? { error: "not_found", issueName };
     },
   }),
-  defineTool({
-    name: "approve_run",
-    description: "승인 대기(AwaitingApproval) 실행을 승인한다(예: PR 생성 승인). 되돌릴 수 없으니 먼저 사용자에게 알린 뒤 호출.",
-    parameters: z.object({ runId: z.string(), decidedBy: z.string().optional() }),
-    execute: async ({ runId, decidedBy }) => {
-      if (!runId) return { error: "bad_input", note: "runId 는 필수입니다." };
-      const res = await approveRun(runId, decidedBy);
-      return res.ok ? res : K8S_OFF;
-    },
-  }),
-  defineTool({
-    name: "reject_run",
-    description: "승인 대기 실행을 거절하고 중단(suspend)한다. 되돌릴 수 없으니 먼저 사용자에게 알린 뒤 호출.",
-    parameters: z.object({ runId: z.string(), reason: z.string().optional(), decidedBy: z.string().optional() }),
-    execute: async ({ runId, reason, decidedBy }) => {
-      if (!runId) return { error: "bad_input", note: "runId 는 필수입니다." };
-      const res = await rejectRun(runId, reason, decidedBy);
-      return res.ok ? res : K8S_OFF;
-    },
-  }),
+  // ---- 승인/거절은 의도적으로 코파일럿 server tool 에서 제거함(리뷰 HIGH; 자율 승인 게이트) ----
+  // approve_run / reject_run 은 가장 위험한 불가역 사람-결정(예: PR 생성 승인)이다. 모델이 자율로
+  // 호출하면 human-in-the-loop 이 무력화되므로, 콘솔 전용(/api/runs/[id]/approve|reject + 콘솔 UI)으로
+  // 격리한다. 코파일럿은 승인 대기 run 을 안내하고 open_run(frontend tool, components/muninn-copilot.tsx)으로
+  // 해당 run 콘솔로 데려가며, 승인/거절은 운영자가 콘솔에서 직접 누른다. get_run_status 로 결정 후 상태만
+  // 다시 폴링한다. (delegate_incident 는 confirmed 게이트가 있어 코파일럿에 남겨둔다.)
 ];

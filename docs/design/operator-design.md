@@ -1,8 +1,10 @@
 # Huginn Operator — 설계 검토 & 구체화
 
-> **상태**: Draft v0.1 · 2026-06-03
+> **상태**: Draft v0.3 · 2026-06-12 (멀티테넌시 admission `workspaceId==namespace` 강제, AwaitingApproval→Running 복귀, `MUNINN_WORKSPACE` 주입, CRD v1 보류 정책 반영)
 > **범위**: 메인 설계서(`muninn-devops-agent-platform.md`) §2~§6 의 Operator 부분을 **구현 가능한 수준**으로 구체화하고, 발견한 모순/공백을 해소한다.
-> **결론 요약**: Operator 는 **Go + kubebuilder(controller-runtime)** 로 구현한다. CRD 3종에 controller 3개 + HuginnApplication ValidatingWebhook 1개. 재시도/상태소유권/취소 전파 등 설계서가 모호하게 남긴 4개 지점을 아래에서 확정한다.
+> **결론 요약**: Operator 는 **Go + kubebuilder(controller-runtime)** 로 구현한다. CRD 3종에 controller 3개 + HuginnAgent ValidatingWebhook 1개. 재시도/상태소유권/취소 전파 등 설계서가 모호하게 남긴 4개 지점을 아래에서 확정한다.
+>
+> **명칭 주의**: 구 명칭 `HuginnApplication`/`spec.applicationRef` 는 메인 스펙 v0.3 에서 **`HuginnAgent`/`spec.agentRef`** 로 확정됐다. 코드도 `HuginnAgentReconciler`/`agentRef` 다. 아래 본문의 잔존 표기는 모두 `HuginnAgent`/`agentRef` 로 읽어라.
 
 ---
 
@@ -19,8 +21,8 @@
 
 **트레이드오프**: kopf 는 Memory Service(FastAPI/Python)와 언어를 통일한다는 장점(§11-6)이 있으나, 위 표의 K8s-native 요구가 압도적으로 많고 모두 Go 생태계에서 1급으로 지원된다. Operator 는 Memory Service 와 코드 공유가 거의 없는 별도 배포 단위이므로 언어 통일 이점은 작다. → **Go + kubebuilder 확정.**
 
-- 버전: kubebuilder v4, controller-runtime(최신), Go 1.26.
-- API: `group=muninn.io`, `version=v1beta1`(설계서 네이밍 규칙).
+- 버전: kubebuilder v4, controller-runtime v0.24.1, k8s.io/* v0.36.1, Go 1.26.
+- API: `group=muninn.io`, `version=v1beta1`(설계서 네이밍 규칙). **현재 `v1beta1` 단일 버전**(served+storage). CRD `v1` 승격(conversion webhook)은 **보류** — 사유·체크리스트는 [`../../huginnOperator/docs/crd-versioning.md`](../../huginnOperator/docs/crd-versioning.md). 이번 PR 은 버저닝/디프리케이션 정책 doc-comment(`api/v1beta1/groupversion_info.go`) + 전략 문서로 **기반만 마련**했고, v1 패키지·conversion 은 아직 없다.
 - 모듈 경로: `github.com/KimSoungRyoul/muninn/huginnOperator`.
 
 ---
@@ -28,11 +30,13 @@
 ## 1. Controller ↔ 리소스 watch 토폴로지
 
 ```
-HuginnApplicationReconciler
-  For:   HuginnApplication
-  Owns:  PersistentVolumeClaim, ServiceAccount   (앱별 격리 리소스, §5.5/§6.1)
-  Watch: HuginnIssue (→ owner App 으로 enqueue, status.activeIssues 재계산, §8.4)
-  할 일: webhookUrl 발급(§4.5) · bindings 검증 · 앱 PVC/SA 보장 · activeIssues/conditions
+HuginnAgentReconciler
+  For:   HuginnAgent
+  Owns:  PersistentVolumeClaim   (앱별 격리 리소스, §5.5)
+  ※ ServiceAccount(huginn-agent)는 ensure 하되 Owns 하지 않는다 — namespace 공용 SA 라
+    Agent 삭제 시 같이 GC 되면 다른 Run/Agent 가 깨진다(premature GC 방지; 코드 정정).
+  Watch: HuginnIssue (→ owner Agent 로 enqueue, status.activeIssues 재계산, §8.4)
+  할 일: webhookUrl 발급(§4.5) · bindings 검증 · 앱 PVC 보장 · SA(비소유) 보장 · activeIssues/conditions
 
 HuginnIssueReconciler
   For:   HuginnIssue
@@ -48,7 +52,7 @@ HuginnRunReconciler
          · Job 상태 → Run.status.phase 매핑 · timeout/ttl 을 Job 네이티브 필드로 위임 · suspend 시 Job 삭제
 ```
 
-**field indexer**(reconcile 성능): `HuginnIssue.spec.applicationRef`, `HuginnRun.spec.issueRef` 에 인덱스를 건다. `Owns()` 가 자동 생성하는 ownerRef 역참조와 별개로, 이름 기반 cross-ref 조회에 사용.
+**field indexer**(reconcile 성능): `HuginnIssue.spec.agentRef`, `HuginnRun.spec.issueRef` 에 인덱스를 건다. `Owns()` 가 자동 생성하는 ownerRef 역참조와 별개로, 이름 기반 cross-ref 조회에 사용.
 
 ---
 
@@ -92,7 +96,7 @@ HuginnRunReconciler
 
 **충돌 회피 메커니즘**: 두 writer 모두 **status subresource 만** 패치하고, 각자 **자기 필드만** 패치(JSON Merge Patch/SSA field manager 분리). Operator 는 진행 메트릭(step/cost/...)을 **절대 0 으로 덮어쓰지 않는다**(reconcile 시 해당 필드는 read-only 취급). 이를 위해 Operator 의 Run reconcile 은 status 패치 시 `phase/startedAt/finishedAt/conditions` 만 갱신하는 부분 패치를 사용.
 
-> AwaitingApproval ↔ Pod Running 공존: 승인 대기 중에도 Pod 는 살아 에이전트가 결정을 폴링한다. Operator 는 Pod=Running 인데 phase=AwaitingApproval 이어도 **phase 를 Running 으로 되돌리지 않는다**(API 소유 전이 존중). Job 이 종료되면 그때만 Succeeded/Failed 로 전이.
+> AwaitingApproval ↔ Pod Running 공존 (**구현됨**): 승인 대기 중에도 Pod 는 살아 에이전트(runner.py)가 `GET /api/runs/{id}` 로 결정을 폴링한다. 승인 시 **Muninn API 는 `approval.state=Approved` 만 쓰고 `phase` 는 건드리지 않으며**, Operator 가 다음 reconcile 에서 `phase=AwaitingApproval && approval.state=Approved` 를 관측하면 **`phase` 를 `Running` 으로 복귀**시킨다(`huginnrun_controller.go` `mapJobToRunStatus`; condition `reason=Approved`). 아직 Pending 이면 phase 를 보존만 한다. status 패치는 `MergeFromWithOptimisticLock` 으로 두 writer 경합을 409→requeue 로 처리. Job 이 종료되면 그때만 Succeeded/Failed 로 전이.
 
 ### 2.3 취소/거절 전파 — `spec.suspend`
 
@@ -106,12 +110,12 @@ HuginnRunReconciler
 
 | 리소스 | 생성/보장 주체 | 비고 |
 |---|---|---|
-| Namespace `ns-{workspace-slug}` | **Operator 범위 밖(MVP)**. 플랫폼 admin / Muninn API 가 사전 provision | 차기: WorkspaceReconciler 후보. Operator 는 App.namespace ↔ workspaceId 정합만 검증 |
-| 앱 PVC `pvc-claude-{app}` (`~/.claude`) | **HuginnApplicationReconciler** (Owns) | §5.5 MVP=앱별 격리 PVC. accessMode 는 설정(RWO 기본, 동시 Run 시 RWX) |
-| ServiceAccount `huginn-agent-{ns}` | **HuginnApplicationReconciler** (Owns) | 자기 ns Secret/CM 만 read(§6.1) |
+| Namespace `ns-{workspace-slug}` | **Operator 범위 밖**. 플랫폼 admin / Muninn API 가 사전 provision | 차기: WorkspaceReconciler 후보. **App.namespace ↔ workspaceId 정합은 validating webhook 이 강제(구현됨, §4)** — `spec.workspaceId == metadata.namespace` 불일치 시 거부 |
+| 앱 PVC `pvc-claude-{app}` (`~/.claude`) | **HuginnAgentReconciler** (Owns) | §5.5 MVP=앱별 격리 PVC. accessMode 는 설정(RWO 기본, 동시 Run 시 RWX) |
+| ServiceAccount `huginn-agent` | **HuginnAgentReconciler** (ensure, **비소유**) | 자기 ns Secret/CM 만 read(§6.1). namespace 공용이라 Owns 하지 않는다(premature GC 방지) |
 | guardrails/context ConfigMap | **HuginnRunReconciler** 또는 env 직접 주입 | MVP=env 직접(`MUNINN_GUARDRAILS` JSON), CM 은 global-prompt/team-settings/soul 만 |
 | Job (→Pod) | **HuginnRunReconciler** (Owns) | jobTemplate.podSpec 기반 |
-| event Secret `{issue}-event` | **Muninn API** (CR 생성 시 함께) | Operator 는 참조만 |
+| event Secret `{issue}-event` | **Muninn API** (CR 생성 시 함께) | **Secret 생성은 미구현(후속)**. 다만 인입 이벤트는 metaDB `inbound_event` 테이블에 영속된다(원본 payload 는 평문 text, dedup·재처리·감사용 — 메인 스펙 §4.4). 원본 payload 를 Secret 으로 격리하는 것은 후속. Operator 는 참조만 |
 
 ### 2.5 에이전트 env 주입 — Issue 단위 + Run 단위
 
@@ -120,7 +124,7 @@ HuginnRunReconciler
 - **Issue 단위**(`buildJobTemplate`, Issue→Run 생성 시): `MUNINN_GOAL`, `MUNINN_GUARDRAILS`(JSON),
   `MUNINN_MEMORY_ENDPOINT`/`MUNINN_API_ENDPOINT`(= muninnWeb, operator env 로 설정), 자격(Secret), SOUL/payload 참조.
 - **Run 단위**(`runScopedEnv`, Job 생성 시 — Run 이름이 확정되는 시점): `MUNINN_RUN_NAME`, `MUNINN_ISSUE_NAME`,
-  `MUNINN_AGENT_NAME`(= app, 메모리 scope), `MUNINN_NAMESPACE`, `MUNINN_ATTEMPT`, `MUNINN_PR_MODE`(기본 `dry-run`).
+  `MUNINN_AGENT_NAME`(= app, 메모리 scope), `MUNINN_NAMESPACE`, `MUNINN_WORKSPACE`(멀티테넌시 경계 — `muninn.io/workspace` 라벨 우선, 누락 시 `run.Namespace` 폴백; runner.py 가 메모리 store/recall 에 동봉해 테넌트 간 기억 누수 차단), `MUNINN_ATTEMPT`, `MUNINN_PR_MODE`(기본 `dry-run`).
 
 에이전트(runner.py)는 이 env 로 **회상→보고→기억화**를 수행한다(보고 계약은 `muninn-goal-conversational-delegation.md` §8):
 `POST {MUNINN_MEMORY_ENDPOINT}/api/memories/recall`(위임 직전 회상) → `POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report`
@@ -139,13 +143,13 @@ HuginnRunReconciler
 
 ## 4. Admission Webhook 범위 (§3.1)
 
-`HuginnApplication` ValidatingWebhook + Defaulting:
+`HuginnAgent` ValidatingWebhook + Defaulting:
 
 - **Validating(순수, 외부 의존 없음)**:
   - `spec.workspaceId` required & **immutable**(update 시 변경 거부).
   - `metadata.name` 형식 `^[a-z0-9-]+$`(CRD OpenAPI 패턴과 이중 방어).
   - `spec.output ∈ {pull_request, github_issue}`, `spec.kind ∈ {triton,fastapi,airflow,other}` (CRD enum 과 이중).
-  - (선택) `metadata.namespace` 가 workspaceId 규약과 정합한지.
+  - **`spec.workspaceId == metadata.namespace` 강제(구현됨)** — 워크스페이스=네임스페이스. 불일치 시 거부, 빈 workspaceId 거부. (단위테스트 컨텍스트처럼 `metadata.namespace` 가 빈 경우만 이 매칭을 건너뜀.)
 - **Defaulting**: 라벨 `muninn.io/workspace=<workspaceId>` 자동 주입(selector 보조, §3.1).
 - **멤버십(owner|member) 검증은 webhook 에 넣지 않는다**: metaDB 조회가 필요해 webhook 가 DB 가용성에 의존하게 되고, webhook 다운 시 모든 CR 연산이 막힌다(가용성 리스크). **CR 생성자인 Muninn API 가 이미 사용자 인증 후 멤버십을 검사**하므로 그 계층에서 집행. (webhook 는 인증 주체를 신뢰할 수 없는 경우의 최후 방어선이지만, 본 플랫폼은 API 가 유일 생성 경로이므로 API 검증으로 충분.)
 
@@ -192,11 +196,12 @@ Issue.phase = Run 들의 집계:
 - [x] CRD/RBAC 매니페스트 생성(`make manifests`)
 - [x] HuginnRunReconciler: Run→Job 생성, env/volume 주입, Job→phase 매핑, suspend→Cancel
 - [x] HuginnIssueReconciler: Issue→Run(attempt 1) 생성, run phase 집계, 재시도(maxRuns)
-- [x] HuginnApplicationReconciler: webhookUrl 발급, PVC/SA 보장, activeIssues 집계
-- [x] HuginnApplication ValidatingWebhook(workspaceId required/immutable) + Defaulting(label)
-- [x] field indexer(issueRef/applicationRef), Owns 토폴로지
+- [x] HuginnAgentReconciler: webhookUrl 발급, PVC/SA 보장, activeIssues 집계
+- [x] HuginnAgent ValidatingWebhook(workspaceId required/immutable + **`workspaceId==namespace` 강제**) + Defaulting(label) + 단위테스트(`huginnagent_validation_test.go`)
+- [x] **AwaitingApproval API 연동**: API 가 `approval.state` 만 쓰고 Operator 가 Approved 관측 시 phase→Running 복귀(§2.2), `MUNINN_WORKSPACE` Run env 주입(§2.5)
+- [x] field indexer(issueRef/agentRef), Owns 토폴로지
 - [x] `make build` 컴파일 통과
-- [ ] (차기) envtest 단위테스트, e2e(kind), finalizer 활성화, AwaitingApproval API 연동, 멤버십(API)
+- [ ] (차기) e2e(kind), finalizer 활성화, 만료 자동집행 데몬, 멤버십 검증(API), CRD v1 conversion(보류 — crd-versioning.md)
 
 ---
 

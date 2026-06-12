@@ -16,6 +16,7 @@ import type { NextRequest } from "next/server";
 import { anthropicProvider, COPILOT_MODEL } from "@/lib/copilot-anthropic";
 import { MUNINN_COPILOT_SYSTEM } from "@/lib/copilot-system";
 import { muninnServerTools } from "@/lib/copilot-tools";
+import { runWithCopilotWorkspace, workspaceFromRequest } from "@/lib/workspace";
 
 // 런타임을 Node.js 에서 실행(streaming + 서버 fetch). Edge 아님.
 export const runtime = "nodejs";
@@ -41,5 +42,8 @@ export const POST = async (req: NextRequest) => {
     runtime: copilotRuntime,
     endpoint: "/api/copilotkit",
   });
-  return handleRequest(req);
+  // 멀티테넌시(§C3/§4): 요청별 workspace 를 ALS 에 담아 server tool(recall/store)이 격리된 테넌트로
+  // 읽고 쓰게 한다. workspaceFromRequest 가 인증 여부를 반영(미인증 콘솔은 서버 기본 workspace).
+  const workspace = await workspaceFromRequest(req);
+  return runWithCopilotWorkspace(workspace, () => handleRequest(req));
 };

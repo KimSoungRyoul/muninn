@@ -35,6 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	muninniov1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1"
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 	"github.com/KimSoungRyoul/muninn/huginnOperator/internal/controller"
 	webhookv1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/internal/webhook/v1beta1"
@@ -50,6 +51,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(muninniov1beta1.AddToScheme(scheme))
+	utilruntime.Must(muninniov1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -182,6 +184,11 @@ func main() {
 	if err := (&controller.HuginnAgentReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// webhookUrl base FQDN + 앱별 PVC 용량/StorageClass 를 env 로 배선(리뷰 MEDIUM).
+		// 비우면 컨트롤러가 기본값(defaultAPIBaseURL / 1Gi / 클러스터 기본 SC)을 쓴다.
+		APIBaseURL:       os.Getenv("MUNINN_API_BASE_URL"),
+		PVCSize:          os.Getenv("MUNINN_AGENT_PVC_SIZE"),
+		StorageClassName: os.Getenv("MUNINN_AGENT_STORAGE_CLASS"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnAgent")
 		os.Exit(1)
@@ -200,6 +207,12 @@ func main() {
 	if err := (&controller.HuginnRunReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// EventRecorder: 주요 전이(JobCreated/JobLost/Cancelled/Approved/IssueNotFound)를 K8s Event 로
+		// 발행해 kubectl describe 로 관측 가능하게 한다(리뷰 MEDIUM; events RBAC 는 이미 선언됨).
+		// 구 events API(record.EventRecorder)를 의도적으로 사용 — controller-runtime manager 가
+		// 신 events API recorder 를 직접 제공하지 않아(브로드캐스터 수동 구성 필요) 비용 대비 이득이 없다.
+		//nolint:staticcheck // SA1019: 구 events API 유지; 신 events API 마이그레이션은 별도 후속.
+		Recorder: mgr.GetEventRecorderFor("huginnrun-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnRun")
 		os.Exit(1)

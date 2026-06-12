@@ -35,6 +35,8 @@ linters:
     modernize:
       disable:
         - omitzero
+        # newexpr: go1.26 의 new(expr) 로 ptr.To(x) 치환 권장 — k8s 생태계 표준 관용구(ptr.To)를 유지한다.
+        - newexpr
   exclusions:
     generated: lax
     rules:

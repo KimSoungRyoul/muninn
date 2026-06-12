@@ -1,8 +1,13 @@
 # Muninn Quickstart — CloudNativePG metaDB + Helm
 
-Muninn 플랫폼을 kind/클러스터에 빠르게 올리는 경로. **metaDB(PostgreSQL+pgvector)는 Helm chart 가
+Muninn 플랫폼을 kind/클러스터에 빠르게 올리는 경로. **metaDB(PostgreSQL, 텍스트 검색 전용)는 Helm chart 가
 번들하지 않는다** — 운영(HA·백업·업그레이드)을 [CloudNativePG(CNPG)](https://cloudnative-pg.io/)
 operator 에 위임하고, chart 는 그 연결 Secret 만 가리킨다. chart 가 가벼워지고 DB 수명주기가 분리된다.
+
+> ⚠️ **operator/web 이미지는 아직 CI 미발행이다.** 아래 4단계를 기본 이미지 값 그대로 따라하면 operator/web 이
+> `ImagePullBackOff` 로 멈춘다. **가장 쉬운 경로는 루트 `make run-local`** — kind 생성·이미지 3종 빌드/적재·metaDB·
+> helm 설치를 한 번에 한다(README "Quick start" 참고). 아래 CNPG quickstart 를 직접 따라갈 때는 4단계의
+> 이미지 로컬 빌드·`kind load`·`--set *.image.*` override 를 반드시 함께 수행하라(chart README "로컬 이미지로 kind 설치").
 
 ```
 CNPG operator(외부 설치) ─▶ Cluster CR(muninn-metadb) ─▶ Pod(postgres)
@@ -42,13 +47,28 @@ kubectl -n muninn create secret generic agent-secrets \
   --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
 ```
 
-## 4) Helm 설치 (web 을 CNPG Secret 에 배선)
+## 4) 이미지 빌드 + load (CI 미발행이므로 필수)
+
+```bash
+# operator/web 이미지를 로컬 빌드해 kind 노드에 적재한다(완전수식 이름 → podman localhost/ 접두 회피).
+make -C huginnOperator image CONTAINER_TOOL=podman IMG=ghcr.io/kimsoungryoul/muninn/huginn-operator:dev
+make -C muninnWeb       image CONTAINER_TOOL=podman IMG=ghcr.io/kimsoungryoul/muninn/muninn-web:dev
+for img in huginn-operator muninn-web; do
+  podman save ghcr.io/kimsoungryoul/muninn/$img:dev -o /tmp/$img.tar
+  KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/$img.tar --name <cluster>
+done
+```
+
+## 5) Helm 설치 (web 을 CNPG Secret 에 배선 + 로컬 이미지 override)
 
 ```bash
 helm upgrade --install muninn deploy/helm/muninn -n muninn \
   --set metaDb.enabled=true \
   --set metaDb.existingSecret=muninn-metadb-app \
-  --set web.auth.existingSecret=muninn-web-secrets
+  --set web.auth.existingSecret=muninn-web-secrets \
+  --set operator.image.repository=ghcr.io/kimsoungryoul/muninn/huginn-operator \
+  --set operator.image.tag=dev --set operator.image.pullPolicy=IfNotPresent \
+  --set web.image.tag=dev --set web.image.pullPolicy=IfNotPresent
 ```
 
 `metaDb.enabled=true` 면 chart 가 muninn-web 에 `DATABASE_URL`(= CNPG Secret 의 `uri`)을 주입하고,
@@ -58,8 +78,8 @@ muninn-web 으로 보고/메모리 저장을 한다.
 
 ## 대안 — 경량(kind QA, operator 불필요)
 
-CNPG 없이 단일 postgres 로 빠르게 보려면 `muninnWeb/examples/kind-goal-e2e.yaml`(bare `pgvector/pgvector`
-Deployment + SA/RBAC). 운영/quickstart 의 권장 경로는 위 CNPG 방식이다.
+CNPG 없이 단일 postgres 로 빠르게 보려면 `muninnWeb/examples/kind-goal-e2e.yaml`(bare `postgres:16`
+Deployment + SA/RBAC — 텍스트 검색만 쓰므로 pgvector operand 불필요). 운영/quickstart 의 권장 경로는 위 CNPG 방식이다.
 
 ## 검증
 

@@ -1,0 +1,145 @@
+# muninnWeb(Muninn API + 콘솔) 이미지를 GitHub Packages(ghcr.io)로 빌드·발행한다.
+#   - PR            : build job 만 — amd64 단일 빌드 + trivy 스캔. 푸시 안 함.
+#   - main 푸시     : build(검증) → publish — latest + sha-<short> 태그로 멀티아치 push.
+#   - v* 태그 푸시  : build(검증) → publish — semver 태그로 push.
+#
+# 보안(agent-runtime-image.yml 과 동일 정책):
+#   - packages:write 는 publish job 에만 부여(최상위는 contents:read). PR 빌드에 쓰기 토큰 없음.
+#   - trivy: build 에서 로드된 이미지를 CRITICAL,HIGH 로 스캔(exit-code:0=리포트, ignore-unfixed:true).
+# uses 는 커밋 SHA 핀(태그 주석 병기). github-actions Dependabot 이 갱신.
+name: web-image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - muninnWeb/**
+      - .github/workflows/web-image.yml
+  pull_request:
+    paths:
+      - muninnWeb/**
+      - .github/workflows/web-image.yml
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/kimsoungryoul/muninn/muninn-web
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 검증: amd64 이미지를 로컬 적재(load)해 trivy 스캔. 푸시하지 않음(쓰기 토큰 없음). ──
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # SARIF 를 code-scanning 으로 업로드하려면 필요(아래 upload-sarif). 결과를 PR Security 탭에 노출.
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build amd64 image (load for scan)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ./muninnWeb
+          file: ./muninnWeb/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}:ci-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      # trivy 는 리포트 위주(exit-code:0). 게이트화(exit-code:1)는 후속 작업 — 현재 build 는
+      #   CRITICAL/HIGH 가 떠도 green 이고, publish(needs:build)가 그대로 push 한다. 즉 취약 이미지도
+      #   latest 로 배포될 수 있음(의도된 단계적 도입). 게이트가 필요하면 CRITICAL 한정 exit-code:1 도입.
+      - name: Scan image (trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}:ci-scan
+          format: sarif
+          output: trivy-web.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+
+      # PR Security 탭에 추세를 남긴다(category 로 이미지별 분리). 스캔이 실패해도 always() 로 업로드.
+      # fork PR 은 GITHUB_TOKEN 이 read-only 로 강등돼 upload-sarif 가 403 으로 실패하므로
+      # continue-on-error 로 외부 기여 PR 체크가 red 되는 것을 막는다(업로드는 same-repo/main 에서만 성공).
+      - name: Upload trivy SARIF to code-scanning
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        with:
+          sarif_file: trivy-web.sarif
+          category: trivy-web
+
+      # 아티팩트 보관(다운로드해 상세 확인용). code-scanning 업로드와 병행.
+      - name: Upload trivy report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trivy-web-sarif
+          path: trivy-web.sarif
+          if-no-files-found: warn
+
+  # ── 발행: PR 이 아닐 때만(main/tag). build 통과 전제. 여기서만 packages:write. ──
+  publish:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ./muninnWeb
+          file: ./muninnWeb/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

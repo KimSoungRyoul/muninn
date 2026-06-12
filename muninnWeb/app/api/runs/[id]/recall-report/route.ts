@@ -5,13 +5,18 @@
 
 import { NextRequest } from "next/server";
 import { ok, badRequest } from "@/lib/api";
+import { requireAuth } from "@/lib/auth";
 import { patchRunStatus, k8sEnabled, DEFAULT_NAMESPACE } from "@/lib/k8s";
 import { normalizeRecalledMemoryIds } from "@/lib/incidents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  // 머신 전용(agent→API) 경로 — 콘솔 우회(sec-fetch-site) 불허, 토큰 필수(CONTRACT §C2).
+  const denied = await requireAuth(req, { allowConsole: false });
+  if (denied) return denied;
   let body: any;
   try {
     body = await req.json();

@@ -10,6 +10,7 @@ metadata:
     - apiVersion: muninn.io/v1beta1
       kind: HuginnIssue
       name: issue-e3f8a91-01
+      uid: 00000000-0000-0000-0000-000000000000  # 부모 HuginnIssue 의 .metadata.uid (필수). 직접 apply 시엔 이 블록 생략 권장 — Operator 가 보강한다.
       controller: true              # cascade GC
 spec:
   issueRef: issue-e3f8a91-01
@@ -47,15 +48,19 @@ spec:
         value: secret/issue-e3f8a91-01-event
       - name: MUNINN_GUARDRAILS                # maxIterations/maxCostUsd/maxTokens → SDK max_turns/max_budget_usd 등
         value: '{"maxIterations":12,"maxCostUsd":5,"maxTokens":100000}'
+      # Muninn API/Memory 는 별도 서비스가 아니라 muninnWeb 한 앱이 겸한다(메인 스펙 §0, goal §9).
+      # operator 는 helm 이 주입한 MUNINN_*_ENDPOINT(= muninn-web Service)를 그대로 Job 에 전달한다.
       - name: MUNINN_MEMORY_ENDPOINT
-        value: http://muninn-memory.muninn.svc:8080
+        value: http://muninn-web.muninn.svc:3030
       - name: MUNINN_API_ENDPOINT             # step/recall-report/finishedAt 보고(§5.6)
-        value: http://muninn-api.muninn.svc:8080
+        value: http://muninn-web.muninn.svc:3030
       # --- 인증은 PVC 가 아니라 env(Secret)로만 주입(§5.1, §6.2). API 키/OAuth 토큰 중 하나면 충분(둘 다 optional) ---
       - name: ANTHROPIC_API_KEY
         valueFrom: { secretKeyRef: { name: agent-secrets, key: anthropic-api-key, optional: true } }
       - name: CLAUDE_CODE_OAUTH_TOKEN   # Pro/Max/team OAuth 인증 대안
         valueFrom: { secretKeyRef: { name: agent-secrets, key: claude-code-oauth-token, optional: true } }
+      - name: MUNINN_API_TOKEN          # 런타임이 Muninn API(보고/승인/메모리) 호출을 인증하는 Bearer 토큰(§5.6). agent-secrets 의 muninn-api-token 키.
+        valueFrom: { secretKeyRef: { name: agent-secrets, key: muninn-api-token, optional: true } }
       - name: GITHUB_PAT
         valueFrom: { secretKeyRef: { name: gh-ai-pat, key: token } }
 
@@ -63,16 +68,16 @@ status:
   phase: Running                    # Queued | Pending | Running | AwaitingApproval | Succeeded | Failed | Cancelled
   step: 4                           # 현재 실행 중 Step 의 ix(1부터)
   maxStep: 12                       # = guardrails.maxIterations
-  cost: 0.18                        # ResultMessage.total_cost_usd 기반 예상치
+  cost: "0.18"                      # ResultMessage.total_cost_usd 기반 예상치(CRD 타입=string — float 모호성 회피)
   maxCostUsd: 5                     # 이슈 상속값 복사(영속화)
   tokens: 47120
   maxTokens: 100000
   startedAt: "2026-06-03T14:32:14+09:00"
   finishedAt: null                  # 종료 시 Pod 보고 → Operator 가 duration_s 계산(§5.6)
-  recalledMemoryIds:                # API recall-report 로 보고(id+score+근거)
-    - { id: m1, score: 0.91, reason: "vector 0.93 + bm25 0.88 (hybrid)" }
-    - { id: m2, score: 0.84 }
-    - { id: m3, score: 0.78 }
+  recalledMemoryIds:                # API recall-report 로 보고(id+score+근거). score 는 CRD 타입=string(float 모호성 회피)
+    - { id: m1, score: "0.91", reason: "텍스트 ts_rank_cd 상위" }
+    - { id: m2, score: "0.84" }
+    - { id: m3, score: "0.78" }
   output: null                      # 완료 시 "PR #842" / "Issue #143"
   approval: null                    # AwaitingApproval 시 {reasons,state,requestedAt,expiresAt,decidedBy}(§6.4)
   conditions:

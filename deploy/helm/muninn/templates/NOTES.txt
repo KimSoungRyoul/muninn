@@ -21,7 +21,7 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
 
 {{- if .Values.web.enabled }}
 
-▶ Muninn Web 콘솔 (프로토타입)
+▶ Muninn Web (콘솔 + Muninn API + 메모리)
   접속:
     kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "muninn.web.fullname" . }} {{ .Values.web.service.port }}:{{ .Values.web.service.port }}
     open http://localhost:{{ .Values.web.service.port }}
@@ -30,14 +30,24 @@ Muninn DevOps Agent Platform 가 설치되었습니다 (release: {{ .Release.Nam
     kubectl -n {{ .Release.Namespace }} create secret generic muninn-web-secrets \
       --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
   {{- end }}
+  워크스페이스(멀티테넌시 §2) = MUNINN_WORKSPACE = {{ .Values.web.workspace | default .Release.Namespace }} (요청 헤더 x-muninn-workspace 로 override).
+  {{- if .Values.web.oidc.issuer }}
+  ✅ OIDC 활성(issuer={{ .Values.web.oidc.issuer }}): 운영자 콘솔 경로(승인/거절/위임)는 SSO JWT 를 JWKS 로 검증합니다.
+  {{- else }}
+  운영자 콘솔 SSO 를 쓰려면 OIDC 를 활성화하세요(미설정 시 정적 토큰만 사용):
+    --set web.oidc.issuer=https://<idp>/realms/muninn --set web.oidc.audience=muninn-web
+  {{- end }}
 {{- end }}
 
 {{- if and .Values.operator.enabled .Values.agent.serviceAccount.create }}
 
-▶ Agent 인증 (operator 가 만드는 Job 이 사용)
+▶ Agent 인증 (operator 가 만드는 Job + muninn-web 이 공유)
   자격 Secret({{ .Values.agent.secrets.name }})은 보안상 chart 가 만들지 않습니다. 런타임에 생성:
     kubectl -n {{ .Release.Namespace }} create secret generic {{ .Values.agent.secrets.name }} \
-      --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+      --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN" \
+      --from-literal=muninn-api-token="$(openssl rand -hex 32)"
+  muninn-api-token 키를 넣으면 muninn-web 의 상태변경 API(보고·승인·위임·webhook)가 Bearer 인증을 강제하고,
+  operator 가 agent Job 에도 같은 토큰을 주입합니다(미설정 시 web 은 dev 모드로 인증 비활성+경고).
 {{- end }}
 
 ▶ metaDB (PostgreSQL)

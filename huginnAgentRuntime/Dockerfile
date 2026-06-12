@@ -7,18 +7,26 @@
 
 # Claude Code CLI 는 Node 패키지(@anthropic-ai/claude-code)이고 Python SDK 는 이 CLI 를
 # subprocess 로 띄우므로 Node 런타임이 항상 필요하다 → Node 베이스에 Python 을 더한다.
-# Node 24 = 현재 LTS(최신 안정 라인).
-FROM node:24-bookworm-slim
+# Node 24 = 현재 LTS(최신 안정 라인, 24.16.0). 재현성·공급망 안전을 위해 digest 핀.
+# 이 digest 는 멀티아치 OCI 인덱스(linux/amd64 + linux/arm64)이며 24-bookworm-slim 태그가
+# 가리키는 24.16.0 과 동일하다. 갱신: docker manifest inspect node:24-bookworm-slim,
+# 또는 registry-1.docker.io/v2/library/node/manifests/24-bookworm-slim 의 Docker-Content-Digest.
+FROM node:24-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203
 
 # --- 도구 버전(빌드 ARG 로 오버라이드 가능) ---
-# kubectl 은 비우면 dl.k8s.io/release/stable.txt 의 최신 stable 을 사용(항상 유효한 태그 보장).
-ARG KUBECTL_VERSION=""
-ARG HELM_VERSION="v3.16.4"
-ARG ARGOCD_VERSION="v2.13.3"
-ARG GH_VERSION="2.63.2"
-ARG YQ_VERSION="v4.44.6"
+# 재현성·공급망 안전을 위해 모든 도구를 구체 버전으로 핀한다(브리프 MEDIUM).
+# kubectl 은 과거 빈 값="최신 stable"이었으나, GHA 레이어 캐시(cache-from=gha)와 결합 시
+# RUN 문자열이 안 바뀌면 옛 캐시 레이어가 재사용돼 '항상 최신' 의도와 어긋났다 → 기본 핀.
+# '최신 stable 자동 추적'이 필요하면 CI 에서 조회해 --build-arg KUBECTL_VERSION=... 로 주입하라.
+# 버전은 각 도구의 최신 stable(2026-06 기준). 다운로드 URL·체크섬 파일 포맷·tar 레이아웃은
+# 아래 RUN 들과 동일 계약 유지를 확인했다(helm v4 도 get.helm.sh 경로/`.sha256sum`/`linux-<arch>/helm` 동일).
+ARG KUBECTL_VERSION="v1.36.1"
+ARG HELM_VERSION="v4.2.0"
+ARG ARGOCD_VERSION="v3.4.3"
+ARG GH_VERSION="2.94.0"
+ARG YQ_VERSION="v4.53.3"
 # claude code CLI 는 SDK 가 subprocess 로 의존하는 핵심 컴포넌트 → 재현성 위해 구체 버전 핀.
-ARG CLAUDE_CODE_VERSION="2.1.167"
+ARG CLAUDE_CODE_VERSION="2.1.173"
 # buildx 가 주입(미지정 시 dpkg 로 폴백)
 ARG TARGETARCH=""
 
@@ -35,44 +43,76 @@ RUN set -eux; \
       python3 python3-venv; \
     rm -rf /var/lib/apt/lists/*
 
-# 2) kubectl — 비우면 최신 stable 태그를 조회
+# 2) kubectl — 핀된 버전 + 공식 .sha256 검증(공급망 안전, 브리프 MEDIUM)
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
     ver="${KUBECTL_VERSION:-$(curl -fsSL https://dl.k8s.io/release/stable.txt)}"; \
-    curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${ver}/bin/linux/${arch}/kubectl"; \
+    base="https://dl.k8s.io/release/${ver}/bin/linux/${arch}"; \
+    curl -fsSLo /usr/local/bin/kubectl "${base}/kubectl"; \
+    curl -fsSLo /tmp/kubectl.sha256 "${base}/kubectl.sha256"; \
+    echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c -; \
+    rm -f /tmp/kubectl.sha256; \
     chmod +x /usr/local/bin/kubectl; \
     kubectl version --client
 
-# 3) helm
+# 3) helm — 공식 .sha256sum 검증 후 압축 해제
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" | tar -xz -C /tmp; \
+    tgz="helm-${HELM_VERSION}-linux-${arch}.tar.gz"; \
+    curl -fsSLo "/tmp/${tgz}" "https://get.helm.sh/${tgz}"; \
+    curl -fsSLo "/tmp/${tgz}.sha256sum" "https://get.helm.sh/${tgz}.sha256sum"; \
+    expected="$(awk '{print $1}' "/tmp/${tgz}.sha256sum")"; \
+    echo "${expected}  /tmp/${tgz}" | sha256sum -c -; \
+    tar -xz -C /tmp -f "/tmp/${tgz}"; \
     mv "/tmp/linux-${arch}/helm" /usr/local/bin/helm; \
-    rm -rf "/tmp/linux-${arch}"; \
+    rm -rf "/tmp/linux-${arch}" "/tmp/${tgz}" "/tmp/${tgz}.sha256sum"; \
     helm version
 
-# 4) argocd CLI
+# 4) argocd CLI — 릴리스 cli_checksums.txt 로 sha256 검증
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    curl -fsSLo /usr/local/bin/argocd \
-      "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/argocd-linux-${arch}"; \
+    rel="https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}"; \
+    curl -fsSLo /usr/local/bin/argocd "${rel}/argocd-linux-${arch}"; \
+    curl -fsSLo /tmp/argocd_checksums.txt "${rel}/cli_checksums.txt"; \
+    expected="$(grep " argocd-linux-${arch}\$" /tmp/argocd_checksums.txt | awk '{print $1}')"; \
+    test -n "${expected}"; \
+    echo "${expected}  /usr/local/bin/argocd" | sha256sum -c -; \
+    rm -f /tmp/argocd_checksums.txt; \
     chmod +x /usr/local/bin/argocd; \
     argocd version --client
 
-# 5) GitHub CLI(gh) — PR/Issue 출력 보조
+# 5) GitHub CLI(gh) — 릴리스 checksums.txt 로 sha256 검증 후 압축 해제
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" \
-      | tar -xz -C /tmp; \
+    rel="https://github.com/cli/cli/releases/download/v${GH_VERSION}"; \
+    tgz="gh_${GH_VERSION}_linux_${arch}.tar.gz"; \
+    curl -fsSLo "/tmp/${tgz}" "${rel}/${tgz}"; \
+    curl -fsSLo /tmp/gh_checksums.txt "${rel}/gh_${GH_VERSION}_checksums.txt"; \
+    expected="$(grep " ${tgz}\$" /tmp/gh_checksums.txt | awk '{print $1}')"; \
+    test -n "${expected}"; \
+    echo "${expected}  /tmp/${tgz}" | sha256sum -c -; \
+    tar -xz -C /tmp -f "/tmp/${tgz}"; \
     mv "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh; \
-    rm -rf "/tmp/gh_${GH_VERSION}_linux_${arch}"; \
+    rm -rf "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/${tgz}" /tmp/gh_checksums.txt; \
     gh --version
 
-# 6) yq(mikefarah) — YAML 매니페스트 처리
+# 6) yq(mikefarah) — YAML 매니페스트 처리.
+#    yq 의 checksums 파일은 다중 해시 컬럼 포맷이라(파일명 + 알고리즘별 컬럼) SHA-256 컬럼 위치를
+#    checksums_hashes_order 에서 동적으로 찾아 검증한다(컬럼 순서 변경에 강건). 둘 다 받을 수 없는
+#    환경이면 빌드를 실패시켜(test -n) unverified 바이너리가 섞이지 않게 한다(브리프 MEDIUM).
 RUN set -eux; \
     arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
-    curl -fsSLo /usr/local/bin/yq \
-      "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${arch}"; \
+    rel="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}"; \
+    curl -fsSLo /usr/local/bin/yq "${rel}/yq_linux_${arch}"; \
+    curl -fsSLo /tmp/yq_order "${rel}/checksums_hashes_order"; \
+    curl -fsSLo /tmp/yq_checksums "${rel}/checksums"; \
+    sha_idx="$(grep -nx 'SHA-256' /tmp/yq_order | cut -d: -f1)"; \
+    test -n "${sha_idx}"; \
+    col="$((sha_idx + 1))"; \
+    expected="$(grep "^yq_linux_${arch} " /tmp/yq_checksums | awk -v c="${col}" '{print $c}')"; \
+    test -n "${expected}"; \
+    echo "${expected}  /usr/local/bin/yq" | sha256sum -c -; \
+    rm -f /tmp/yq_order /tmp/yq_checksums; \
     chmod +x /usr/local/bin/yq; \
     yq --version
 
