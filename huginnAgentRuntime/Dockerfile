@@ -11,7 +11,7 @@
 # 이 digest 는 멀티아치 OCI 인덱스(linux/amd64 + linux/arm64)이며 24-bookworm-slim 태그가
 # 가리키는 24.16.0 과 동일하다. 갱신: docker manifest inspect node:24-bookworm-slim,
 # 또는 registry-1.docker.io/v2/library/node/manifests/24-bookworm-slim 의 Docker-Content-Digest.
-FROM node:24-bookworm-slim@sha256:2c87ef9bd3c6a3bd4b472b4bec2ce9d16354b0c574f736c476489d09f560a203
+FROM node:26-bookworm-slim@sha256:3fe807a03a4436e7bc76b7e84e6861899cd75c9028ae99bc00581940141ae150
 
 # --- 도구 버전(빌드 ARG 로 오버라이드 가능) ---
 # 재현성·공급망 안전을 위해 모든 도구를 구체 버전으로 핀한다(브리프 MEDIUM).
