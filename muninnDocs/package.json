@@ -9,8 +9,7 @@
     "dev": "next dev -p 3031",
     "prebuild": "node scripts/sync-design-docs.mjs",
     "build": "next build",
-    "postbuild": "pagefind --site .next/server/app --output-path out/_pagefind",
-    "start": "next start"
+    "postbuild": "pagefind --site .next/server/app --output-path out/_pagefind"
   },
   "dependencies": {
     "next": "15.5.19",

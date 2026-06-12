@@ -83,7 +83,7 @@ helm upgrade muninn deploy/helm/muninn -n muninn --set web.auth.existingSecret=m
 
 ## CRD 관리
 
-CRD 는 Helm 의 `crds/` 디렉토리로 관리된다(원본: [huginnOperator/config/crd/bases/](https://github.com/KimSoungRyoul/muninn/blob/main/huginnOperator/config/crd/bases)).
+CRD 는 Helm 의 `crds/` 디렉토리로 관리된다(원본: [huginnOperator/config/crd/bases/](https://github.com/KimSoungRyoul/muninn/tree/main/huginnOperator/config/crd/bases)).
 
 - `helm install` 시 자동 적용, `helm uninstall` 시 **보존**(데이터 보호).
 - `helm upgrade` 는 CRD 를 **갱신하지 않는다**. CRD 스키마 변경 시:

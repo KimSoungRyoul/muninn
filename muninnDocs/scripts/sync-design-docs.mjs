@@ -8,7 +8,7 @@
 //   - 이미지 임베드(![]())는 content/design/ 으로 복사 후 상대 경로 참조(Nextra 정적 임포트)
 //   - 각 페이지 상단에 "동기화된 사본" 안내 추가
 // 코드 펜스(``` / ~~~) 내부와 인라인 코드(`...`)는 변환하지 않는다.
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -68,11 +68,31 @@ function rewriteUrl(url, { isImage }) {
     return `./${basename}`
   }
 
-  // 그 외 저장소 파일(예제 YAML, 코드, drawio 등) → GitHub blob
-  return `${GITHUB_BLOB_BASE}${repoPath}${hash}`
+  // 그 외 저장소 경로 → GitHub. 디렉토리는 tree, 파일은 blob.
+  let isDir = false
+  try {
+    isDir = statSync(path.join(repoRoot, repoPath)).isDirectory()
+  } catch {
+    // 원본에 존재하지 않는 경로면 blob 으로 두고 GitHub 의 404 페이지에 맡긴다.
+  }
+  const base = isDir ? GITHUB_BLOB_BASE.replace('/blob/', '/tree/') : GITHUB_BLOB_BASE
+  return `${base}${repoPath}${hash}`
 }
 
-/** 코드 펜스/인라인 코드를 보존하면서 마크다운 링크·이미지 URL 을 변환한다. */
+/** 한 줄에서 인라인 코드 스팬(`...`)의 [시작, 끝) 범위 목록을 구한다. */
+function codeSpanRanges(line) {
+  const ranges = []
+  const re = /`[^`]*`/g
+  let m
+  while ((m = re.exec(line)) !== null) ranges.push([m.index, m.index + m[0].length])
+  return ranges
+}
+
+/**
+ * 코드 펜스/인라인 코드를 보존하면서 마크다운 링크·이미지 URL 을 변환한다.
+ * 링크 텍스트가 인라인 코드인 형태([`x`](url))도 변환 대상 — 링크가 코드 스팬
+ * "내부에서 시작"하는 경우(`[x](y)` 전체가 코드)만 보존한다.
+ */
 function rewriteLinks(markdown) {
   const lines = markdown.split('\n')
   let inFence = false
@@ -83,18 +103,15 @@ function rewriteLinks(markdown) {
         return line
       }
       if (inFence) return line
-      // 인라인 코드(홀수 인덱스 세그먼트)는 건드리지 않는다.
-      return line
-        .split('`')
-        .map((seg, i) =>
-          i % 2 === 1
-            ? seg
-            : seg.replace(
-                /(!?)\[([^\]]*)\]\(([^()\s]+)\)/g,
-                (_, bang, text, url) => `${bang}[${text}](${rewriteUrl(url, { isImage: bang === '!' })})`
-              )
-        )
-        .join('`')
+      const spans = codeSpanRanges(line)
+      const insideCode = i => spans.some(([s, e]) => i > s && i < e)
+      return line.replace(
+        /(!?)\[((?:`[^`]*`|[^\]`])*)\]\(([^()\s]+)\)/g,
+        (full, bang, text, url, offset) =>
+          insideCode(offset)
+            ? full
+            : `${bang}[${text}](${rewriteUrl(url, { isImage: bang === '!' })})`
+      )
     })
     .join('\n')
 }
