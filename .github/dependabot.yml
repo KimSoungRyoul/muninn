@@ -1,5 +1,5 @@
 # Dependabot — 의존성 업데이트 자동화(주간; 보안 패치는 Dependabot 이 즉시 별도 PR).
-# 영향 생태계 5개: npm/pnpm(muninnWeb), gomod(huginnOperator), pip(agent), docker, github-actions.
+# 영향 생태계 5개: npm/pnpm(muninnWeb·muninnDocs), gomod(huginnOperator), pip(agent), docker, github-actions.
 # next 14.2.x 같은 정체를 구조적으로 방지하고, github-actions 의 커밋 SHA 핀 갱신도 자동화한다.
 version: 2
 updates:
@@ -14,6 +14,21 @@ updates:
       prefix: "build(muninnWeb)"
     groups:
       # 보안 외 마이너/패치 업데이트는 묶어 PR 소음을 줄인다.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # ── muninnDocs (npm/pnpm) ──
+  # ⚠️ zod 는 pnpm.overrides 로 4.1.12 에 핀(nextra-theme-docs 4.6.1 의 zod 4.4 비호환) —
+  #    Dependabot 은 overrides 를 갱신하지 않으므로 nextra 가 호환을 고치면 수동 제거.
+  - package-ecosystem: npm
+    directory: /muninnDocs
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    labels: ["dependencies", "muninnDocs"]
+    commit-message:
+      prefix: "build(muninnDocs)"
+    groups:
       minor-and-patch:
         update-types: ["minor", "patch"]
 

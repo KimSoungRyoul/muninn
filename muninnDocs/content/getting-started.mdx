@@ -1,0 +1,117 @@
+import { Callout } from 'nextra/components'
+
+# 시작하기
+
+로컬에서 Muninn 풀스택을 띄우는 가장 빠른 길은 루트 `Makefile` 의 `make run-local` 이다. 컴포넌트 하나만 빠르게 개발하려면 아래 컴포넌트별 경로를 쓴다.
+
+## 사전 요구
+
+| 도구 | 용도 |
+|------|------|
+| Podman | 컨테이너 런타임 기본값 (이 레포 규약 — Docker 아님). `CONTAINER_TOOL=docker` 로 변경 가능 |
+| kind | 로컬 K8s 클러스터. Podman 사용 시 `KIND_EXPERIMENTAL_PROVIDER=podman` 이 자동 설정된다 |
+| kubectl | 클러스터 조작 |
+| Helm | 플랫폼 chart 설치 |
+| Go | huginnOperator 개발 시 |
+| pnpm | muninnWeb 개발 시 |
+
+## 풀스택 한 줄 기동 — `make run-local` (권장)
+
+루트 `Makefile` 이 kind 클러스터를 만들고, 세 이미지(operator·web·agent-runtime)를 로컬 빌드해 적재한 뒤, Helm 으로 플랫폼 전체(operator + web + metaDB)를 클러스터 **안** 에 띄운다.
+
+```bash
+make run-local                      # kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install (Podman 기본)
+# (선택) 자격이 있으면 코파일럿/agent 까지 활성화:
+CLAUDE_CODE_OAUTH_TOKEN=... make run-local
+make status                         # 배포 상태 (deploy/svc/pod + HuginnAgent/HuginnIssue/HuginnRun)
+make down                           # kind 클러스터 삭제(정리)
+```
+
+기동이 끝나면 콘솔에 접속한다.
+
+```bash
+kubectl -n muninn port-forward svc/muninn-web 3030:3030
+open http://localhost:3030
+```
+
+`CLAUDE_CODE_OAUTH_TOKEN` 없이 설치하면 코파일럿/agent 가 비활성 상태로 뜬다. 나중에 켜려면 Secret(`agent-secrets`, `muninn-web-secrets`)을 만든 뒤 **web Deployment 를 재시작**해야 한다 — Secret 은 `optional` env 로만 참조되어 helm values 가 그대로면 `helm upgrade --reuse-values` 로는 rollout 이 일어나지 않는다.
+
+```bash
+kubectl -n muninn rollout restart deploy/muninn-web
+```
+
+<Callout type="info">
+**`run-local` 과 `run-kind` 는 다르다.** `run-local`(루트)은 operator 까지 Helm 으로 클러스터 **안** 에 배포하고, `run-kind`(huginnOperator)는 operator 를 클러스터 **밖**(host `go run`)에서 실행하는 빠른 컨트롤러 개발 루프다.
+</Callout>
+
+### 루트 Makefile 주요 타깃
+
+| 타깃 | 설명 |
+|------|------|
+| `make run-local` | kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install (클러스터 안 전체 기동) |
+| `make images` | 세 컨테이너 이미지 로컬 빌드 (Podman 기본) |
+| `make status` | 로컬 풀스택 리소스 상태 |
+| `make down` | kind 클러스터 삭제 (`make kind-delete` 와 동일) |
+
+루트 Makefile 은 하위 프로젝트로 위임하는 일관 어휘(`build`·`image`·`lint`·`test`)도 노출한다 — `make build`/`make lint` 는 각 프로젝트로 fan-out 한다. 전체 타깃은 `make help`, 정의는 [Makefile](https://github.com/KimSoungRyoul/muninn/blob/main/Makefile) 참고.
+
+## 컴포넌트별 개발 경로
+
+### huginnOperator (Go)
+
+```bash
+cd huginnOperator
+make build                 # manager 바이너리 빌드
+make test                  # unit + envtest (Ginkgo/Gomega; etcd/kube-apiserver 다운로드)
+make manifests generate    # api/*_types.go 또는 +kubebuilder 마커 수정 후 필수
+make run                   # 현재 kubeconfig 로 컨트롤러 실행 (로컬은 ENABLE_WEBHOOKS=false)
+```
+
+로컬 end-to-end (kind):
+
+```bash
+make run-kind CONTAINER_TOOL=podman   # kind 생성 + CRD 설치 + agent-runtime 이미지 빌드/적재 + operator 를 host 에서 실행
+# 그다음 다른 셸에서 — 인증 Secret + 예제 CR 적용 (ns ns-huginn-e2e):
+kubectl -n ns-huginn-e2e create secret generic agent-secrets \
+  --from-literal=claude-code-oauth-token="$CLAUDE_CODE_OAUTH_TOKEN"
+kubectl apply -f ../huginnAgentRuntime/examples/kind-e2e.yaml
+make test-e2e                         # 격리된 e2e (별도 클러스터; CONTAINER_TOOL 무시)
+make kind-delete CONTAINER_TOOL=podman
+```
+
+<Callout type="warning">
+operator 의 make 타깃은 `CONTAINER_TOOL=docker` 가 기본값이다 — 루트/web/runtime Makefile 은 podman 이 기본이므로, operator 타깃에는 `CONTAINER_TOOL=podman` 을 명시하라.
+</Callout>
+
+### huginnAgentRuntime (이미지)
+
+```bash
+cd huginnAgentRuntime
+make image        # = podman build -t ghcr.io/kimsoungryoul/muninn/agent-runtime:dev .
+make selftest     # 오프라인 tool+SDK 배선 점검 (API 호출 없음). make test 도 동일.
+```
+
+CI 는 `.github/workflows/agent-runtime-image.yml` 로 이미지를 발행한다 (PR = 빌드만, main/tag push = 멀티아치 push).
+
+### muninnWeb (Next.js, 포트 3030 — pnpm)
+
+```bash
+cd muninnWeb
+make install       # = pnpm install --frozen-lockfile
+make dev           # http://localhost:3030
+make build         # production 빌드 = 타입체크 게이트 (tsc 실행). make test 도 동일.
+make lint
+make image         # = podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev .
+```
+
+<Callout type="warning">
+`make dev` 가 도는 중에 `make build` 를 돌리지 말 것 — `.next` 가 손상된다.
+</Callout>
+
+코파일럿(CopilotKit) 동작에는 `CLAUDE_CODE_OAUTH_TOKEN` 또는 `ANTHROPIC_API_KEY` 가 필요하다. 선택적으로 `COPILOT_MODEL` 로 모델을 override 할 수 있고(기본 `claude-haiku-4-5-20251001`), 라우트는 `/api/copilotkit` 이다.
+
+## 다음 단계
+
+- [Quickstart 배포](/deployment/quickstart) — 클러스터 배포를 더 깊게
+- [Helm chart](/deployment/helm) — `helm install muninn deploy/helm/muninn -n muninn --create-namespace`. PostgreSQL 은 chart 가 설치하지 않는다 — `externalPostgresql.*` 로 외부 인스턴스를 연결한다.
+- [핵심 개념: CRD](/concepts/crds) — `HuginnAgent` / `HuginnIssue` / `HuginnRun`

@@ -11,6 +11,7 @@
 | `huginnOperator/` | CRD 라이프사이클을 소유하는 K8s 오퍼레이터 | Go, kubebuilder/controller-runtime |
 | `huginnAgentRuntime/` | 각 에이전트 실행이 돌아가는 컨테이너 이미지 | Dockerfile + `claude_skill.sh` + Python (`claude-agent-sdk`) |
 | `muninnWeb/` | 오퍼레이터 콘솔 + Muninn API (프로토타입) | Next.js (App Router), pnpm |
+| `muninnDocs/` | 문서 사이트(GitHub Pages) — `docs/design/` 을 빌드 시 동기화 | Next.js (Nextra 4), pnpm |
 | `docs/design/` | **권위 있는 스펙** — 코드 주석이 `§` 섹션을 인용한다 | Markdown + 예제 CR |
 
 `docs/design/muninn-devops-agent-platform.md`(메인 스펙)와 `operator-design.md`(오퍼레이터 시맨틱)가 source of truth 다. 오퍼레이터 동작을 바꿀 땐 `operator-design.md` 를 먼저 읽어라 — 주석이 섹션 번호(`§2.2`, `§5.1`)로 이를 참조한다. `muninn-goal-conversational-delegation.md` 는 코파일럿 오케스트레이션을, `muninnWeb/docs/copilotkit-request-flow.md` 는 CopilotKit→Anthropic 요청/OAuth 흐름을 다룬다.
@@ -55,6 +56,8 @@ make test-e2e              # 격리된 e2e (별도 클러스터 huginnoperator-t
 **huginnAgentRuntime/** (이미지): `make image`(빌드), `make selftest` / `make test`(오프라인 tool+SDK 배선 점검). CI 는 `.github/workflows/agent-runtime-image.yml` 로 publish(PR=빌드만, main/tag=multi-arch push).
 
 **muninnWeb/** (Next.js, 포트 3030): ⚠️ `make dev` 중에 `make build` 금지(`.next` 손상). 코파일럿엔 `CLAUDE_CODE_OAUTH_TOKEN` 또는 `ANTHROPIC_API_KEY` 필요. 선택적 `COPILOT_MODEL`(기본 `claude-haiku-4-5-20251001`), 라우트 `/api/copilotkit`.
+
+**muninnDocs/** (Nextra 4, 포트 3031): `make dev` / `build`(정적 export + pagefind) / `build-pages`(`/muninn` basePath QA). `content/design/` 과 `content/muninn-architecture.png` 는 `scripts/sync-design-docs.mjs` 가 `docs/design/` 과 루트 PNG 에서 생성하는 산출물(gitignore) — **설계 문서 수정은 항상 `docs/design/` 원본에서**. ⚠️ `content/` 하위에 페이지(md/mdx) 없는 폴더를 만들면 Nextra pageMap 검증이 깨져 전 페이지가 500 이 된다. zod 는 `pnpm.overrides` 로 4.1.12 핀(nextra-theme-docs 4.6.1 이 zod 4.4 와 비호환 — 업스트림 수정 시 제거). main 푸시 시 `.github/workflows/docs-site.yml` 이 GitHub Pages(`https://kimsoungryoul.github.io/muninn/`)로 배포한다.
 
 ## 규약
 

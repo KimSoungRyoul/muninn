@@ -55,6 +55,11 @@ help: ## 이 도움말 출력.
 
 ##@ 하위 프로젝트 위임 (일관 어휘)
 
+.PHONY: run-docs
+run-docs: ## 문서 사이트 dev 서버(http://localhost:3031). 의존성 없으면 설치 후 기동.
+	@test -d muninnDocs/node_modules || $(MAKE) -C muninnDocs install
+	$(MAKE) -C muninnDocs dev
+
 .PHONY: build
 build: ## operator 바이너리 + web(next build) 빌드.
 	$(MAKE) -C huginnOperator build

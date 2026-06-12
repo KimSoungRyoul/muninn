@@ -1,0 +1,19 @@
+# 의존성/빌드 산출물
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# sync-design-docs.mjs 가 docs/design/ 과 루트 PNG 에서 생성하는 산출물 — 원본이 single source of truth.
+content/design/
+content/muninn-architecture.png
+
+# pagefind 검색 인덱스(postbuild 산출물)
+_pagefind/
+
+# 로컬 브라우저 QA 아티팩트(playwright-cli)
+.playwright-cli/
+
+# make serve-pages 가 만드는 /muninn prefix 스테이징 디렉토리
+.pages-root/
