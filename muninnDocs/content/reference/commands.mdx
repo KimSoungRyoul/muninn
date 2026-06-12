@@ -15,6 +15,7 @@ kind + Helm 로컬 풀스택과 하위 프로젝트 위임 타깃. 원본: [Make
 | 타깃 | 설명 |
 |------|------|
 | `run-local` | kind 생성 → 이미지 3종 빌드/적재 → metaDB(postgres) → helm install — 플랫폼 전체를 클러스터 안에 기동 |
+| `run-docs` | 문서 사이트 dev 서버(http://localhost:3031) — 의존성 없으면 설치 후 기동 |
 | `images` | 세 컨테이너 이미지(operator/web/agent-runtime) 로컬 빌드 |
 | `status` | 로컬 풀스택 리소스 상태 (deploy/svc/pod + HuginnAgent/HuginnIssue/HuginnRun) |
 | `down` (= `kind-delete`) | kind 클러스터 삭제(로컬 풀스택 정리) |
