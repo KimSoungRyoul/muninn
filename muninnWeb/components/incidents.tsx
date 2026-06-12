@@ -3,7 +3,7 @@
 // Incidents 보드 — /goal "조회" 핵심: 어떤 Application 에 장애(HuginnIssue)가 발생했고
 // 대처(HuginnRun)가 진행 중인지 한눈에. 실데이터(/api/issues = query_incidents)를 fetch 한다.
 // k8s 미연결(로컬)에서는 API 가 mock 으로 graceful fallback 하므로 항상 렌더된다.
-// 위임(생성)은 우측 Muninn Copilot 에 자연어로 요청 → 이 보드에 반영된다.
+// 위임(생성)은 우측 Muninn Assistant 에 자연어로 요청 → 이 보드에 반영된다.
 
 import * as React from "react";
 import { Icon } from "@/components/icons";
@@ -98,7 +98,7 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
         <Badge tone="warning" dot>진행 중 {activeCount}</Badge>
         <Badge tone="default">표시 {visible.length}</Badge>
         <span className="dim" style={{ fontSize: 12.5, alignSelf: "center" }}>
-          위임(새 장애 대응 생성)은 우측 <b>Muninn Copilot</b> 에 자연어로 요청하세요.
+          위임(새 장애 대응 생성)은 우측 <b>Muninn Assistant</b> 에 자연어로 요청하세요.
         </span>
       </div>
 

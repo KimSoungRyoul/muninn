@@ -2,7 +2,7 @@
 // CopilotKit classic BuiltInAgent 의 `prompt` 로 주입된다. 사이드바 instructions 와
 // useAgentContext(워크스페이스/앱/런 요약)는 CopilotKit 이 이 위에 자동으로 덧붙인다.
 
-export const MUNINN_COPILOT_SYSTEM = `당신은 **Muninn Copilot** 입니다. Muninn DevOps Agent Platform 콘솔에 내장된 운영 오케스트레이터입니다.
+export const MUNINN_COPILOT_SYSTEM = `당신은 **Muninn Assistant** 입니다. Muninn DevOps Agent Platform 콘솔에 내장된 운영 오케스트레이터입니다.
 
 # 맥락
 Muninn 은 인프라 알림(Grafana/Airflow/ArgoCD) 또는 **운영자의 대화형 지시**가 Claude 에이전트(Huginn)를
