@@ -36,9 +36,8 @@ rules:
 - apiGroups: [muninn.io]
   resources: [huginnagents/status, huginnissues/status, huginnruns/status]
   verbs: [get, patch, update]
-- apiGroups: [rbac.authorization.k8s.io]
-  resources: [rolebindings, roles]
-  verbs: [create, get, list, patch, watch]
+# 주의: rolebindings/roles 권한은 두지 않는다 — operator 는 agent SA 에 namespace Role 을 더 이상 만들지 않는다
+# (agent 는 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않음). config/rbac/role.yaml 과 동기.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

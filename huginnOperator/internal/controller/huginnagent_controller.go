@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -58,9 +57,12 @@ type HuginnAgentReconciler struct {
 // +kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // 주의: operator 는 Secret/ConfigMap '객체'를 직접 Get/List 하지 않는다(인증은 Pod env 의 secretKeyRef 로만
-// 참조 — 내용 read 아님). 따라서 cluster-wide secrets/configmaps read 마커를 제거해 권한 탈취 시 피해 반경을
-// 줄인다(리뷰 MEDIUM). 에이전트 SA 의 namespace 범위 read 는 ensureAgentRBAC 가 Role 로 별도 부여한다.
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;patch
+// 참조 — 내용 read 아님). 따라서 cluster-wide secrets/configmaps read 마커를 두지 않아 권한 탈취 시 피해 반경을 줄인다(리뷰 MEDIUM).
+// 에이전트 SA 도 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않으므로 namespace Role 을 부여하지 않는다:
+// agent SA Role 의 secrets/configmaps read 는 과잉 권한이었고(리뷰 MEDIUM — 워크스페이스 내 자격 탈취 표면),
+// operator 가 그 권한을 Role 로 grant 하려면 자신도 보유해야 하는데 보유하지 않아 RBAC privilege-escalation 으로
+// 거부됐다(kind e2e 에서 발견된 회귀). agent 가 자기 namespace 리소스를 K8s API 로 직접 다뤄야 하는 기능이 생기면
+// 그때 최소 권한 Role 을 ensureServiceAccount 옆에서 부여하고 여기에 roles;rolebindings create 마커를 다시 추가한다.
 
 func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -79,11 +81,9 @@ func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.ensurePVC(ctx, &agent); err != nil {
 		return ctrl.Result{}, err
 	}
-	// 2) namespace 공용 ServiceAccount + 격리 RBAC 보장(owned 아님 — 다른 agent 와 공유).
+	// 2) namespace 공용 ServiceAccount 보장(owned 아님 — 다른 agent 와 공유).
+	// agent 는 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않으므로 별도 Role 을 부여하지 않는다.
 	if err := r.ensureServiceAccount(ctx, agent.Namespace); err != nil {
-		return ctrl.Result{}, err
-	}
-	if err := r.ensureAgentRBAC(ctx, agent.Namespace); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -163,52 +163,6 @@ func (r *HuginnAgentReconciler) ensureServiceAccount(ctx context.Context, namesp
 		ObjectMeta: metav1.ObjectMeta{Name: serviceAccountName, Namespace: namespace},
 	}
 	if err := r.Create(ctx, &sa); err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	return nil
-}
-
-// ensureAgentRBAC 는 §6.1 격리를 집행한다: 에이전트 SA 가 자기 namespace 의 Secret/ConfigMap 만 read.
-// SA 와 마찬가지로 namespace 공용(특정 agent 가 owned 하지 않음 — 삭제 시 premature GC 방지).
-func (r *HuginnAgentReconciler) ensureAgentRBAC(ctx context.Context, namespace string) error {
-	roleName := serviceAccountName + "-role"
-	var role rbacv1.Role
-	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: roleName}, &role); apierrors.IsNotFound(err) {
-		role = rbacv1.Role{
-			ObjectMeta: metav1.ObjectMeta{Name: roleName, Namespace: namespace},
-			Rules: []rbacv1.PolicyRule{{
-				APIGroups: []string{""},
-				Resources: []string{"secrets", "configmaps"},
-				Verbs:     []string{"get", "list", "watch"},
-			}},
-		}
-		if err := r.Create(ctx, &role); err != nil && !apierrors.IsAlreadyExists(err) {
-			return err
-		}
-	} else if err != nil {
-		return err
-	}
-
-	bindingName := serviceAccountName + "-binding"
-	var rb rbacv1.RoleBinding
-	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: bindingName}, &rb); apierrors.IsNotFound(err) {
-		rb = rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: bindingName, Namespace: namespace},
-			RoleRef: rbacv1.RoleRef{
-				APIGroup: rbacv1.GroupName,
-				Kind:     "Role",
-				Name:     roleName,
-			},
-			Subjects: []rbacv1.Subject{{
-				Kind:      rbacv1.ServiceAccountKind,
-				Name:      serviceAccountName,
-				Namespace: namespace,
-			}},
-		}
-		if err := r.Create(ctx, &rb); err != nil && !apierrors.IsAlreadyExists(err) {
-			return err
-		}
-	} else if err != nil {
 		return err
 	}
 	return nil
