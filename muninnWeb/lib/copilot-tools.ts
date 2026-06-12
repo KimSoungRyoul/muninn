@@ -18,7 +18,7 @@ import { z } from "zod";
 import { dbEnabled, recall, store, summarize, listIncidents } from "./db";
 import {
   listApplications, getApplicationCr, queryIncidents, listRunsVM, getRunStatus, getIssueRuns,
-  delegateIncident,
+  delegateIncident, MAX_GOAL_LENGTH,
 } from "./incidents";
 import { k8sEnabled } from "./k8s";
 import { getCopilotWorkspace } from "./workspace";
@@ -159,7 +159,7 @@ export const muninnServerTools = [
       "실행되지 않고 확인 요청만 반환한다. recall_memory 결과의 id 를 recalledMemoryIds 로 넘기면 감사·seed 로 남는다.",
     parameters: z.object({
       app: z.string().describe("위임 대상 앱(HuginnAgent name)"),
-      goal: z.string().describe("이 사건에서 달성할 목표(불변 컨텍스트). 예: '외부 API timeout 확인 후 fallback 로직 PR 생성·검토요청'"),
+      goal: z.string().max(MAX_GOAL_LENGTH).describe("이 사건에서 달성할 목표(불변 컨텍스트). 예: '외부 API timeout 확인 후 fallback 로직 PR 생성·검토요청'"),
       confirmed: z.boolean().optional().describe("사용자가 위임에 명시적으로 동의했으면 true. 미설정/false 면 확인 요청만 반환(실행 안 함)."),
       userPrompt: z.string().optional().describe("운영자 원본 프롬프트(감사·재실행용)"),
       issuingUser: z.string().optional().describe("개시 운영자 식별자(감사용)"),

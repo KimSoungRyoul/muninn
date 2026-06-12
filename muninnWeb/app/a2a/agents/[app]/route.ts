@@ -5,12 +5,12 @@
 // 구현: message/send · message/stream(SSE) · tasks/get · tasks/cancel · tasks/resubscribe(SSE).
 // 미구현(PoC): pushNotificationConfig(P3), task continuation/threading(message.taskId/contextId 로 재개) — 명시 거절.
 import { NextRequest, NextResponse } from "next/server";
-import { getRunStatus, getIssueRuns, delegateIncident, rejectRun } from "@/lib/incidents";
+import { getRunStatus, getIssueRuns, delegateIncident, rejectRun, MAX_GOAL_LENGTH } from "@/lib/incidents";
 import type { RunVM } from "@/lib/incidents";
 import * as k8s from "@/lib/k8s";
 import { runVmToTask, issueToSubmittedTask, latestRun, statusToA2AState } from "@/lib/a2a/task-mapper";
 import { sseResponse, streamTask, streamIssue } from "@/lib/a2a/stream";
-import { a2aServerEnabled, a2aAuthOk, a2aDisabled, a2aUnauthorized } from "@/lib/a2a/gate";
+import { a2aServerEnabled, a2aRequireAuth, a2aDisabled } from "@/lib/a2a/gate";
 import { RPC } from "@/lib/a2a/types";
 import type { JsonRpcRequest } from "@/lib/a2a/types";
 
@@ -28,8 +28,8 @@ function rpcOk(id: unknown, result: unknown) {
   return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result });
 }
 
-// 위임 목표(goal) 길이 상한 — 무제한 텍스트가 HuginnIssue CR 에 그대로 들어가는 것을 막는다(etcd 부하·남용 방지).
-const MAX_GOAL = 8 * 1024;
+// 위임 목표(goal) 길이 상한 — 모든 위임 진입점이 공유하는 값(lib/incidents.ts).
+const MAX_GOAL = MAX_GOAL_LENGTH;
 
 // Issue 레벨 종료 phase — latest Run 이 failed 여도 Issue 가 비종료(재시도 backoff)면 작업 세션은 살아있다.
 const ISSUE_TERMINAL_STATUS = new Set(["Succeeded", "Failed", "Cancelled"]);
@@ -125,6 +125,11 @@ async function dispatch(req: NextRequest, app: string, body: JsonRpcRequest): Pr
       }
 
       case "tasks/cancel": {
+        // cancel 은 승인 결정에 닿는다(awaiting Run → rejectRun = 콘솔 reject 와 동일 효과). 콘솔
+        // /api/runs/[id]/reject 의 requireOperator 격리를 A2A 가 우회하지 못하게 같은 수준을 요구한다(이슈 #44).
+        // OIDC_OPERATOR_GROUP 미설정 환경에선 일반 인증과 동일하게 동작(현행 완화 유지 — lib/auth.ts 참고).
+        const cancelDenied = await a2aRequireAuth(req, { requireOperator: true });
+        if (cancelDenied) return cancelDenied;
         const taskId = strParam(p.id ?? p.taskId);
         if (!taskId) return rpcError(id, RPC.INVALID_PARAMS, "params.id(=task id, 문자열) 필요");
         // Run 직접 해석 + (contextId 인 경우) Issue 종료성 판단을 위해 둘 다 확인한다.
@@ -231,7 +236,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ app: str
   // 게이트를 본문 파싱보다 먼저 — 비활성/무인증이면 라우트 존재·본문 오류조차 노출하지 않는다(fail-closed).
   // 인증 실패는 A2A 스펙대로 HTTP 401(+WWW-Authenticate), 비활성은 404.
   if (!a2aServerEnabled()) return a2aDisabled();
-  if (!a2aAuthOk(req)) return a2aUnauthorized();
+  const denied = await a2aRequireAuth(req);
+  if (denied) return denied;
 
   const params = await props.params; // Next 15: params 는 Promise
 

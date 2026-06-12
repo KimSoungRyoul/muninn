@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 import { ok, serverError } from "@/lib/api";
 import { listApplications } from "@/lib/incidents";
 import { huginnAgentToAgentCard, baseUrlFromRequest } from "@/lib/a2a/card";
-import { a2aServerEnabled, a2aAuthOk, a2aDisabled, a2aUnauthorized } from "@/lib/a2a/gate";
+import { a2aServerEnabled, a2aRequireAuth, a2aDisabled } from "@/lib/a2a/gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
   // POST 와 동일 게이트(fail-closed) — 디스커버리 표면으로 HuginnAgent·source repo 가 무인증 노출되지 않게.
   // 인증 실패는 A2A 스펙대로 HTTP 401, 비활성은 404.
   if (!a2aServerEnabled()) return a2aDisabled();
-  if (!a2aAuthOk(req)) return a2aUnauthorized();
+  const denied = await a2aRequireAuth(req);
+  if (denied) return denied;
   try {
     const baseUrl = baseUrlFromRequest(req);
     const apps = await listApplications();
