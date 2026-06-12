@@ -2,14 +2,16 @@
 # 빌드: podman build -t ghcr.io/kimsoungryoul/muninn/muninn-web:dev .
 # (이 레포는 Podman 을 컨테이너 런타임으로 쓴다 — Docker 아님.)
 
-FROM node:22-alpine AS deps
+# Node 24 = 현재 Active LTS(2025-10~). Node 26 은 아직 Current(비-LTS, 2026-10 LTS 예정)이고
+# Node 25+ 부터 corepack 이 배포에서 제거돼 아래 `corepack enable` 이 깨지므로 LTS(24)에 머문다.
+FROM node:24-alpine AS deps
 WORKDIR /app
 # corepack 으로 package.json 의 packageManager(pnpm) 버전 활성화.
 RUN corepack enable
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
@@ -18,7 +20,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV COPILOTKIT_TELEMETRY_DISABLED=true
 RUN pnpm build
 
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
