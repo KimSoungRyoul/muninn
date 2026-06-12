@@ -111,11 +111,13 @@ stateDiagram-v2
     Pending --> Running
     Running --> AwaitingApproval: 승인 조건 trip
     AwaitingApproval --> Running: 승인
-    AwaitingApproval --> Cancelled: 거절/만료
+    AwaitingApproval --> Cancelled: 거절(suspend)
     Running --> Succeeded
     Running --> Failed
     Running --> Cancelled
 ```
+
+승인 **만료**는 `Cancelled` 로 전이하지 않는다 — 만료 후 approve/reject 호출이 차단되고, 에이전트가 자체 wall-clock timeout 으로 정상 중단하면 Job 종료가 관측되어 `Succeeded`/`Failed` 로 마감된다([실행 라이프사이클](/concepts/run-lifecycle) §5 참고).
 
 ## status 필드 소유권 — 3-writer 규칙
 

@@ -67,7 +67,7 @@ flowchart TB
 
 Operator 는 외부 webhook 수신자가 아니라 **K8s API watch 기반 controller** 다. 흐름을 풀면:
 
-1. Grafana → Muninn API(`POST /hooks/{app}`)가 webhook 을 받는다.
+1. Grafana → Muninn API(`POST /api/hooks/{app}`)가 webhook 을 받는다.
 2. API 가 payload 를 정규화하고 dedup 을 평가한다.
 3. 신규/재발이면 API 가 K8s API Server 에 `HuginnIssue` CR 을 생성한다.
 4. Operator 의 watch 가 이를 감지해 `HuginnRun`(→ Job/Pod)을 만든다.

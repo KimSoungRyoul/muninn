@@ -52,7 +52,7 @@ make -C huginnOperator image CONTAINER_TOOL=podman IMG=ghcr.io/kimsoungryoul/mun
 make -C muninnWeb       image CONTAINER_TOOL=podman IMG=ghcr.io/kimsoungryoul/muninn/muninn-web:dev
 for img in huginn-operator muninn-web; do
   podman save ghcr.io/kimsoungryoul/muninn/$img:dev -o /tmp/$img.tar
-  KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/$img.tar --name <cluster>
+  KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive /tmp/$img.tar --name <cluster>   # <cluster> = kind 클러스터 이름 (예: muninn)
 done
 
 # 2) 설치 (완전수식 이름이라 repository override 불필요 — tag/pullPolicy 만 맞춘다)

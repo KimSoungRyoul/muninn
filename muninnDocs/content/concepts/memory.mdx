@@ -67,7 +67,7 @@ flowchart LR
 
 ## recalledMemoryIds 보고
 
-에이전트는 어떤 기억을 회상했는지 `POST /runs/{id}/recall-report` 로 Muninn API 에
+에이전트는 어떤 기억을 회상했는지 `POST /api/runs/{id}/recall-report` 로 Muninn API 에
 보고하고, API 가 `HuginnRun.status.recalledMemoryIds[]` 를 PATCH 한다(이 필드는
 Operator 가 아니라 API 경유로 쓰인다 — [status 필드 소유권](/concepts/crds)).
 

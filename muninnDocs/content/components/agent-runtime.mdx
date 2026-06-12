@@ -73,7 +73,7 @@ podman run --rm \
   -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
   -e MUNINN_GOAL="Reply with HUGINN_OK" \
   -e MUNINN_GUARDRAILS='{"maxIterations":2}' \
-  huginn-agent-runtime:dev
+  ghcr.io/kimsoungryoul/muninn/agent-runtime:dev
 ```
 
 CI 는 [.github/workflows/agent-runtime-image.yml](https://github.com/KimSoungRyoul/muninn/blob/main/.github/workflows/agent-runtime-image.yml) 로 publish 한다(PR=빌드만, main/tag=multi-arch push). 베이스 이미지(`node:24-bookworm-slim`)는 digest 로 핀되고 도구 버전은 Dockerfile `ARG` 로 핀되어 체크섬으로 검증된다.

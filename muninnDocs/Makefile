@@ -32,12 +32,17 @@ build: ## 정적 export 빌드(out/) + pagefind 검색 인덱스 생성.
 	$(PNPM) build
 
 .PHONY: build-pages
-build-pages: ## GitHub Pages 와 동일한 basePath(/muninn)로 빌드 — 배포 전 QA 용.
+build-pages: ## GitHub Pages 와 동일한 basePath(/muninn)로 빌드 — QA 는 serve-pages 로.
 	NEXT_PUBLIC_BASE_PATH=/muninn $(PNPM) build
 
 .PHONY: serve
-serve: ## 빌드 산출물(out/) 로컬 서빙 — QA 용(http://localhost:$(PORT)).
+serve: ## `make build`(basePath 없음) 산출물 서빙(http://localhost:$(PORT)). build-pages 산출물엔 serve-pages 사용.
 	npx serve@latest out -l $(PORT)
+
+.PHONY: serve-pages
+serve-pages: ## `make build-pages` 산출물을 GitHub Pages 처럼 /muninn prefix 로 서빙(http://localhost:$(PORT)/muninn/).
+	@rm -rf .pages-root && mkdir .pages-root && ln -s ../out .pages-root/muninn
+	npx serve@latest .pages-root -l $(PORT)
 
 .PHONY: test
 test: build ## build(타입체크 게이트) 별칭 — 별도 단위 테스트 없음.

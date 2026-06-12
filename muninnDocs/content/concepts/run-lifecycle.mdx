@@ -15,7 +15,7 @@ sequenceDiagram
     participant A as Agent Job (Run)
     participant GH as GitHub
 
-    G->>API: POST /hooks/{app} (alert payload)
+    G->>API: POST /api/hooks/{app} (alert payload)
     API->>API: 정규화 + severity 필터 + dedup
     alt 신규 fingerprint 또는 재발
         API->>K: HuginnIssue CR 생성
@@ -36,7 +36,7 @@ Operator 는 외부 webhook 수신자가 아니라 **K8s API watch 기반 contro
 
 트리거는 두 경로이고 둘 다 같은 `HuginnIssue` CR 로 수렴한다.
 
-- **Webhook**: Grafana/Airflow/ArgoCD 가 `POST /hooks/{app}` 으로 alert 를 보낸다.
+- **Webhook**: Grafana/Airflow/ArgoCD 가 `POST /api/hooks/{app}` 으로 alert 를 보낸다.
   `source` 는 `grafana`/`airflow`/`argocd`.
 - **Manual(대화형 위임)**: 운영자가 CopilotKit 코파일럿으로 자연어 지시를 내리면
   `source=manual` 에 `issuingUser`/`userPrompt` provenance 가 채워진다 —
@@ -104,7 +104,7 @@ Job/Pod 상태는 Operator 가 `Run.status.phase` 로 매핑한다:
 workflow 파일 변경, guardrail 한도 근접)이 충족되면 human-in-the-loop 승인을 거친다.
 `output=github_issue` 는 승인 없이 자동 발행된다.
 
-1. 에이전트(runner.py)가 위험 작업 직전 `POST /runs/{id}/report` 에 승인 요청을 보낸다.
+1. 에이전트(runner.py)가 위험 작업 직전 `POST /api/runs/{id}/report` 에 승인 요청을 보낸다.
 2. **Muninn API 가** Run 을 `phase=AwaitingApproval`, `approval.state=Pending` 으로 전이하고
    `expiresAt`(기본 90분, `MUNINN_APPROVAL_TTL_MINUTES`)을 기록한다 — 이 전이와 `approval`
    은 API 소유 필드다([3-writer 규칙](/concepts/crds)).
@@ -123,8 +123,8 @@ workflow 파일 변경, guardrail 한도 근접)이 충족되면 human-in-the-lo
 
 실행 중·종료 시 에이전트는 Muninn API 로 보고한다:
 
-- `POST /runs/{id}/report` — `step`/`cost`/`tokens`/`output`(Agent→API 소유 필드만 PATCH).
-- `POST /runs/{id}/recall-report` — `recalledMemoryIds[]`(id, score, reason).
+- `POST /api/runs/{id}/report` — `step`/`cost`/`tokens`/`output`(Agent→API 소유 필드만 PATCH).
+- `POST /api/runs/{id}/recall-report` — `recalledMemoryIds[]`(id, score, reason).
 - 완료 시 결과를 기억으로 저장한다 — [기억 시스템](/concepts/memory).
 
 `finishedAt` 과 `durationSeconds` 는 Operator 가 Job 종료를 관측해 기록한다. Run/Issue 는

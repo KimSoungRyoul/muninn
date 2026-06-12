@@ -88,6 +88,7 @@ Next.js 콘솔 + Muninn API. 포트 3030, 패키지 매니저는 pnpm. 원본: [
 |------|------|
 | `dev` | 개발 서버(`http://localhost:3031`) — 검색(pagefind)은 build 산출물에서만 동작 |
 | `build` | 정적 export 빌드(`out/`) + pagefind 검색 인덱스 생성 |
-| `build-pages` | GitHub Pages 와 동일한 basePath(`/muninn`)로 빌드 — 배포 전 QA 용 |
-| `serve` | 빌드 산출물(`out/`) 로컬 서빙 — QA 용 |
+| `build-pages` | GitHub Pages 와 동일한 basePath(`/muninn`)로 빌드 — QA 는 `serve-pages` 로 |
+| `serve` | `make build`(basePath 없음) 산출물 로컬 서빙 |
+| `serve-pages` | `make build-pages` 산출물을 `/muninn` prefix 로 서빙(Pages 모사 QA) |
 | `sync` | `docs/design/` → `content/design/` 동기화(빌드/개발 전 자동 실행됨) |

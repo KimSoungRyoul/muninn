@@ -14,3 +14,6 @@ _pagefind/
 
 # 로컬 브라우저 QA 아티팩트(playwright-cli)
 .playwright-cli/
+
+# make serve-pages 가 만드는 /muninn prefix 스테이징 디렉토리
+.pages-root/

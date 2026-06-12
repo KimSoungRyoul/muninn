@@ -34,7 +34,11 @@ kubectl -n muninn port-forward svc/muninn-web 3030:3030
 open http://localhost:3030
 ```
 
-`CLAUDE_CODE_OAUTH_TOKEN` 없이 설치하면 코파일럿/agent 가 비활성 상태로 뜨고, 나중에 Secret(`agent-secrets`, `muninn-web-secrets`)을 만들어 `helm upgrade --reuse-values` 로 켤 수 있다.
+`CLAUDE_CODE_OAUTH_TOKEN` 없이 설치하면 코파일럿/agent 가 비활성 상태로 뜬다. 나중에 켜려면 Secret(`agent-secrets`, `muninn-web-secrets`)을 만든 뒤 **web Deployment 를 재시작**해야 한다 — Secret 은 `optional` env 로만 참조되어 helm values 가 그대로면 `helm upgrade --reuse-values` 로는 rollout 이 일어나지 않는다.
+
+```bash
+kubectl -n muninn rollout restart deploy/muninn-web
+```
 
 <Callout type="info">
 **`run-local` 과 `run-kind` 는 다르다.** `run-local`(루트)은 operator 까지 Helm 으로 클러스터 **안** 에 배포하고, `run-kind`(huginnOperator)는 operator 를 클러스터 **밖**(host `go run`)에서 실행하는 빠른 컨트롤러 개발 루프다.
