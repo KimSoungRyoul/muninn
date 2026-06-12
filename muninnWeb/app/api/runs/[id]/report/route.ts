@@ -7,7 +7,7 @@
 //   이미 종료된 Run(Succeeded/Failed/Cancelled)은 승인 전이를 무시한다(상태 검증).
 //
 // 입력(JSON):
-//   { step?, cost?, tokens?, output?, recalledMemoryIds?: [{id,score?,reason?}],
+//   { step?, cost?, tokens?, output?, sessionId?, recalledMemoryIds?: [{id,score?,reason?}],
 //     requestApproval?: bool | {reasons:[{type,detail?}]}, approvalReasons?: [{type,detail?}],
 //     incidentId?, summary?, final?, failed?, terminalKind?: "rejected"|"expired"|"aborted" }
 //
@@ -60,6 +60,12 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const tokens = finiteOr(body.tokens);
   if (tokens != null) status.tokens = tokens;
   if (typeof body.output === "string") status.output = body.output;
+  // sessionId(Agent→API 소유, §5.5): 다음 attempt 의 resume 에 쓰인다. operator 가 이 값을
+  // MUNINN_RESUME_SESSION_ID env 로 그대로 주입하므로, Claude 세션 ID 형태(UUID 류)만 수용해
+  // 임의 문자열이 env 로 흘러들지 않게 한다.
+  if (typeof body.sessionId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(body.sessionId)) {
+    status.sessionId = body.sessionId;
+  }
   const recalled = normalizeRecalledMemoryIds(body.recalledMemoryIds);
   if (recalled.length) status.recalledMemoryIds = recalled;
 

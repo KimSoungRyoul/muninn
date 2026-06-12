@@ -104,6 +104,56 @@ func TestBuildJobTemplate(t *testing.T) {
 	}
 }
 
+// TestWithResumeSession 은 재시도 attempt 의 세션 resume 배선을 검증한다(§5.5).
+// sessionID 가 있으면 MUNINN_RESUME_SESSION_ID env 가 덧붙고, 비면(직전 attempt 가 보고 전에
+// 죽은 경우) JobTemplate 이 그대로여야 한다 — 빈 env 주입은 runner 의 새-세션 기본 동작을 가린다.
+func TestWithResumeSession(t *testing.T) {
+	agent, issue := testFixtures()
+	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
+	baseEnvLen := len(jt.Env)
+
+	resumed := withResumeSession(jt, "0a1b2c3d-e4f5-6789-abcd-ef0123456789")
+	e, ok := envByName(resumed.Env, "MUNINN_RESUME_SESSION_ID")
+	if !ok || e.Value != "0a1b2c3d-e4f5-6789-abcd-ef0123456789" {
+		t.Errorf("MUNINN_RESUME_SESSION_ID = %+v(ok=%v), want 직전 sessionId", e, ok)
+	}
+
+	fresh := withResumeSession(buildJobTemplate(agent, issue, "http://mem", "http://api"), "")
+	if _, ok := envByName(fresh.Env, "MUNINN_RESUME_SESSION_ID"); ok {
+		t.Error("sessionID 빈 값엔 MUNINN_RESUME_SESSION_ID 가 없어야 한다(새 세션)")
+	}
+	if len(fresh.Env) != baseEnvLen {
+		t.Errorf("빈 sessionID 가 env 를 변형: len=%d, want %d", len(fresh.Env), baseEnvLen)
+	}
+}
+
+// TestLastSessionID 는 재시도 시 resume 할 세션 선택 규칙을 고정한다(§5.5, 리뷰 LOW-1):
+// attempt 오름차순에서 뒤에서부터 첫 non-empty sessionId — 직전 attempt 가 init 전에 죽어
+// 세션을 못 남겼어도 그 이전 attempt 의 세션 체인을 잇고, 전부 비면 새 세션("").
+func TestLastSessionID(t *testing.T) {
+	mkRun := func(attempt int32, sid string) muninniov1beta1.HuginnRun {
+		var r muninniov1beta1.HuginnRun
+		r.Spec.Attempt = attempt
+		r.Status.SessionID = sid
+		return r
+	}
+	cases := []struct {
+		name string
+		runs []muninniov1beta1.HuginnRun
+		want string
+	}{
+		{"빈 목록", nil, ""},
+		{"전부 미보고", []muninniov1beta1.HuginnRun{mkRun(1, ""), mkRun(2, "")}, ""},
+		{"직전 attempt 우선", []muninniov1beta1.HuginnRun{mkRun(1, "sid-1"), mkRun(2, "sid-2")}, "sid-2"},
+		{"직전 미보고 → 한 단계 폴백", []muninniov1beta1.HuginnRun{mkRun(1, "sid-1"), mkRun(2, "")}, "sid-1"},
+	}
+	for _, tc := range cases {
+		if got := lastSessionID(tc.runs); got != tc.want {
+			t.Errorf("%s: lastSessionID = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestBuildJobTemplateRequireApprovalDefault 은 PR 정책이 없거나 false 면 requireApproval:false 로
 // 직렬화됨을 검증한다(HITL 트리거 기본 off — CONTRACT §C1).
 func TestBuildJobTemplateRequireApprovalDefault(t *testing.T) {

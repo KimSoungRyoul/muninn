@@ -6,6 +6,9 @@ claude_skill.sh 가 컨텍스트(env)를 준비한 뒤 이 모듈을 exec 한다
 * live(기본): MUNINN_GOAL 을 목표로 Claude Agent SDK `query()` 루프를 돌린다.
   - max_turns ← MUNINN_GUARDRAILS.maxIterations (§5.4)
   - 인증은 env 의 ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN(claude CLI 가 소비)
+  - MUNINN_RESUME_SESSION_ID 가 있으면(같은 Issue 의 재시도 attempt — operator 주입, §5.5)
+    직전 attempt 의 Claude 세션을 resume 해 진단 컨텍스트를 이어받는다. 세션 ID 는 메시지
+    스트림에서 잡히는 즉시 report API 로 보고해 다음 attempt 가 쓸 수 있게 한다.
 * selftest(--selftest / MUNINN_SELFTEST=1 / ANTHROPIC_API_KEY=SELFTEST):
   API 호출 없이 SDK import·옵션 구성·claude CLI 응답만 검증하고 exit 0. kind/CI QA 용.
 """
@@ -13,6 +16,7 @@ claude_skill.sh 가 컨텍스트(env)를 준비한 뒤 이 모듈을 exec 한다
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import os
 import shutil
@@ -380,10 +384,15 @@ def _gate_terminal_kind(gate_outcome: str) -> str:
     return ""
 
 
-def build_options(max_turns: int, max_budget_usd: float | None = None):
+def build_options(max_turns: int, max_budget_usd: float | None = None, resume_session_id: str = ""):
     """ClaudeAgentOptions 를 구성(라이브/셀프테스트 공통). SDK 계약 검증 지점.
 
     guardrails 매핑(§5.4): maxIterations→max_turns, maxCostUsd→max_budget_usd.
+
+    resume_session_id(§5.5): 직전 attempt 의 Claude 세션 ID(MUNINN_RESUME_SESSION_ID).
+    세션 transcript 는 앱별 ~/.claude PVC 에 있고 모든 Run 의 cwd(/workspace)가 동일해
+    같은 프로젝트 디렉토리로 resume 된다. attempt 간 pod 겹침은 없으므로(Issue 컨트롤러가
+    직전 Run 의 터미널 phase 를 확인한 뒤에만 다음 attempt 를 만든다) 동일 세션 이어쓰기가 안전하다.
 
     maxTokens 한계(브리프 MEDIUM): SDK 에 직접 옵션이 없다. 토큰/cost 값은 SDK 가 주는 usage 에
     의존하는데, 현재 SDK 버전에서 per-turn usage 가 AssistantMessage 에 실리지 않으면 누적은
@@ -411,7 +420,37 @@ def build_options(max_turns: int, max_budget_usd: float | None = None):
     }
     if max_budget_usd is not None and max_budget_usd > 0:
         opts["max_budget_usd"] = max_budget_usd
+    if resume_session_id:
+        opts["resume"] = resume_session_id
     return ClaudeAgentOptions(**opts)
+
+
+def _has_transcript(session_id: str, claude_home: str | None = None) -> bool:
+    """resume 대상 세션의 transcript 가 ~/.claude/projects/ 하위에 실재하는지 검사한다(§5.5).
+
+    preflight 인 이유(리뷰 MEDIUM-1): transcript 가 없으면(PVC 재생성, transcript 정리 등)
+    claude CLI 가 --resume 단계에서 에러로 죽어 attempt 가 단 한 턴도 못 돌고 Failed 가 된다 —
+    retry budget(maxRuns) 1회가 통째로 증발한다. 없으면 호출부가 새 세션으로 폴백한다.
+    """
+    if not session_id:
+        return False
+    home = claude_home or os.path.expanduser("~/.claude")
+    return bool(glob.glob(os.path.join(home, "projects", "*", f"{session_id}.jsonl")))
+
+
+def _extract_session_id(message) -> str:
+    """SDK 메시지에서 Claude 세션 ID 를 추출한다(없으면 빈 문자열).
+
+    스트림 첫 init SystemMessage 는 data dict 에, ResultMessage 는 session_id 속성에 싣는다 —
+    둘 다 duck-typing 으로 읽어 SDK 버전별 메시지 형태 차이에 강건하게 한다(§5.5).
+    init 에서 일찍 잡는 것이 중요하다: ResultMessage 만 기다리면 도중 죽은 run(=재시도가
+    필요한 바로 그 경우)은 세션 ID 를 보고하지 못해 resume 이 영영 안 된다.
+    """
+    sid = getattr(message, "session_id", None)
+    if not (isinstance(sid, str) and sid):
+        data = getattr(message, "data", None)
+        sid = data.get("session_id") if isinstance(data, dict) else None
+    return sid if isinstance(sid, str) else ""
 
 
 def selftest() -> int:
@@ -429,10 +468,12 @@ def selftest() -> int:
         report["ok"] = False
         report["checks"]["claude_agent_sdk"] = f"IMPORT FAILED: {exc}"
 
-    # 2) ClaudeAgentOptions 구성(API 시그니처 검증) — max_budget_usd 배선 경로도 커버
+    # 2) ClaudeAgentOptions 구성(API 시그니처 검증) — max_budget_usd·resume(§5.5) 배선 경로도 커버.
+    #    resume 는 SDK 의 ClaudeAgentOptions 필드 계약이므로 여기서 깨지면 이미지 QA 에서 잡힌다.
     try:
         build_options(max_turns=1, max_budget_usd=1.0)
-        report["checks"]["claude_agent_options"] = "ok"
+        build_options(max_turns=1, max_budget_usd=1.0, resume_session_id="selftest-session")
+        report["checks"]["claude_agent_options"] = "ok (incl. resume)"
     except Exception as exc:
         report["ok"] = False
         report["checks"]["claude_agent_options"] = f"FAILED: {exc}"
@@ -566,7 +607,13 @@ async def run_live() -> int:
     max_turns = int(g.get("maxIterations", 12) or 12)
     max_cost = g.get("maxCostUsd")
     max_budget = float(max_cost) if max_cost else None  # 0/None=무제한(가드레일이 명시한 경우)
-    options = build_options(max_turns=max_turns, max_budget_usd=max_budget)
+    # 재시도 attempt(같은 Issue)면 operator 가 직전 attempt 의 세션 ID 를 주입한다(§5.5).
+    # transcript 미발견 시 새 세션 폴백(리뷰 MEDIUM-1) — 깨진 resume 으로 attempt 를 태우지 않는다.
+    resume_id = _env("MUNINN_RESUME_SESSION_ID")
+    if resume_id and not _has_transcript(resume_id):
+        log(f"WARN: resume 대상 transcript 미발견(session={resume_id}) → 새 세션으로 시작")
+        resume_id = ""
+    options = build_options(max_turns=max_turns, max_budget_usd=max_budget, resume_session_id=resume_id)
 
     # SIGTERM(pod 축출/timeout 시 kubelet 이 보냄) → 현재 task 를 cancel 해 CancelledError 경로로
     # 진입시킨다. 그러면 try/except 가 terminal 보고를 보내고, 미보내면 metaDB incident 가 영구
@@ -613,12 +660,14 @@ async def run_live() -> int:
         "recalledMemoryIds": recalled_payload,
     })
 
-    log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, pr_mode={pr_mode}, goal={goal[:120]!r}")
+    log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, pr_mode={pr_mode}, "
+        f"resume={resume_id or '-'}, goal={goal[:120]!r}")
     cost = 0.0
     tokens = 0
     turns = 0
     step = 0
     last_text = ""  # dry-run PR 계획 = 마지막 assistant 텍스트
+    session_id = ""  # 이 run 의 Claude 세션 ID(스트림에서 캡처, 다음 attempt 의 resume 용 §5.5)
     is_error = False
     subtype = ""
     final_sent = False  # terminal 보고 중복 방지(정상 종료 경로 ↔ 예외/취소 경로)
@@ -665,6 +714,10 @@ async def run_live() -> int:
             "final": True,
             "failed": failed,
         }
+        # 세션 ID(§5.5): 같은 Issue 의 다음 attempt 가 resume 하도록 terminal 보고에도 동봉한다
+        # (스트림 캡처 시점의 즉시 보고가 일시 장애로 유실됐어도 여기서 한 번 더 보장).
+        if session_id:
+            patch["sessionId"] = session_id
         # 화이트리스트(web report route 와 동일) 외 값은 싣지 않는다 — 임의 문자열 차단.
         if terminal_kind in ("rejected", "expired", "aborted"):
             patch["terminalKind"] = terminal_kind
@@ -739,6 +792,14 @@ async def run_live() -> int:
                 ))
                 return 0
         async for message in query(prompt=prompt, options=options):
+            # 세션 ID 캡처(§5.5) — 스트림 첫 init 메시지에서 잡히는 즉시 보고한다. ResultMessage 만
+            # 기다리면 도중 죽은 run(재시도가 필요한 바로 그 경우)이 세션을 남기지 못한다.
+            if not session_id:
+                sid = _extract_session_id(message)
+                if sid:
+                    session_id = sid
+                    log(f"session: {session_id}" + (" (resumed)" if resume_id else ""))
+                    await report_async({"step": step, "sessionId": session_id})
             if isinstance(message, AssistantMessage):
                 step += 1
                 for block in message.content:
@@ -841,11 +902,13 @@ async def run_live() -> int:
         title_line = next((ln.strip("# ").strip() for ln in output.splitlines() if ln.strip()), "")
         outcome = f"DRY-RUN PR: {title_line[:80]}" if pr_mode == "dry-run" else title_line[:80]
 
-    log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}, subtype={subtype!r}, is_error={is_error}, outcome={outcome!r}")
+    log(f"live 완료: turns={turns}, cost_usd={cost}, tokens={tokens}, subtype={subtype!r}, "
+        f"is_error={is_error}, session={session_id or '-'}, outcome={outcome!r}")
     print(json.dumps(
         {"mode": "live", "ok": ok, "turns": turns, "cost_usd": cost, "tokens": tokens,
          "subtype": subtype, "is_error": is_error, "outcome": outcome,
-         "recalled": recalled_ids, "pr_mode": pr_mode},
+         "recalled": recalled_ids, "pr_mode": pr_mode,
+         "session_id": session_id, "resumed_from": resume_id},
         ensure_ascii=False,
     ))
     return 0 if ok else 1

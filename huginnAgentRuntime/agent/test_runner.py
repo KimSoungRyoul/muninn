@@ -10,12 +10,14 @@
   * _parse_approval_state / _approval_detail: 거절 선점(항목1) 조회가 의존하는 방어적 파싱
   * send_final patch 의 terminalKind 화이트리스트(임의 문자열 차단) — 보고 페이로드 빌더를
     runner 의 실제 분기와 동일하게 재현해 계약 형태를 고정한다.
+  * _extract_session_id: 세션 resume 배선(§5.5)이 의존하는 SDK 메시지 duck-typing 파싱
 """
 
 from __future__ import annotations
 
 import os
 import sys
+import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -97,6 +99,62 @@ class ParseApprovalStateTest(unittest.TestCase):
         self.assertIsNone(runner._parse_approval_state({"approval": ""}))
         self.assertIsNone(runner._parse_approval_state({"approval": {"state": ""}}))
         self.assertIsNone(runner._parse_approval_state("not-a-dict"))
+
+
+class ExtractSessionIdTest(unittest.TestCase):
+    """_extract_session_id 의 duck-typing 계약(§5.5) — SDK 메시지 형태 둘 다 커버한다."""
+
+    def test_attribute_form_result_message(self):
+        # ResultMessage 형태: session_id 속성.
+        msg = types.SimpleNamespace(session_id="0a1b2c3d-e4f5")
+        self.assertEqual(runner._extract_session_id(msg), "0a1b2c3d-e4f5")
+
+    def test_data_dict_form_init_message(self):
+        # init SystemMessage 형태: data dict 의 session_id 키.
+        msg = types.SimpleNamespace(data={"session_id": "init-sid", "tools": []})
+        self.assertEqual(runner._extract_session_id(msg), "init-sid")
+
+    def test_attribute_takes_precedence_over_data(self):
+        msg = types.SimpleNamespace(session_id="attr-sid", data={"session_id": "data-sid"})
+        self.assertEqual(runner._extract_session_id(msg), "attr-sid")
+
+    def test_missing_or_invalid_yields_empty(self):
+        # 없음/빈 값/비문자열 → 빈 문자열(캡처 안 함, 다음 메시지에서 재시도).
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace()), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(session_id="")), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(session_id=123)), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(data={"other": 1})), "")
+        self.assertEqual(runner._extract_session_id(types.SimpleNamespace(data="not-a-dict")), "")
+
+
+class HasTranscriptTest(unittest.TestCase):
+    """_has_transcript 의 resume preflight(§5.5, 리뷰 MEDIUM-1) — transcript 가 없으면
+    새 세션으로 폴백해 깨진 resume 으로 attempt(retry budget)를 태우지 않는다."""
+
+    def setUp(self):
+        import tempfile
+
+        self.home = tempfile.mkdtemp(prefix="claude-home-")
+        self.addCleanup(__import__("shutil").rmtree, self.home, ignore_errors=True)
+
+    def _write_transcript(self, project: str, sid: str) -> None:
+        d = os.path.join(self.home, "projects", project)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, f"{sid}.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write("{}\n")
+
+    def test_existing_transcript_found(self):
+        self._write_transcript("-workspace", "sid-live")
+        self.assertTrue(runner._has_transcript("sid-live", claude_home=self.home))
+
+    def test_missing_transcript_yields_false(self):
+        # PVC 재생성/transcript 정리 시나리오 — preflight 가 False 면 호출부가 resume 을 끈다.
+        self._write_transcript("-workspace", "sid-other")
+        self.assertFalse(runner._has_transcript("sid-gone", claude_home=self.home))
+
+    def test_empty_session_or_empty_home(self):
+        self.assertFalse(runner._has_transcript("", claude_home=self.home))
+        self.assertFalse(runner._has_transcript("sid-x", claude_home=self.home))
 
 
 class ApprovalDetailTest(unittest.TestCase):

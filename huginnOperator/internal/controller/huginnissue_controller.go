@@ -124,9 +124,9 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	runs := runList.Items
 	sort.Slice(runs, func(i, j int) bool { return runs[i].Spec.Attempt < runs[j].Spec.Attempt })
 
-	// 최초 Run 생성.
+	// 최초 Run 생성(resume 없음 — 새 세션).
 	if len(runs) == 0 {
-		if err := r.createRun(ctx, &issue, &agent, 1); err != nil {
+		if err := r.createRun(ctx, &issue, &agent, 1, ""); err != nil {
 			return ctrl.Result{}, err
 		}
 		log.Info("최초 Run 생성", "attempt", 1)
@@ -197,7 +197,10 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{RequeueAfter: wait}, nil
 			}
 			next := latest.Spec.Attempt + 1
-			if err := r.createRun(ctx, &issue, &agent, next); err != nil {
+			// 가장 최근에 보고된 Claude 세션을 이어받는다(§5.5 resume, 리뷰 LOW-1). 직전 attempt 가
+			// 세션 보고 전에 죽었어도(init 전 크래시 등) 그 이전 attempt 의 transcript 는 PVC 에 남아
+			// 있으므로 뒤에서부터 첫 non-empty sessionId 를 고른다. 전부 비면 새 세션.
+			if err := r.createRun(ctx, &issue, &agent, next, lastSessionID(runs)); err != nil {
 				return ctrl.Result{}, err
 			}
 			log.Info("재시도 Run 생성", "attempt", next)
@@ -252,8 +255,10 @@ func (r *HuginnIssueReconciler) suspendRuns(ctx context.Context, issue *muninnio
 	return nil
 }
 
+// createRun 은 attempt 번째 HuginnRun 을 만든다. resumeSessionID 가 있으면(재시도 attempt 한정)
+// MUNINN_RESUME_SESSION_ID env 로 주입해 runner 가 직전 attempt 의 Claude 세션을 resume 한다(§5.5).
 func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1beta1.HuginnIssue,
-	agent *muninniov1beta1.HuginnAgent, attempt int32) error {
+	agent *muninniov1beta1.HuginnAgent, attempt int32, resumeSessionID string) error {
 	memEndpoint := orDefault(r.MemoryEndpoint, defaultMemoryEndpoint)
 	apiEndpoint := orDefault(r.APIEndpoint, defaultAPIEndpoint)
 
@@ -270,7 +275,7 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 			// 60~90m 사이 승인이 60m activeDeadline 에 SIGKILL 당하는 모순을 막는다(CONTRACT §C-HITL).
 			TimeoutSeconds:          runTimeoutSeconds(agent),
 			TTLSecondsAfterFinished: 86400,
-			JobTemplate:             buildJobTemplate(agent, issue, memEndpoint, apiEndpoint),
+			JobTemplate:             withResumeSession(buildJobTemplate(agent, issue, memEndpoint, apiEndpoint), resumeSessionID),
 		},
 	}
 	if err := controllerutil.SetControllerReference(issue, run, r.Scheme); err != nil {
@@ -343,6 +348,18 @@ func issueChildLabels(issue *muninniov1beta1.HuginnIssue, agent *muninniov1beta1
 		out[LabelFingerprint] = issue.Spec.Event.Fingerprint
 	}
 	return out
+}
+
+// lastSessionID 는 attempt 오름차순 정렬된 runs 에서 가장 최근의 non-empty sessionId 를 반환한다(§5.5).
+// sessionId 는 Agent→API 소유라 init 전에 죽은 attempt 는 비어 있다 — 그 경우 한 단계 더 거슬러
+// 올라가 살아 있는 세션 체인을 잇는다(리뷰 LOW-1). 전부 비면 빈 문자열(새 세션).
+func lastSessionID(runs []muninniov1beta1.HuginnRun) string {
+	for i := len(runs) - 1; i >= 0; i-- {
+		if sid := runs[i].Status.SessionID; sid != "" {
+			return sid
+		}
+	}
+	return ""
 }
 
 func runNames(runs []muninniov1beta1.HuginnRun) []string {
