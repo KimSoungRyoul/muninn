@@ -21,6 +21,7 @@ import {
   delegateIncident,
 } from "./incidents";
 import { k8sEnabled } from "./k8s";
+import { getCopilotWorkspace } from "./workspace";
 
 const K8S_OFF = { error: "k8s-disabled", note: "이 muninnWeb 인스턴스는 클러스터에 연결돼 있지 않습니다(로컬 dev). 위임/조회는 kind/클러스터 배포에서 동작합니다." };
 const DB_OFF = { error: "db-disabled", note: "메모리(postgres)가 설정되지 않았습니다(DATABASE_URL 미설정). 검색/저장은 DB 연결 시 동작합니다." };
@@ -40,7 +41,8 @@ export const muninnServerTools = [
     }),
     execute: async ({ query, scope, app, k }) => {
       if (!dbEnabled()) return DB_OFF;
-      const rows = await recall(query, { scope, appId: app, k });
+      // 멀티테넌시(§C3/§4): 요청 컨텍스트(ALS)의 workspace 로 격리 — 미설정 시 서버 기본값.
+      const rows = await recall(query, { workspace: getCopilotWorkspace(), scope, appId: app, k });
       return { count: rows.length, items: rows };
     },
   }),
@@ -59,7 +61,8 @@ export const muninnServerTools = [
     execute: async ({ fact, scope, app, tags, sourceRunId }) => {
       if (!dbEnabled()) return DB_OFF;
       if (!fact) return { error: "bad_input", note: "fact 는 필수입니다." };
-      const row = await store({ fact, scope, appId: app ?? null, appName: app ?? null, tags, sourceRunId: sourceRunId ?? null, changedBy: "copilot" });
+      // 멀티테넌시(§C3/§4): 요청 컨텍스트(ALS)의 workspace 로 격리 저장 — 미설정 시 서버 기본값.
+      const row = await store({ fact, workspace: getCopilotWorkspace(), scope, appId: app ?? null, appName: app ?? null, tags, sourceRunId: sourceRunId ?? null, changedBy: "copilot" });
       return { stored: row };
     },
   }),

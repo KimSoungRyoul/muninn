@@ -43,6 +43,10 @@ export interface RunVM {
   issue: string | null;
   namespace: string;
   approval: string | null; // Pending | Approved | Rejected | Expired
+  // 거절/승인 사유 표면화(관측성, 리뷰 LOW) — runner 의 _approval_detail 이 'rejected: <사유>' 를 남기도록
+  // 평탄화된 state 외에 보조 필드도 노출한다(approval 이 dict 일 때만 채워짐).
+  approvalReason?: string | null;
+  approvalDecidedBy?: string | null;
   startedAt: string | null;
   source?: DataSource;
 }
@@ -106,6 +110,9 @@ function runView(cr: any): RunVM {
     issue: cr?.spec?.issueRef ?? null,
     namespace: cr?.metadata?.namespace ?? ns(),
     approval: st.approval?.state ?? null,
+    // 거절 사유 표면화(관측성): reasons[].detail 우선, 없으면 자기류 reason 필드(rejectRun 이 둘 다 기록).
+    approvalReason: st.approval?.reason ?? st.approval?.reasons?.[0]?.detail ?? null,
+    approvalDecidedBy: st.approval?.decidedBy ?? null,
     startedAt: st.startedAt ?? null,
     source: "k8s",
   };
@@ -590,6 +597,13 @@ export interface DedupResult {
  * 위임 전 호출 — fingerprint 라벨로 활성(Pending/Running/AwaitingApproval) HuginnIssue 를 찾아,
  * 있으면 status.dedupCount 를 +1 merge-patch 하고 hit=true 를 반환한다. 없으면 hit=false(새로 생성).
  * Redis 도입 전 K8s 라벨 기반 MVP. fingerprint 는 label-safe 로 정규화된 값을 받는다.
+ *
+ * **불변식(리뷰 LOW)**: dedup 조회 namespace 와 delegateIncident 의 Issue 생성 namespace 는 반드시
+ * 일치해야 한다. 둘 다 ns()(=k8s.DEFAULT_NAMESPACE)를 기준으로 한다 — delegateIncident 는
+ * `agent.metadata.namespace ?? ns()` 로 생성하지만, agent CR 도 listApplications/getApplicationCr 가
+ * ns() 에서 조회하므로 단일 namespace 운영에서 둘이 같다. agent CR 을 다른 namespace 에 두는 멀티-
+ * namespace 배치로 확장하면, dedup 이 생성 namespace 를 보지 못해 중복 Issue 가 양산되므로(매번 hit=false)
+ * 이 함수에 대상 namespace 를 인자로 받아 delegate 와 공유해야 한다.
  */
 export async function dedupActiveIssue(app: string, fingerprintLabel: string): Promise<DedupResult> {
   if (!k8s.k8sEnabled() || !fingerprintLabel || !isLabelSafe(fingerprintLabel)) return { hit: false };

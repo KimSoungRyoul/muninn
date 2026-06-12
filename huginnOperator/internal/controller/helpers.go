@@ -82,11 +82,21 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 	memoryEndpoint, apiEndpoint string) muninniov1beta1.JobTemplate {
 
 	g := issue.Spec.InheritedGuardrails
+	// HITL 진입 트리거(CONTRACT §C1, 리뷰 HIGH): agent 의 PR 정책
+	// source.pr.requireApprovalOnWorkflowChange 를 MUNINN_GUARDRAILS JSON 의
+	// "requireApproval" 키로 직렬화한다. runner._require_approval() 가 이 키를 읽어
+	// 위험작업 직전 승인 게이트를 켠다 — operator 만 이 키를 채우면 HITL 루프가 실제 작동한다.
+	// (CRD 필드명 requireApprovalOnWorkflowChange ↔ runner 키 requireApproval 의 경계는 여기서 고정.)
+	requireApproval := false
+	if pr := agent.Spec.Source.PR; pr != nil {
+		requireApproval = pr.RequireApprovalOnWorkflowChange
+	}
 	env := []corev1.EnvVar{
 		{Name: "MUNINN_GOAL", Value: issue.Spec.Goal},
 		{Name: "MUNINN_GLOBAL_SYSTEM_PROMPT_REF", Value: "configmap/muninn-global-prompt"},
 		{Name: "MUNINN_TEAM_SETTINGS_REF", Value: "configmap/muninn-team-settings"},
-		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d}`, g.MaxIterations, g.MaxCostUsd, g.MaxTokens)},
+		{Name: "MUNINN_GUARDRAILS", Value: fmt.Sprintf(`{"maxIterations":%d,"maxCostUsd":%d,"maxTokens":%d,"requireApproval":%t}`,
+			g.MaxIterations, g.MaxCostUsd, g.MaxTokens, requireApproval)},
 		{Name: "MUNINN_MEMORY_ENDPOINT", Value: memoryEndpoint},
 		{Name: "MUNINN_API_ENDPOINT", Value: apiEndpoint},
 		// 인증: env(Secret)로만(§5.1, §6.2). API 키 또는 OAuth 토큰 중 하나면 충분 →

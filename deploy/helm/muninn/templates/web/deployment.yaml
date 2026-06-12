@@ -28,7 +28,7 @@ spec:
       serviceAccountName: {{ include "muninn.web.serviceAccountName" . }}
       # 토큰 마운트는 SA 생성 여부와 분리한다 — 기존 SA(create=false) 사용 시에도 in-cluster K8s
       # 자격이 있어야 k8sEnabled()가 통과한다(아니면 조용히 mock 폴백). 기본 true.
-      automountServiceAccountToken: {{ .Values.web.serviceAccount.automount }}
+      automountServiceAccountToken: {{ .Values.web.serviceAccount.automount | default true }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

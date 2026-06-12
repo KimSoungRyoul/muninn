@@ -38,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # SARIF 를 code-scanning 으로 업로드하려면 필요(아래 upload-sarif). 결과를 PR Security 탭에 노출.
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -58,6 +60,9 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
+      # trivy 는 리포트 위주(exit-code:0). 게이트화(exit-code:1)는 후속 작업 — 현재 build 는
+      #   CRITICAL/HIGH 가 떠도 green 이고, publish(needs:build)가 그대로 push 한다. 즉 취약 이미지도
+      #   latest 로 배포될 수 있음(의도된 단계적 도입). 게이트가 필요하면 CRITICAL 한정 exit-code:1 도입.
       - name: Scan image (trivy)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -68,6 +73,15 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
 
+      # PR Security 탭에 추세를 남긴다(category 로 이미지별 분리). 스캔이 실패해도 always() 로 업로드.
+      - name: Upload trivy SARIF to code-scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        with:
+          sarif_file: trivy-web.sarif
+          category: trivy-web
+
+      # 아티팩트 보관(다운로드해 상세 확인용). code-scanning 업로드와 병행.
       - name: Upload trivy report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -133,12 +133,23 @@ func (r *HuginnRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		//       Failed(reason=JobLost) 로 종료시켜 Issue 컨트롤러의 정규 재시도(새 attempt, maxRuns/backoff)로 넘긴다.
 		//   (2) status.jobName == "" → 최초 생성. 이 분기만 createJob 한다('Run=정확히 1 attempt=Job 1개' 불변식).
 		if run.Status.JobName != "" {
-			log.Info("Job 소실 감지(비터미널 Run) — 재생성하지 않고 Failed 로 종료", "job", run.Status.JobName)
+			// 결과 불확정 구분(리뷰 LOW): 에이전트가 이미 종료 신호를 보고했는데(status.output 채워짐)
+			// Job 이 사라졌다면, 이는 '실패해서 Job 이 죽은 것'이 아니라 'Job 이 Complete 된 뒤
+			// TTL 정리되었고 그사이 operator 가 다운'된 정황일 수 있다. 비멱등 계약상 재실행은
+			// 여전히 금지(Failed 로 닫아 Issue 의 정규 재시도로 넘김)하되, 운영자가 Issue outcome 으로
+			// 성공/실패를 구분할 수 있도록 condition message 에 '결과 불확정' 과 보고값을 명시한다.
+			reported := run.Status.Output != ""
+			msg := fmt.Sprintf("Job %q 가 사라짐 — 비멱등 재실행 금지, Issue 가 새 attempt 로 재시도", run.Status.JobName)
+			if reported {
+				msg = fmt.Sprintf("Job %q 가 사라짐 — 에이전트가 이미 결과(output=%q)를 보고함. "+
+					"결과 불확정(TTL 정리 후 성공 Job 일 가능성); 비멱등 재실행 금지, Issue outcome 으로 판정",
+					run.Status.JobName, run.Status.Output)
+			}
+			log.Info("Job 소실 감지(비터미널 Run) — 재생성하지 않고 Failed 로 종료",
+				"job", run.Status.JobName, "agentReported", reported)
 			r.markFinished(&run, muninniov1beta1.RunFailed)
-			setRunCondition(&run, "Failed", metav1.ConditionTrue, "JobLost",
-				fmt.Sprintf("Job %q 가 사라짐 — 비멱등 재실행 금지, Issue 가 새 attempt 로 재시도", run.Status.JobName))
-			r.recordEvent(&run, corev1.EventTypeWarning, "JobLost",
-				fmt.Sprintf("Job %q 소실 — 재생성하지 않고 Failed 처리", run.Status.JobName))
+			setRunCondition(&run, "Failed", metav1.ConditionTrue, "JobLost", msg)
+			r.recordEvent(&run, corev1.EventTypeWarning, "JobLost", msg)
 			return r.patchStatus(ctx, base, &run)
 		}
 		if err := r.createJob(ctx, &run); err != nil {
@@ -254,6 +265,10 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		ServiceAccountName: sa,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
+		// SIGTERM(축출/타임아웃) 시 runner.py 가 terminal 보고(final/failed/terminalKind)를 보낼 예산을
+		// 확보한다. runner 의 SIGTERM 보고 예산(기본 ~20s) + 여유 → 60s. K8s 기본 30s 는 API 지연 시
+		// terminal 보고가 SIGKILL 로 잘려 incident 가 'running' 으로 고착될 수 있다(리뷰 MEDIUM).
+		TerminationGracePeriodSeconds: ptr.To(int64(60)),
 		// 비-root 강제 + PVC(~/.claude) 를 node(uid 1000)가 쓰도록 fsGroup 지정. seccomp=RuntimeDefault.
 		SecurityContext: &corev1.PodSecurityContext{
 			RunAsNonRoot:   ptr.To(true),
@@ -273,13 +288,14 @@ func runScopedEnv(run *muninniov1beta1.HuginnRun) []corev1.EnvVar {
 	if prMode == "" {
 		prMode = "dry-run" // MVP: 실제 gh pr create 대신 diff/요약만 생성(설계 §8). 실 PR 은 후속.
 	}
-	// MUNINN_WORKSPACE: 멀티테넌시 경계(CONTRACT §2, "워크스페이스 = K8s 네임스페이스"). runner.py 가
-	// 메모리 store/recall 페이로드에 workspace 로 동봉해 테넌트 간 기억 누수를 막는다. 권위 소스는
-	// muninn.io/workspace 라벨(agent defaulter→issue→run 으로 전파)이며, 라벨이 누락된 경로에서도
-	// 격리가 끊기지 않도록 run.Namespace(=워크스페이스) 로 폴백한다.
-	workspace := run.Labels[LabelWorkspace]
+	// MUNINN_WORKSPACE: 멀티테넌시 경계(CONTRACT §C3, "workspace = namespace 단일 진실원천").
+	// runner.py 가 메모리 store/recall 페이로드에 workspace 로 동봉해 테넌트 간 기억 누수를 막는다.
+	// 격리 경계의 단일 진실원천은 run.Namespace 다 — webhook off 환경(run-kind 등 defaulter 미동작)에서도
+	// 라벨 누락/변조에 무관하게 namespace 로 격리가 닫히도록 namespace 를 우선한다.
+	// muninn.io/workspace 라벨은 selector 보조일 뿐이며, namespace 가 빈 비정상 경로에서만 폴백한다.
+	workspace := run.Namespace
 	if workspace == "" {
-		workspace = run.Namespace
+		workspace = run.Labels[LabelWorkspace]
 	}
 	return []corev1.EnvVar{
 		{Name: "MUNINN_RUN_NAME", Value: run.Name},

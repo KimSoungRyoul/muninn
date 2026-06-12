@@ -8,7 +8,13 @@
 //
 // 입력(JSON):
 //   { step?, cost?, tokens?, output?, recalledMemoryIds?: [{id,score?,reason?}],
-//     requestApproval?: bool | {reasons:[{type,detail?}]}, approvalReasons?: [{type,detail?}], incidentId?, summary? }
+//     requestApproval?: bool | {reasons:[{type,detail?}]}, approvalReasons?: [{type,detail?}],
+//     incidentId?, summary?, final?, failed?, terminalKind?: "rejected"|"expired"|"aborted" }
+//
+// 멀티테넌시 범위(CONTRACT §C3, 리뷰 LOW): 이 라우트를 포함한 모든 K8s CR 경로(report/approve/reject/
+// incidents/runs/dedup)는 DEFAULT_NAMESPACE(MUNINN_NAMESPACE||'ns-huginn') 단일 네임스페이스에 고정돼
+// x-muninn-workspace 를 반영하지 않는다. 즉 멀티테넌시 격리는 **postgres 메모리 레이어에만** 적용되고
+// K8s 측 Issue/Run 은 단일 네임스페이스로 섞인다. CR 네임스페이스 분리는 후속 작업이다(별도 이슈).
 
 import { NextRequest } from "next/server";
 import { ok, badRequest } from "@/lib/api";
@@ -22,7 +28,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const denied = await requireAuth(req);
+  // 머신 전용(agent→API) 경로 — 콘솔 우회(sec-fetch-site) 불허, 토큰 필수(CONTRACT §C2).
+  const denied = await requireAuth(req, { allowConsole: false });
   if (denied) return denied;
   const runName = params.id;
   let body: any;
@@ -75,15 +82,21 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   // 종료 Run 을 AwaitingApproval 로 되돌리면 operator 의 라이프사이클을 깨뜨린다.
   let approvalApplied = false;
   if (wantApproval) {
+    // 조회 성공 여부를 phase 와 분리한다(lookupOk). 조회 실패 시 currentPhase=undefined 를
+    // "비종료"로 오인해 승인 전이를 적용하면, 일시적 404/RBAC 오류로 종료된 Run 을
+    // AwaitingApproval 로 되돌릴 수 있다(operator 라이프사이클 파괴). 따라서 **조회 성공 + 비종료**일
+    // 때만 승인 전이; 조회 실패 시엔 phase/approval 을 손대지 않고 나머지 보고 필드만 patch 한다.
     let currentPhase: string | undefined;
+    let lookupOk = false;
     try {
       const cr: any = await getHuginnRun(DEFAULT_NAMESPACE, runName);
       currentPhase = cr?.status?.phase;
+      lookupOk = true;
     } catch {
-      // 조회 실패(404/RBAC) — 승인 전이를 건너뛰되 나머지 보고 필드는 계속 patch.
-      currentPhase = undefined;
+      // 조회 실패(404/RBAC) — 미확인. 보수적으로 승인 전이를 건너뛴다.
+      lookupOk = false;
     }
-    if (!isTerminalPhase(currentPhase)) {
+    if (lookupOk && !isTerminalPhase(currentPhase)) {
       const appr = buildApprovalRequest(approvalReasons);
       status.phase = appr.phase;
       status.approval = appr.approval;
@@ -104,9 +117,16 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
 
   // 사건 이력(metaDB) 동기화 — 비용/요약/결과/단계 기록. 회수 폐루프(설계 §7.3):
   // 에이전트는 incidentId 를 모르지만 issueName(MUNINN_ISSUE_NAME)은 아므로, issueName 으로 종결한다.
+  // 종료 종류(CONTRACT §C4): runner 가 승인 거절/만료/중단 종료 시 terminalKind 를 싣는다(failed 와 별개).
+  // 화이트리스트로만 수용(임의 문자열이 사건 상태로 흘러들지 않게). failed=False && terminalKind 없음 → succeeded.
+  const TERMINAL_KINDS = new Set(["rejected", "expired", "aborted"]);
+  const terminalKind = typeof body.terminalKind === "string" && TERMINAL_KINDS.has(body.terminalKind)
+    ? body.terminalKind : null;
+
   const incidentIdNum = finiteOr(body.incidentId);
   if (dbEnabled() && (incidentIdNum != null || issueName)) {
-    const incidentStatus = body.final ? (body.failed ? "failed" : "succeeded")
+    const incidentStatus = body.final
+      ? (body.failed ? "failed" : terminalKind ?? "succeeded")
       : approvalApplied ? "awaiting-approval" : "running";
     const patch = {
       ...(cost != null ? { cost } : {}),

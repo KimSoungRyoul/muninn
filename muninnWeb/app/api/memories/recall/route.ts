@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
     return badRequest("invalid JSON body");
   }
   try {
-    // 멀티테넌시(CONTRACT §2): 헤더 x-muninn-workspace 또는 body.workspace, 폴백 env/'default'.
-    const workspace = workspaceFromRequest(req, body?.workspace);
+    // 멀티테넌시(CONTRACT §2/§C3): 인증된 요청만 클라이언트 workspace 헤더 신뢰, 미인증 콘솔은 서버 기본값.
+    const workspace = await workspaceFromRequest(req, body?.workspace);
     const rows = await recall(body?.query, { workspace, scope: body?.scope, appId: body?.app ?? body?.appId, k: body?.k });
     return ok({ count: rows.length, items: rows });
   } catch (e) {

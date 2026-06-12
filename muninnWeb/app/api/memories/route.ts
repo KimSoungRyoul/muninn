@@ -20,8 +20,8 @@ export async function GET(req: NextRequest) {
   const appId = sp.get("app") ?? undefined;
   const q = sp.get("q") ?? undefined;
   const limit = sp.get("limit") ? Number(sp.get("limit")) : undefined;
-  // 멀티테넌시(CONTRACT §2): 헤더 x-muninn-workspace 또는 ?workspace=, 폴백 env/'default'.
-  const workspace = workspaceFromRequest(req, sp.get("workspace"));
+  // 멀티테넌시(CONTRACT §2/§C3): 인증된 요청만 클라이언트 workspace 헤더 신뢰, 미인증 콘솔은 서버 기본값.
+  const workspace = await workspaceFromRequest(req, sp.get("workspace"));
 
   if (!dbEnabled()) {
     // mock fallback
@@ -57,8 +57,8 @@ export async function POST(req: NextRequest) {
   if (fact.length < 8) return badRequest("fact 가 너무 짧습니다(최소 8자) — 재사용 가능한 기억만 저장");
   if (fact.length > 4000) return badRequest("fact 가 너무 깁니다(최대 4000자)");
 
-  // 저장 workspace: 헤더 > body.workspace > env/'default'.
-  const workspace = workspaceFromRequest(req, body.workspace);
+  // 저장 workspace(§C3): 인증된 요청만 클라이언트 헤더/body.workspace 신뢰, 미인증 콘솔은 서버 기본값.
+  const workspace = await workspaceFromRequest(req, body.workspace);
 
   try {
     const row = await store({

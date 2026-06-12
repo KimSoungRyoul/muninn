@@ -73,8 +73,10 @@ webhooks:
         namespace: {{ .Release.Namespace }}
         path: /mutate-muninn-io-v1beta1-huginnagent
     rules:
+      # apiVersions 는 operator 생성물(config/webhook/manifests.yaml)과 동기화 — v1(storage)+v1beta1(served)
+      #   둘 다 검증을 거치게 한다. drift 시 v1 직행 CREATE/UPDATE 가 webhook 을 우회한다.
       - apiGroups: [muninn.io]
-        apiVersions: [v1beta1]
+        apiVersions: [v1, v1beta1]
         operations: [CREATE, UPDATE]
         resources: [huginnagents]
 ---
@@ -99,8 +101,10 @@ webhooks:
         namespace: {{ .Release.Namespace }}
         path: /validate-muninn-io-v1beta1-huginnagent
     rules:
+      # apiVersions 는 operator 생성물(config/webhook/manifests.yaml)과 동기화 — v1(storage)+v1beta1(served)
+      #   둘 다 검증을 거치게 한다. drift 시 v1 직행 CREATE/UPDATE 가 webhook 을 우회한다.
       - apiGroups: [muninn.io]
-        apiVersions: [v1beta1]
+        apiVersions: [v1, v1beta1]
         operations: [CREATE, UPDATE]
         resources: [huginnagents]
 {{- end }}

@@ -41,6 +41,8 @@ func testFixtures() (*muninniov1beta1.HuginnAgent, *muninniov1beta1.HuginnIssue)
 	agent.Spec.Agent.Image = "registry.local/agent:0.1.0"
 	agent.Spec.Agent.SoulRef = "soul-ai-router-svc"
 	agent.Spec.Source.SecretRef = "gh-pat"
+	// HITL 진입 트리거(CONTRACT §C1): PR 정책의 승인 요구를 MUNINN_GUARDRAILS 로 직렬화하는지 검증용.
+	agent.Spec.Source.PR = &muninniov1beta1.PRPolicy{RequireApprovalOnWorkflowChange: true}
 
 	issue := &muninniov1beta1.HuginnIssue{}
 	issue.Name = "issue-1"
@@ -70,9 +72,10 @@ func TestBuildJobTemplate(t *testing.T) {
 	}
 
 	// 단순 Value env 들은 표로 한 번에 검증
-	// (MUNINN_GUARDRAILS 는 maxIterations/maxCostUsd/maxTokens 모두 포함해야 함 — 리뷰 수정 #1).
+	// (MUNINN_GUARDRAILS 는 maxIterations/maxCostUsd/maxTokens + requireApproval 모두 포함해야 함 — 리뷰 수정 #1, CONTRACT §C1).
+	// requireApproval=true 는 agent.Spec.Source.PR.RequireApprovalOnWorkflowChange 에서 직렬화된 것(HITL 트리거 배선).
 	for _, tc := range []struct{ name, want string }{
-		{"MUNINN_GUARDRAILS", `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000}`},
+		{"MUNINN_GUARDRAILS", `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000,"requireApproval":true}`},
 		{"MUNINN_SOUL_REF", "configmap/soul-ai-router-svc"},
 		{"MUNINN_EVENT_PAYLOAD_REF", "secret/issue-1-event"},
 		{"MUNINN_GOAL", "diagnose"},
@@ -96,6 +99,22 @@ func TestBuildJobTemplate(t *testing.T) {
 
 	if gh, ok := envByName(jt.Env, "GITHUB_PAT"); !ok || gh.ValueFrom == nil || gh.ValueFrom.SecretKeyRef.Name != "gh-pat" {
 		t.Error("GITHUB_PAT secretKeyRef(gh-pat) 누락")
+	}
+}
+
+// TestBuildJobTemplateRequireApprovalDefault 은 PR 정책이 없거나 false 면 requireApproval:false 로
+// 직렬화됨을 검증한다(HITL 트리거 기본 off — CONTRACT §C1).
+func TestBuildJobTemplateRequireApprovalDefault(t *testing.T) {
+	agent, issue := testFixtures()
+	agent.Spec.Source.PR = nil // PR 정책 미설정 → 승인 게이트 off
+	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
+	e, ok := envByName(jt.Env, "MUNINN_GUARDRAILS")
+	if !ok {
+		t.Fatal("MUNINN_GUARDRAILS env 누락")
+	}
+	want := `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000,"requireApproval":false}`
+	if e.Value != want {
+		t.Errorf("MUNINN_GUARDRAILS = %q, want %q", e.Value, want)
 	}
 }
 

@@ -6,11 +6,11 @@ apiVersion: muninn.io/v1beta1
 kind: HuginnAgent
 metadata:
   name: ai-router-svc            # UI 검증 규칙: ^[a-z0-9-]+$ (webhook 가 재검증)
-  namespace: ns-ai-platform         # Operator 가 spec.workspaceId 로 강제(§6.1)
+  namespace: ns-ai-platform         # workspace = namespace 단일 진실원천(§3.1) — webhook 가 workspaceId==namespace 강제
   labels:
-    muninn.io/workspace: ws-ai      # defaulting webhook 가 spec.workspaceId 로 자동 주입
+    muninn.io/workspace: ns-ai-platform  # defaulting webhook 가 spec.workspaceId 로 자동 주입(selector 보조 라벨)
 spec:
-  workspaceId: ws-ai                # ★ 1급 필드(required, immutable). webhook+CEL 이중 검증
+  workspaceId: ns-ai-platform       # ★ 1급 필드(required, immutable). metadata.namespace 와 동일해야 함(webhook+CEL 이중 검증)
   displayName: "AI Router Service"
   description: "추론 서비스 (Triton Inference Server)"
   kind: triton                      # triton | fastapi | airflow | other

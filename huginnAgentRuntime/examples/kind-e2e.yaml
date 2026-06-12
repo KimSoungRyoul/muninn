@@ -29,9 +29,9 @@ metadata:
   name: e2e-probe
   namespace: ns-huginn-e2e
   labels:
-    muninn.io/workspace: ws-e2e
+    muninn.io/workspace: ns-huginn-e2e   # workspace = namespace 단일 진실원천(§3.1)
 spec:
-  workspaceId: ws-e2e
+  workspaceId: ns-huginn-e2e             # metadata.namespace 와 동일(webhook 가 workspaceId==namespace 강제)
   displayName: "Agent runtime E2E probe"
   kind: other
   output: github_issue
@@ -56,7 +56,7 @@ metadata:
   name: e2e-probe-issue
   namespace: ns-huginn-e2e
   labels:
-    muninn.io/workspace: ws-e2e
+    muninn.io/workspace: ns-huginn-e2e   # workspace = namespace(§3.1)
     muninn.io/agent: e2e-probe
 spec:
   agentRef: e2e-probe

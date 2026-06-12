@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
-  const denied = await requireAuth(req);
+  // 고위험 사람-결정(PR 생성 승인 등) — 콘솔(OIDC)+머신 둘 다 허용하되, 운영자 group claim 강제(설정 시).
+  const denied = await requireAuth(req, { requireOperator: true });
   if (denied) return denied;
   let decidedBy = "operator";
   try {

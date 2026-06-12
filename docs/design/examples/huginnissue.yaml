@@ -8,7 +8,7 @@ metadata:
   namespace: ns-ai-platform
   labels:
     muninn.io/agent: ai-router-svc
-    muninn.io/workspace: ws-ai
+    muninn.io/workspace: ns-ai-platform   # workspace = namespace(§3.1). selector 보조 라벨
     muninn.io/event-fingerprint: PodCrashLooping
   ownerReferences:
     - apiVersion: muninn.io/v1beta1

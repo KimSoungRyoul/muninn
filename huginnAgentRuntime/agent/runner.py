@@ -104,6 +104,7 @@ def _http_json(
     body: dict | None = None,
     timeout: float = 10.0,
     retries: int = 2,
+    deadline: float | None = None,
 ) -> dict | None:
     """JSON 요청 후 응답(dict)을 반환. 실패해도 에이전트 루프를 막지 않도록 None 반환.
 
@@ -113,6 +114,11 @@ def _http_json(
     내구성(브리프 HIGH): API 일시 장애로 결과(output/cost)가 영구 유실되지 않도록
     짧은 지수 backoff 재시도를 둔다. `retries` 는 *추가* 재시도 횟수(총 시도 = retries+1).
     최종(final) 보고는 호출부에서 더 큰 retries 를 넘겨 더 끈질기게 재전송한다.
+
+    deadline(절대 monotonic 시각, 브리프 항목3): SIGTERM grace period 안에서 끝나야 하는
+    terminal 보고는 이 값을 넘긴다. 매 시도 전 잔여 시간을 계산해 per-attempt timeout 을
+    그 이하로 줄이고, 잔여가 없으면 더는 재시도하지 않는다 → 전체 보고가 deadline 내에 끝나
+    kubelet 의 SIGKILL(기본 grace 30s) 전에 완료될 가능성을 높인다.
     """
     if not url:
         return None
@@ -121,13 +127,21 @@ def _http_json(
     attempts = max(1, retries + 1)
     last_exc: Exception | None = None
     for attempt in range(attempts):
+        # deadline 모드: 잔여 예산을 per-attempt timeout 으로 캡(0 이하면 포기).
+        attempt_timeout = timeout
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                log(f"WARN: HTTP {method} {url} deadline 초과 — 재시도 중단(시도 {attempt}/{attempts})")
+                break
+            attempt_timeout = min(timeout, remaining)
         # urllib Request 는 재사용 시 상태가 남을 수 있어 시도마다 새로 만든다.
         req = urllib.request.Request(url, data=data, method=method)
         req.add_header("content-type", "application/json")
         if token:
             req.add_header("authorization", f"Bearer {token}")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with urllib.request.urlopen(req, timeout=attempt_timeout) as resp:
                 raw = resp.read().decode("utf-8") or "{}"
                 return json.loads(raw)
         # http.client.HTTPException(BadStatusLine 등)을 포함시켜 비정상 응답이
@@ -136,18 +150,27 @@ def _http_json(
             last_exc = exc
             if attempt + 1 < attempts:
                 backoff = min(8.0, 0.5 * (2 ** attempt))  # 0.5s, 1s, 2s, 4s, … (상한 8s)
+                if deadline is not None:
+                    # backoff 후에도 시도할 시간이 남아야 의미가 있다 — 잔여를 넘기면 즉시 중단.
+                    remaining = deadline - time.monotonic()
+                    if remaining - backoff <= 0:
+                        log(f"WARN: HTTP {method} {url} 실패(시도 {attempt + 1}/{attempts}): {exc} → deadline 임박, 재시도 중단")
+                        break
                 log(f"WARN: HTTP {method} {url} 실패(시도 {attempt + 1}/{attempts}): {exc} → {backoff:.1f}s 후 재시도")
                 time.sleep(backoff)
     log(f"WARN: HTTP {method} {url} 최종 실패({attempts}회): {last_exc}")
     return None
 
 
-def _report(patch: dict) -> dict | None:
+def _report(patch: dict, deadline: float | None = None) -> dict | None:
     """진행 보고 → POST {MUNINN_API_ENDPOINT}/api/runs/{run}/report (Agent→API 소유 필드).
 
     중간(step) 보고는 best-effort(짧은 재시도)지만, 최종(`final:true`) 보고는 그 run 의
     유일한 결과물(output/cost)이자 incident 종결의 단일 경로이므로 더 끈질기게(지수 backoff
     다회) 재전송한다(브리프 HIGH). 끝내 실패하면 None 을 반환하므로 호출부가 표면화한다.
+
+    deadline(브리프 항목3): SIGTERM 취소 경로의 terminal 보고는 pod grace period 내에 끝나도록
+    절대 monotonic 시각을 넘긴다 — _http_json 이 잔여 예산으로 재시도를 캡한다.
     """
     api = _env("MUNINN_API_ENDPOINT")
     run = _env("MUNINN_RUN_NAME")
@@ -158,7 +181,9 @@ def _report(patch: dict) -> dict | None:
         patch = {**patch, "issueName": issue}
     # 최종 보고는 결과 유실을 막기 위해 더 많이 재시도(총 5회), 중간 보고는 적게(총 2회).
     retries = 4 if patch.get("final") else 1
-    return _http_json("POST", f"{api.rstrip('/')}/api/runs/{run}/report", patch, retries=retries)
+    return _http_json(
+        "POST", f"{api.rstrip('/')}/api/runs/{run}/report", patch, retries=retries, deadline=deadline
+    )
 
 
 def _recall(query: str, k: int = 6) -> list:
@@ -200,17 +225,34 @@ def _store_memory(fact: str, tags: list | None = None) -> dict | None:
 # ---- 사람 승인(HITL) 루프(CONTRACT §3) — 표준 라이브러리만 ----
 
 
-def _approval_reasons(goal: str, plan: str = "") -> list[dict]:
+def _approval_reasons(goal: str, plan: str = "", pr_mode: str = "") -> list[dict]:
     """승인 요청 사유를 goal/계획 요약에서 추출한다(최소 1건, CONTRACT §3).
 
     plan(에이전트가 산출한 PR 계획/요약)이 있으면 그 첫 줄을, 없으면 goal 요약을 detail 로 쓴다.
     PR 생성/실제 변경 적용은 인프라에 영향을 주므로 type 은 "infra-change" 로 분류한다.
+
+    구조적 한계(브리프 항목5): 게이트는 query 루프 진입 *전* 에 돌아 plan 이 아직 없다(plan="").
+    1차 계획 산출 후로 게이트를 옮기는 건 구조 변경이 커 위험하므로, 여기서는 운영자가 무엇을
+    승인하는지 가늠하도록 가용 컨텍스트(goal 요약 + 의도된 작업 종류=PR mode)를 detail 에 풍부하게
+    담는다. plan 이 전달되면 그 요약을 우선 쓴다.
     """
     src = (plan or goal or "").strip()
     summary = next((ln.strip("# ").strip() for ln in src.splitlines() if ln.strip()), "")
     if not summary:
         summary = "위험 작업(PR 생성/변경 적용) 전 운영자 승인 필요"
-    return [{"type": "infra-change", "detail": summary[:300]}]
+    # plan 이 아직 없을 때(게이트가 루프 전): 의도된 작업 종류를 명시해 detail 을 보강한다.
+    if not plan:
+        mode = (pr_mode or _pr_mode())
+        action = (
+            "PR 계획(diff)을 산출할 예정(dry-run, 실제 PR 미생성)"
+            if mode == "dry-run"
+            else "실제 PR 생성/변경 적용을 수행할 예정(live)"
+        )
+        # 운영자는 아직 구체 diff 를 볼 수 없음을 명시 — 오해(이미 확정된 변경 승인) 방지.
+        detail = f"[{mode}] {summary} — {action}. 구체 변경(diff)은 승인 후 산출됩니다."
+    else:
+        detail = summary
+    return [{"type": "infra-change", "detail": detail[:300]}]
 
 
 def _request_approval(reasons: list[dict]) -> dict | None:
@@ -280,10 +322,39 @@ def _approval_poll_seconds() -> float:
 
 
 def _approval_timeout_seconds() -> float:
+    # 기본 5400s(90m) — web API 의 승인 TTL(incidents.ts approvalTtlMinutes 기본 90m)과 일치시킨다
+    # (브리프 항목4). 더 짧게 끝내면 운영자가 31~90m 사이 승인해도 에이전트가 이미 사라져
+    # Run 만 Approved 로 전이되는 모순이 생긴다. operator 가 동일 값을 env 로 주입하면 단일 소스가 된다.
     try:
-        return max(1.0, float(os.getenv("MUNINN_APPROVAL_TIMEOUT", "1800") or 1800))
+        return max(1.0, float(os.getenv("MUNINN_APPROVAL_TIMEOUT", "5400") or 5400))
     except (TypeError, ValueError):
-        return 1800.0
+        return 5400.0
+
+
+def _sigterm_report_budget_seconds() -> float:
+    """SIGTERM(취소) 경로의 terminal 보고에 허용할 총 예산(초). 기본 20s — pod 기본 grace 30s 안에서
+    여유를 두고 끝나도록(브리프 항목3). MUNINN_SIGTERM_REPORT_BUDGET 로 조정 가능."""
+    try:
+        return max(1.0, float(os.getenv("MUNINN_SIGTERM_REPORT_BUDGET", "20") or 20))
+    except (TypeError, ValueError):
+        return 20.0
+
+
+def _gate_terminal_kind(gate_outcome: str) -> str:
+    """승인 게이트 outcome → web report route 의 terminalKind 화이트리스트 매핑(CONTRACT §C4).
+
+      rejected(…)      → "rejected"
+      expired          → "expired"
+      approval-timeout → "aborted"  (운영자가 끝내 결정 안 함 = 능동 거절이 아닌 중단)
+    그 외(이론상 도달 불가)는 빈 문자열 → terminalKind 미전송(web 은 기존 동작 유지).
+    """
+    if gate_outcome.startswith("rejected"):
+        return "rejected"
+    if gate_outcome == "expired":
+        return "expired"
+    if gate_outcome == "approval-timeout":
+        return "aborted"
+    return ""
 
 
 def build_options(max_turns: int, max_budget_usd: float | None = None):
@@ -490,6 +561,12 @@ async def run_live() -> int:
     async def report_async(patch: dict) -> dict | None:
         return await asyncio.to_thread(_report, patch)
 
+    # SIGTERM(취소) 경로의 terminal 보고는 deadline 으로 예산을 제한해 pod grace period(기본 30s) 내에
+    # 끝나도록 한다(브리프 항목3). MUNINN_SIGTERM_REPORT_BUDGET(기본 20s)로 조정 가능 — 운영자가
+    # expandPodSpec 에 terminationGracePeriodSeconds≥60 을 명시하면 더 여유 있게 늘릴 수 있다.
+    async def report_async_deadline(patch: dict, deadline: float) -> dict | None:
+        return await asyncio.to_thread(_report, patch, deadline)
+
     # 1) 회상(recall) — 위임 직전, Muninn 메모리에서 관련 과거 사건/해결을 가져와 컨텍스트로 주입(설계 §3.1).
     #    동기 urllib 호출이므로 thread 로 오프로드(이벤트 루프 블로킹 방지).
     recalled = await asyncio.to_thread(_recall, goal, 6)
@@ -523,10 +600,21 @@ async def run_live() -> int:
     subtype = ""
     final_sent = False  # terminal 보고 중복 방지(정상 종료 경로 ↔ 예외/취소 경로)
 
-    async def send_final(failed: bool, abort_reason: str = "", outcome_override: str = "") -> bool:
+    async def send_final(
+        failed: bool,
+        abort_reason: str = "",
+        outcome_override: str = "",
+        terminal_kind: str = "",
+        report_deadline: float | None = None,
+    ) -> bool:
         """terminal 보고(final:true)를 1회 전송한다. 성공 여부(API 도달 여부)를 반환.
 
         outcome_override 가 주어지면(승인 거절/만료/타임아웃 같은 정상 중단) 그 값을 outcome 으로 쓴다.
+        terminal_kind(CONTRACT §C4): 승인 거절/만료/중단 종료의 *종류*를 web report route 에 알린다
+        ("rejected"|"expired"|"aborted"). failed 와 별개 필드 — failed=False 라도 terminalKind 가 있으면
+        web 은 succeeded 가 아니라 해당 상태(rejected/expired/aborted)로 사건을 기록한다.
+        report_deadline(절대 monotonic 시각)이 주어지면 SIGTERM grace period 내에 끝나도록
+        보고 전체 예산을 그 시각으로 제한한다(브리프 항목3 — grace 초과 SIGKILL 방지).
         """
         nonlocal final_sent
         if final_sent:
@@ -545,7 +633,7 @@ async def run_live() -> int:
         if abort_reason:
             # 비정상 종료 표면화: outcome 비어 있으면 사유를 남겨 운영자가 'running 고착' 대신 원인을 본다.
             outcome = outcome or f"aborted: {abort_reason}"
-        res = await report_async({
+        patch: dict = {
             "step": step,
             "cost": f"{cost:.4f}",
             "tokens": tokens,
@@ -553,7 +641,12 @@ async def run_live() -> int:
             "outcome": outcome,
             "final": True,
             "failed": failed,
-        })
+        }
+        # 화이트리스트(web report route 와 동일) 외 값은 싣지 않는다 — 임의 문자열 차단.
+        if terminal_kind in ("rejected", "expired", "aborted"):
+            patch["terminalKind"] = terminal_kind
+        res = await report_async_deadline(patch, report_deadline) if report_deadline is not None \
+            else await report_async(patch)
         if res is None:
             # 최종 보고가 끝내 실패 — 결과가 소리 없이 사라지지 않도록 stdout/exit 로 표면화한다(브리프 HIGH).
             log("ERROR: 최종 보고 전송 실패(재시도 소진) — 결과가 API 에 기록되지 않았을 수 있음")
@@ -569,7 +662,8 @@ async def run_live() -> int:
         dry-run 에선 PR 계획 확정 직전, live 에선 실제 변경 적용 직전에 호출된다(여기선 query 루프 진입 직전).
         SIGTERM 시 asyncio.sleep 에서 CancelledError 가 올라와 상위 except 가 terminal 보고를 보낸다.
         """
-        reasons = _approval_reasons(goal)
+        # plan 은 아직 없음(게이트가 query 루프 전) — 가용 컨텍스트(goal + pr_mode)로 detail 보강(브리프 항목5).
+        reasons = _approval_reasons(goal, pr_mode=pr_mode)
         log(f"승인 요청(HITL): reasons={json.dumps(reasons, ensure_ascii=False)}")
         # 요청도 thread 오프로드(동기 urllib). 실패해도 폴링은 시도(이미 Pending 일 수 있음).
         await asyncio.to_thread(_request_approval, reasons)
@@ -602,8 +696,12 @@ async def run_live() -> int:
         if _require_approval(g):
             gate_outcome = await gate_approval()
             if gate_outcome:
-                await send_final(failed=False, outcome_override=gate_outcome)
-                log(f"live 종료(승인 게이트): outcome={gate_outcome!r}")
+                # CONTRACT §C4: 종료 종류를 terminalKind 로 분리해 web 이 succeeded 로 오기록하지 않게 한다.
+                #   rejected→"rejected", expired→"expired", approval-timeout→"aborted".
+                #   (terminalKind 없이 failed=False 면 web 은 여전히 succeeded 로 기록한다.)
+                terminal_kind = _gate_terminal_kind(gate_outcome)
+                await send_final(failed=False, outcome_override=gate_outcome, terminal_kind=terminal_kind)
+                log(f"live 종료(승인 게이트): outcome={gate_outcome!r}, terminalKind={terminal_kind!r}")
                 print(json.dumps(
                     {"mode": "live", "ok": True, "turns": 0, "cost_usd": cost, "tokens": tokens,
                      "subtype": "approval-stop", "is_error": False, "outcome": gate_outcome,
@@ -641,9 +739,15 @@ async def run_live() -> int:
                     tokens = _usage_tokens(usage)
     except asyncio.CancelledError:
         # SIGTERM(graceful cancel)/타임아웃 → 비정상 종료지만 terminal 보고는 반드시 보낸다.
+        # pod grace period(기본 30s) 내에 끝나도록 deadline 으로 보고 예산을 제한한다(브리프 항목3):
+        # 기본 보고는 retries=4 + backoff(~7.5s) + timeout 10s 로 최악 ~57s 라 grace 를 넘겨 SIGKILL
+        # 위험이 있다. shield 로 취소 전파를 막아 보고가 중간에 끊기지 않게 한 뒤 deadline 으로 캡한다.
         is_error = True
-        log("WARN: 실행이 취소됨(SIGTERM/timeout) — terminal 보고 전송")
-        await send_final(failed=True, abort_reason="cancelled")
+        log("WARN: 실행이 취소됨(SIGTERM/timeout) — terminal 보고 전송(grace 제한)")
+        deadline = time.monotonic() + _sigterm_report_budget_seconds()
+        await asyncio.shield(
+            send_final(failed=True, abort_reason="cancelled", report_deadline=deadline)
+        )
         raise
     except Exception as exc:
         # SDK ProcessError 등 예외 — 결과 유실 방지를 위해 terminal 보고를 먼저 보낸다.

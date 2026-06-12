@@ -48,7 +48,10 @@ func SetupHuginnAgentWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/mutate-muninn-io-v1beta1-huginnagent,mutating=true,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1beta1,name=mhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
+// versions=v1;v1beta1(리뷰 LOW): CRD 는 v1(storage)+v1beta1(served·deprecated) 둘 다 served 이고
+// conversion=None(스키마 1:1 동일)이라, v1 으로 직접 CREATE/UPDATE 하는 요청도 동일 defaulter/validator 를
+// 거쳐야 한다. 한 버전만 등록하면 다른 버전 직행 요청이 admission 을 우회해 workspaceId==namespace 강제가 뚫린다.
+// +kubebuilder:webhook:path=/mutate-muninn-io-v1beta1-huginnagent,mutating=true,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1;v1beta1,name=mhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
 
 // HuginnAgentCustomDefaulter 는 생성/수정 시 기본값을 채운다.
 type HuginnAgentCustomDefaulter struct{}
@@ -67,7 +70,8 @@ func (d *HuginnAgentCustomDefaulter) Default(_ context.Context, obj *muninniov1b
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-muninn-io-v1beta1-huginnagent,mutating=false,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1beta1,name=vhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
+// versions=v1;v1beta1: v1(storage) 직행 CREATE/UPDATE 도 검증을 거치게 한다(위 mutating 마커와 동일 이유).
+// +kubebuilder:webhook:path=/validate-muninn-io-v1beta1-huginnagent,mutating=false,failurePolicy=fail,sideEffects=None,groups=muninn.io,resources=huginnagents,verbs=create;update,versions=v1;v1beta1,name=vhuginnagent-v1beta1.kb.io,admissionReviewVersions=v1
 
 // HuginnAgentCustomValidator 는 HuginnAgent 의 불변/필수 규칙을 검증한다.
 type HuginnAgentCustomValidator struct{}
