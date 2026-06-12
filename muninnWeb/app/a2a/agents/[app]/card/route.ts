@@ -11,12 +11,13 @@ import { a2aServerEnabled, a2aAuthOk, a2aDisabled, a2aUnauthorized } from "@/lib
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: { app: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ app: string }> }) {
   // POST 와 동일 게이트(fail-closed) — 광고한 능력(streaming 등)과 실제 활성 상태를 일치시키고 무인증 노출 방지.
   // 인증 실패는 A2A 스펙대로 HTTP 401, 비활성은 404.
   if (!a2aServerEnabled()) return a2aDisabled();
   if (!a2aAuthOk(req)) return a2aUnauthorized();
   try {
+    const params = await props.params; // Next 15: params 는 Promise
     const baseUrl = baseUrlFromRequest(req);
 
     if (!k8sEnabled()) {

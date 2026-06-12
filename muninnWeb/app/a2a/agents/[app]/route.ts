@@ -227,11 +227,13 @@ async function dispatch(req: NextRequest, app: string, body: JsonRpcRequest): Pr
   }
 }
 
-export async function POST(req: NextRequest, { params }: { params: { app: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ app: string }> }) {
   // 게이트를 본문 파싱보다 먼저 — 비활성/무인증이면 라우트 존재·본문 오류조차 노출하지 않는다(fail-closed).
   // 인증 실패는 A2A 스펙대로 HTTP 401(+WWW-Authenticate), 비활성은 404.
   if (!a2aServerEnabled()) return a2aDisabled();
   if (!a2aAuthOk(req)) return a2aUnauthorized();
+
+  const params = await props.params; // Next 15: params 는 Promise
 
   let body: JsonRpcRequest;
   try {
