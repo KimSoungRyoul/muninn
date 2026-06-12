@@ -22,6 +22,7 @@ import {
 } from "./incidents";
 import { k8sEnabled } from "./k8s";
 import { getCopilotWorkspace } from "./workspace";
+import { sendTaskToA2AAgentTool } from "./a2a/client-tool";
 
 const K8S_OFF = { error: "k8s-disabled", note: "이 muninnWeb 인스턴스는 클러스터에 연결돼 있지 않습니다(로컬 dev). 위임/조회는 kind/클러스터 배포에서 동작합니다." };
 const DB_OFF = { error: "db-disabled", note: "메모리(postgres)가 설정되지 않았습니다(DATABASE_URL 미설정). 검색/저장은 DB 연결 시 동작합니다." };
@@ -207,3 +208,9 @@ export const muninnServerTools = [
   // 해당 run 콘솔로 데려가며, 승인/거절은 운영자가 콘솔에서 직접 누른다. get_run_status 로 결정 후 상태만
   // 다시 폴링한다. (delegate_incident 는 confirmed 게이트가 있어 코파일럿에 남겨둔다.)
 ];
+
+// V1(A2A 클라이언트, 설계 docs/design/muninn-a2a-integration.md §4) — 플래그로만 활성화.
+// 기본 off → 기존 동작 불변. MUNINN_A2A_ENABLED=1 일 때만 코파일럿이 외부/내부 A2A 에이전트에 위임 가능.
+if (process.env.MUNINN_A2A_ENABLED === "1") {
+  (muninnServerTools as any[]).push(sendTaskToA2AAgentTool);
+}

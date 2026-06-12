@@ -9,6 +9,16 @@ const nextConfig = {
   // 검색은 postgres 텍스트 검색 전용.)
   // Next 15: experimental.serverComponentsExternalPackages → 최상위 serverExternalPackages.
   serverExternalPackages: ["pg", "@kubernetes/client-node"],
+  async rewrites() {
+    return [
+      // A2A 표준 디스커버리 경로(/.well-known/agent-card.json) → 내부 card 라우트.
+      // 설계: docs/design/muninn-a2a-integration.md §5. 닷(.)으로 시작하는 App Router 폴더 회피.
+      {
+        source: "/a2a/agents/:app/.well-known/agent-card.json",
+        destination: "/a2a/agents/:app/card",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
