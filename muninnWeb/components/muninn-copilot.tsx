@@ -107,7 +107,7 @@ export function MuninnCopilot() {
     <CopilotSidebar
       width={420}
       labels={{
-        modalHeaderTitle: "Muninn Copilot",
+        modalHeaderTitle: "Muninn Assistant",
         // 짧은 환영문 — 긴 문장은 heading 으로 렌더돼 넘침. 사용 예시는 추천 pill 로 안내.
         welcomeMessageText: "안녕하세요 👋 무엇을 도와드릴까요?",
         chatInputPlaceholder: "장애 조회·위임을 Muninn 에게 말해보세요…",
