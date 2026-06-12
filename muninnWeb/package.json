@@ -35,6 +35,6 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.0",
     "eslint-config-next": "15.5.19",
-    "typescript": "^5.5.4"
+    "typescript": "^6.0.3"
   }
 }
