@@ -159,20 +159,33 @@ export async function streamIssue(issueName: string, app: string, rpcId: unknown
       }
       misses = 0;
       const latest = latestRun((issue.runs ?? []).filter((r) => r.app === app));
-      // 종료성은 Issue.phase 로 판정 — latest Run 이 failed 여도 Issue 가 Running(재시도 backoff)이면 닫지 않는다.
+      // ★ Issue 스트림의 'final' 은 Run 종료성이 아니라 Issue 종료성으로 판정한다.
+      //   runVmToStatusUpdate(latest).final 은 Run 상태(isStreamFinal) 기준이라, 재시도 backoff 중
+      //   attempt-1 이 failed 면 final:true 가 새어나가 스펙 준수 클라이언트가 조기 종료 → attempt-2 를 못 본다.
+      //   따라서 streamFinal = Issue 종료(Succeeded/Failed/Cancelled) 또는 latest 가 input-required 일 때만 true.
       const issueDone = ISSUE_TERMINAL.has(issue.phase);
+      const awaitingNow = !!latest && statusToA2AState(latest.status) === "input-required";
+      const streamFinal = issueDone || awaitingNow;
 
       if (first) {
         // 스펙: 첫 프레임은 Task 스냅샷. Run 이 있으면 그 Task, 없으면 submitted Task.
         emit({ jsonrpc: "2.0", id: rpcId, result: latest ? runVmToTask(latest) : issueToSubmittedTask(issueName, app) });
         first = false;
         last = latest ? sig(latest) : "submitted";
+        // 첫 프레임이 Task 라도 이미 종료 상태면 종료 status-update(final:true)로 닫는다.
+        if (streamFinal && latest) {
+          emit({ jsonrpc: "2.0", id: rpcId, result: { ...runVmToStatusUpdate(latest), final: true } });
+          return;
+        }
+      } else if (streamFinal) {
+        // 종료 tick — sig 미변경이어도 반드시 final:true 프레임을 한 번 보낸 뒤 닫는다(스펙: 종료 프레임 보장).
+        if (latest) emit({ jsonrpc: "2.0", id: rpcId, result: { ...runVmToStatusUpdate(latest), final: true } });
+        return;
       } else if (latest && sig(latest) !== last) {
+        // 중간 delta — final 은 항상 false(Run 이 failed 여도 Issue 가 살아있으면 닫지 않음).
         last = sig(latest);
-        emit({ jsonrpc: "2.0", id: rpcId, result: runVmToStatusUpdate(latest) });
+        emit({ jsonrpc: "2.0", id: rpcId, result: { ...runVmToStatusUpdate(latest), final: false } });
       }
-      // awaiting(input-required) Run 또는 Issue 종료 시 스트림을 닫는다.
-      if ((latest && statusToA2AState(latest.status) === "input-required") || issueDone) return;
       await sleep(POLL_MS, signal);
     }
     if (!aborted(signal)) emit(timeoutEvent(issueName, issueName, rpcId));
