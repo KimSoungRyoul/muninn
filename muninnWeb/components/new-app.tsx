@@ -125,7 +125,7 @@ function HmNewApp({ workspaceId, onCancel, onCreated }: any) {
               <div className="input-with-icon">
                 <Icon name="globe" size={16}/>
                 <input className="input mono" readOnly
-                       value={`https://huginn.platform.local/hooks/${form.name || "<name>"}`}
+                       value={`https://muninn-api.platform.local/api/hooks/${form.name || "<name>"}`}
                        style={{color: form.name ? "var(--on-surface-variant)" : "var(--on-surface-muted)"}}/>
               </div>
             </NaField>

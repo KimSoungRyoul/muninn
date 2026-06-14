@@ -123,7 +123,6 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
           {label:"Memories", value:"memories", count: HM_DATA.MEMORIES.filter(m => m.appId === a.id).length},
           {label:"Platform tools", value:"bindings"},
           {label:"설정", value:"settings"},
-          {label:"Webhooks", value:"webhooks"},
         ]}/>
       </div>
 
@@ -132,9 +131,6 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
       {tab === "memories" && <AppMemoriesTab app={a}/>}
       {tab === "bindings" && <BindingsTab app={a}/>}
       {tab === "settings" && <AgentSettingsTab app={a}/>}
-      {tab === "webhooks" && (
-        <HmCard><div style={{padding:"40px 24px"}}><Empty icon="layers" title="Webhooks 탭" sub="이 데모에서는 Overview / Events / Memories / Platform tools / 설정 동작을 보여줍니다." /></div></HmCard>
-      )}
     </>
   );
 }
