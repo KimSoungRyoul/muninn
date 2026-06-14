@@ -220,7 +220,6 @@ func TestExpandPodSpec(t *testing.T) {
 		Image:         "img:1",
 		Env:           []corev1.EnvVar{{Name: "X", Value: "y"}},
 		ClaudePVCName: "pvc-claude-app",
-		ClaudeSubPath: "issue-7",
 		// Command/Resources/ServiceAccountName 비움 → 기본값 적용 검증
 	}
 	ps := expandPodSpec(jt)
@@ -247,35 +246,9 @@ func TestExpandPodSpec(t *testing.T) {
 	if len(c.VolumeMounts) != 1 || c.VolumeMounts[0].MountPath != claudeMountPath {
 		t.Errorf("volumeMount = %+v", c.VolumeMounts)
 	}
-	// SubPath=Issue 이름: 앱 PVC 안에서 Issue별 하위 경로를 ~/.claude 로 마운트(§5.5 격리).
-	if c.VolumeMounts[0].SubPath != "issue-7" {
-		t.Errorf("volumeMount.SubPath = %q, want issue-7", c.VolumeMounts[0].SubPath)
-	}
 	if len(ps.Volumes) != 1 || ps.Volumes[0].PersistentVolumeClaim == nil ||
 		ps.Volumes[0].PersistentVolumeClaim.ClaimName != "pvc-claude-app" {
 		t.Errorf("PVC volume = %+v", ps.Volumes)
-	}
-	// subPath 디렉토리 선생성 initContainer(리뷰 R1): PVC 루트를 claudeStoreInitPath 에 (subPath 없이)
-	// 마운트하고 ClaudeSubPath 디렉토리를 mkdir 한다 → uid 1000 쓰기 가능 보장.
-	if len(ps.InitContainers) != 1 {
-		t.Fatalf("initContainers = %d, want 1 (subPath 선생성)", len(ps.InitContainers))
-	}
-	ic := ps.InitContainers[0]
-	if ic.Image != "img:1" {
-		t.Errorf("init image = %q, want img:1 (동일 이미지 재사용)", ic.Image)
-	}
-	if len(ic.VolumeMounts) != 1 || ic.VolumeMounts[0].MountPath != claudeStoreInitPath || ic.VolumeMounts[0].SubPath != "" {
-		t.Errorf("init volumeMount = %+v (PVC 루트를 subPath 없이 마운트해야 함)", ic.VolumeMounts)
-	}
-	if e, ok := envByName(ic.Env, "CLAUDE_HOME_DIR"); !ok || e.Value != claudeStoreInitPath+"/issue-7" {
-		t.Errorf("init CLAUDE_HOME_DIR = %+v, want %s/issue-7", ic.Env, claudeStoreInitPath)
-	}
-	if ic.SecurityContext == nil || ic.SecurityContext.AllowPrivilegeEscalation == nil || *ic.SecurityContext.AllowPrivilegeEscalation {
-		t.Error("init allowPrivilegeEscalation 은 false 여야 함(비-root 하드닝)")
-	}
-	// init 리소스 요청 명시(리뷰 R2): LimitRange-strict 네임스페이스 거부/BestEffort QoS 방지.
-	if len(ic.Resources.Requests) == 0 {
-		t.Error("init container 에 리소스 requests 가 명시돼야 함(LimitRange 대비)")
 	}
 
 	// 비-root 하드닝(§5.1, §6.1): pod fsGroup/runAsNonRoot + 컨테이너 capability 드롭.
@@ -297,8 +270,45 @@ func TestExpandPodSpec(t *testing.T) {
 	if len(ps2.Volumes) != 0 || len(ps2.Containers[0].VolumeMounts) != 0 || len(ps2.InitContainers) != 0 {
 		t.Error("ClaudePVCName 비었는데 볼륨/init 이 부착됨")
 	}
+}
 
-	// 레거시 JobTemplate(PVC 있고 SubPath 비어있음): PVC 루트 마운트(SubPath ""), init 미부착 — 하위호환.
+// TestExpandPodSpecSubPath 는 Issue별 subPath 마운트와 그 디렉토리 선생성 initContainer 를 검증한다(§5.5).
+// (TestExpandPodSpec 와 분리 — gocyclo 복잡도 한계 회피, 관심사도 분리.)
+func TestExpandPodSpecSubPath(t *testing.T) {
+	ps := expandPodSpec(muninniov1beta1.JobTemplate{
+		Image: "img:1", ClaudePVCName: "pvc-claude-app", ClaudeSubPath: "issue-7",
+	})
+
+	// 메인 컨테이너: 앱 PVC 안 Issue별 하위 경로를 ~/.claude 로 마운트(§5.5 격리).
+	mounts := ps.Containers[0].VolumeMounts
+	if len(mounts) != 1 || mounts[0].MountPath != claudeMountPath || mounts[0].SubPath != "issue-7" {
+		t.Errorf("main volumeMount = %+v, want SubPath=issue-7", mounts)
+	}
+
+	// subPath 디렉토리 선생성 initContainer(리뷰 R1): PVC 루트를 claudeStoreInitPath 에 (subPath 없이)
+	// 마운트하고 ClaudeSubPath 디렉토리를 mkdir → uid 1000 쓰기 가능 보장.
+	if len(ps.InitContainers) != 1 {
+		t.Fatalf("initContainers = %d, want 1 (subPath 선생성)", len(ps.InitContainers))
+	}
+	ic := ps.InitContainers[0]
+	if ic.Image != "img:1" {
+		t.Errorf("init image = %q, want img:1 (동일 이미지 재사용)", ic.Image)
+	}
+	if len(ic.VolumeMounts) != 1 || ic.VolumeMounts[0].MountPath != claudeStoreInitPath || ic.VolumeMounts[0].SubPath != "" {
+		t.Errorf("init volumeMount = %+v (PVC 루트를 subPath 없이 마운트해야 함)", ic.VolumeMounts)
+	}
+	if e, ok := envByName(ic.Env, "CLAUDE_HOME_DIR"); !ok || e.Value != claudeStoreInitPath+"/issue-7" {
+		t.Errorf("init CLAUDE_HOME_DIR = %+v, want %s/issue-7", ic.Env, claudeStoreInitPath)
+	}
+	if ic.SecurityContext == nil || ic.SecurityContext.AllowPrivilegeEscalation == nil || *ic.SecurityContext.AllowPrivilegeEscalation {
+		t.Error("init allowPrivilegeEscalation 은 false 여야 함(비-root 하드닝)")
+	}
+	// init 리소스 요청 명시(리뷰 R2): LimitRange-strict 네임스페이스 거부/BestEffort QoS 방지.
+	if len(ic.Resources.Requests) == 0 {
+		t.Error("init container 에 리소스 requests 가 명시돼야 함(LimitRange 대비)")
+	}
+
+	// 레거시(PVC 있고 SubPath 비어있음): PVC 루트 마운트(SubPath ""), init 미부착 — 하위호환.
 	ps3 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:3", ClaudePVCName: "pvc-legacy"})
 	if len(ps3.Containers[0].VolumeMounts) != 1 || ps3.Containers[0].VolumeMounts[0].SubPath != "" {
 		t.Errorf("레거시 SubPath 는 빈값(루트 마운트)이어야 함: %+v", ps3.Containers[0].VolumeMounts)
