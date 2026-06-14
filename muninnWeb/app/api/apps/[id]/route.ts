@@ -2,16 +2,56 @@ import { NextRequest } from "next/server";
 import { ok, notFound, badRequest } from "@/lib/api";
 import { requireAuth } from "@/lib/auth";
 import { APPS, EVENTS, RECENT_RUNS } from "@/lib/data";
+import { k8sEnabled } from "@/lib/k8s";
+import { getApplicationCr, listRunsVM } from "@/lib/incidents";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// GET /api/apps/{id} — 단일 Application + 이벤트 수 + 최근 Run. dual-mode:
+//   k8sEnabled() → HuginnAgent CR(getApplicationCr) + 그 앱의 Run(listRunsVM). 없으면 404.
+//   미연결 → mock(APPS/EVENTS/RECENT_RUNS) 폴백.
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const { id } = params;
+
+  if (k8sEnabled()) {
+    try {
+      const cr = await getApplicationCr(id);
+      if (!cr) return notFound("application not found");
+      const name = cr?.metadata?.name ?? id;
+      const runsVm = await listRunsVM({ app: name });
+      return ok({
+        id: name,
+        workspaceId: req.nextUrl.searchParams.get("workspace") ?? "ws_ai",
+        name,
+        kind: cr?.spec?.kind ?? "other",
+        output: cr?.spec?.output ?? "pull_request",
+        repo: cr?.spec?.source?.repo ?? "",
+        runs24h: 0,
+        failed24h: 0,
+        lastRun: null,
+        cost7d: 0,
+        eventCount: 0,
+        runs: runsVm.map((v) => ({
+          id: v.id, app: v.app, status: v.status, step: v.step, max: v.max, cost: v.cost,
+          duration: v.startedAt ? Math.max(0, Math.floor((Date.now() - new Date(v.startedAt).getTime()) / 1000)) : 0,
+          started: v.startedAt ?? new Date().toISOString(), output: v.output,
+        })),
+        source: "k8s",
+      });
+    } catch (e) {
+      console.warn("[muninn] /api/apps/[id]: k8s 조회 실패 — mock fallback", e);
+    }
+  }
+
   const app: any = APPS.find((a) => a.id === id);
   if (!app) return notFound("application not found");
   return ok({
     ...app,
     eventCount: EVENTS.filter((e) => e.appId === id).length,
     runs: RECENT_RUNS.filter((r) => r.app === app.name),
+    source: "mock",
   });
 }
 

@@ -3,35 +3,31 @@ import React from "react";
 import { Icon } from "@/components/icons";
 import { Button, Tabs, Empty } from "@/components/ui";
 import { HmPageHead, HmKpi, HmCard, StackedBars, StatusLabel, fmtMoney, fmtDuration, fmtTimeAgo } from "@/components/common";
-import { HM_DATA } from "@/lib/data";
+import { DEMO_NOW } from "@/lib/demo-clock";
+import { useApi } from "@/lib/use-api";
+import { useWorkspace } from "@/lib/workspace-context";
 
 // Huginn & Muninn — Dashboard page
+// 데이터는 mock 직접 참조 대신 /api/dashboard 로 조회한다(k8s/db 연결 시 실데이터, 아니면 mock fallback).
 
 function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
-  const D = HM_DATA;
-  const ws = D.WORKSPACES.find(w => w.id === workspaceId) || D.WORKSPACES[0];
-  const wsApps = D.APPS.filter(a => a.workspaceId === workspaceId);
-  const wsAppNames = new Set(wsApps.map(a => a.name));
-  const liveRuns = D.LIVE_RUNS.filter(r => wsAppNames.has(r.app));
+  const { workspace } = useWorkspace();
+  const ws = workspace;
+  const { data, loading } = useApi<any>(`/api/dashboard?workspace=${encodeURIComponent(workspaceId)}`);
 
-  const wsRuns24h = wsApps.reduce((s, a) => s + a.runs24h, 0);
-  const wsFailed24h = wsApps.reduce((s, a) => s + a.failed24h, 0);
-  const successRate = wsRuns24h > 0 ? ((wsRuns24h - wsFailed24h) / wsRuns24h * 100).toFixed(1) : "0";
+  const liveRuns: any[] = data?.liveRuns ?? [];
+  const wsRuns24h: number = data?.runs24h ?? 0;
+  const successRate: string = data ? String(data.successRate) : "0";
+  const avgCostPerRun: number = data?.avgCostPerRun ?? 0;
 
-  // 평균 비용/실행: 현재 워크스페이스 run 들의 평균 (하드코딩 대신 실제 데이터로 계산)
-  const wsRecentRuns = D.RECENT_RUNS.filter(r => wsAppNames.has(r.app));
-  const avgCostPerRun = wsRecentRuns.length
-    ? wsRecentRuns.reduce((s, r) => s + r.cost, 0) / wsRecentRuns.length
-    : 0;
-
-  // 승인 대기: 워크스페이스 내 awaiting run. hint/link 는 실제 run 이 있을 때만 노출한다.
-  const awaitingRuns = liveRuns.filter(r => r.status === "awaiting");
+  // 승인 대기: awaiting run. hint/link 는 실제 run 이 있을 때만 노출한다.
+  const awaitingRuns = liveRuns.filter((r) => r.status === "awaiting");
   const oldestAwaiting = awaitingRuns.reduce(
     (acc, r) => (acc && new Date(acc.started) <= new Date(r.started) ? acc : r),
     awaitingRuns[0]
   );
   const agoKo = (iso: string) => {
-    const m = Math.max(0, (D.NOW.getTime() - new Date(iso).getTime()) / 60000);
+    const m = Math.max(0, (DEMO_NOW.getTime() - new Date(iso).getTime()) / 60000);
     if (m < 60) return `${Math.floor(m)}분 전`;
     if (m < 1440) return `${Math.floor(m / 60)}시간 전`;
     return `${Math.floor(m / 1440)}일 전`;
@@ -44,12 +40,10 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
     { label: "승인 대기",           value: awaitingRuns.length.toString(),                                accent: "amber", hint: oldestAwaiting ? `가장 오래된 건 ${agoKo(oldestAwaiting.started)}` : "대기 중인 승인 없음", link: oldestAwaiting ? () => onOpenRun(oldestAwaiting.id) : undefined },
   ];
 
-  const topFailing = wsApps
-    .filter(a => a.failed24h > 0)
-    .sort((a, b) => b.failed24h - a.failed24h)
-    .slice(0, 5);
+  const topFailing: any[] = data?.topFailing ?? [];
+  const flow: any[] = data?.flow ?? [];
 
-  const monthCost = 182.40, monthCap = 500;
+  const monthCost = data?.monthCost ?? 0, monthCap = data?.monthCap ?? 500;
   const monthByApp = [
     { name: "ai-router-svc",  pct: 48, color: "var(--huginn-500)" },
     { name: "payment-worker", pct: 19, color: "var(--muninn-500)" },
@@ -83,7 +77,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
             <span><span className="status-dot is-awaiting" style={{marginRight:4}}></span>승인 대기</span>
           </span>}
         >
-          <StackedBars buckets={D.FLOW} h={160}/>
+          <StackedBars buckets={flow} h={160}/>
         </HmCard>
 
         <HmCard title="실패 빈도 상위" meta="최근 24시간">

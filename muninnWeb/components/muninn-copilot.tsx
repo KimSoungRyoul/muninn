@@ -20,21 +20,24 @@ import {
 import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/lib/workspace-context";
-import { APPS, WORKSPACES } from "@/lib/data";
 import { navPath, appPath } from "@/lib/nav";
-import type { Application } from "@/lib/types";
 
 const json = (v: unknown) => JSON.stringify(v, null, 0);
 
-// id 또는 name 으로 앱을 찾는다(네비게이션 보조용).
-function resolveApp(key: string): Application | undefined {
+// id 또는 name 으로 앱을 찾는다(네비게이션 보조용). mock 직접 참조 대신 /api/apps 로 조회.
+async function resolveApp(key: string): Promise<{ id: string; name: string } | undefined> {
   const k = key.trim().toLowerCase();
-  return APPS.find((a) => a.id.toLowerCase() === k || a.name.toLowerCase() === k);
+  try {
+    const apps: any[] = await fetch("/api/apps", { cache: "no-store" }).then((r) => (r.ok ? r.json() : []));
+    return apps.find((a) => String(a.id).toLowerCase() === k || String(a.name).toLowerCase() === k);
+  } catch {
+    return undefined;
+  }
 }
 
 export function MuninnCopilot() {
   const router = useRouter();
-  const { workspaceId, workspace, setWorkspaceId } = useWorkspace();
+  const { workspaceId, workspace, workspaces, setWorkspaceId } = useWorkspace();
 
   // ---- readable context : 코파일럿에게 현재 화면 맥락만 가볍게 노출 ----
   // (실제 앱/실행/메모리 데이터는 server tool 로 조회한다 — ambient mock 으로 경쟁시키지 않음.)
@@ -60,7 +63,7 @@ export function MuninnCopilot() {
     description: "앱 상세 페이지로 이동한다. app 은 id 또는 name.",
     parameters: z.object({ app: z.string(), tab: z.string().optional().describe("탭(예: agent, runs)") }),
     handler: async ({ app, tab }) => {
-      const a = resolveApp(app);
+      const a = await resolveApp(app);
       if (!a) return json({ error: "not_found", app });
       router.push(appPath(a.id, tab));
       return json({ navigated: appPath(a.id, tab) });
@@ -95,8 +98,8 @@ export function MuninnCopilot() {
     parameters: z.object({ workspace: z.string() }),
     handler: async ({ workspace: key }) => {
       const k = key.trim().toLowerCase();
-      const ws = WORKSPACES.find((w) => w.id.toLowerCase() === k || w.slug.toLowerCase() === k || w.name.toLowerCase() === k);
-      if (!ws) return json({ error: "not_found", workspace: key, available: WORKSPACES.map((w) => ({ id: w.id, name: w.name })) });
+      const ws = workspaces.find((w) => w.id.toLowerCase() === k || w.slug.toLowerCase() === k || w.name.toLowerCase() === k);
+      if (!ws) return json({ error: "not_found", workspace: key, available: workspaces.map((w) => ({ id: w.id, name: w.name })) });
       setWorkspaceId(ws.id);
       router.push("/");
       return json({ switched: { id: ws.id, name: ws.name } });

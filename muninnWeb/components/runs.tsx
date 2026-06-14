@@ -17,16 +17,21 @@ import {
   RavenMark,
   highlightJson,
 } from "@/components/common";
-import { HM_DATA } from "@/lib/data";
+import { DEMO_NOW } from "@/lib/demo-clock";
+import { useApi } from "@/lib/use-api";
 
 // Huginn & Muninn — Run detail (★ flagship) + Runs list
+
+// 데모 flagship run — 전체 트랜스크립트(steps/recall/tools)가 존재하는 유일한 mock run.
+const FLAGSHIP_RUN_ID = "run_82c0f1a";
 
 const { useState: useS_RD, useEffect: useE_RD, useMemo: useM_RD } = React;
 
 function HmRunsList({ onOpenRun }: any) {
-  const D = HM_DATA;
   const [filter, setFilter] = useS_RD("all");
-  const filtered = filter === "all" ? D.RECENT_RUNS : D.RECENT_RUNS.filter(r => r.status === filter);
+  // mock 직접 참조 대신 /api/runs 로 조회(미연결 시 라우트가 mock fallback).
+  const { data: recent = [] } = useApi<any[]>(`/api/runs`);
+  const filtered = filter === "all" ? recent : recent.filter(r => r.status === filter);
 
   return (
     <>
@@ -42,7 +47,7 @@ function HmRunsList({ onOpenRun }: any) {
       <HmCard flush>
         <div className="hm-chipbar">
           {[
-            {v: "all",        l: "전체",       n: D.RECENT_RUNS.length},
+            {v: "all",        l: "전체",       n: recent.length},
             {v: "running",    l: "실행 중"},
             {v: "awaiting",   l: "승인 대기"},
             {v: "succeeded",  l: "성공"},
@@ -99,28 +104,42 @@ function HmRunsList({ onOpenRun }: any) {
 }
 
 // ===== Run Detail — flagship =====
-function HmRunDetail({ runId, onBack, awaitingMode, runVm, onDecided }: any) {
-  const R = HM_DATA.RUN_DETAIL;
+// 데이터 소스는 /api/runs/[id](runVm). flagship run 은 전체 트랜스크립트(steps)를 포함하고,
+// 그 외 run 은 요약(RunVM/mock Run)만 와서 요약 뷰로 렌더한다. (loading: 페이지가 내려준 플래그)
+function HmRunDetail({ runId, onBack, awaitingMode, runVm, loading, onDecided }: any) {
   const [selectedStep, setSelectedStep] = useS_RD(4);
   const [follow, setFollow] = useS_RD(true);
   const [arrivedIx, setArrivedIx] = useS_RD(null);
 
-  // mock SSE arrival pulse on the active step
+  // 전체 트랜스크립트(steps/memories/tools)는 데모 데이터상 flagship run(run_82c0f1a) 에만 있다.
+  const hasFullDetail = !!(runVm && Array.isArray(runVm.steps));
+  const R = hasFullDetail ? runVm : null;
+
+  // mock SSE arrival pulse on the active step (flagship 트랜스크립트가 있을 때만)
   useE_RD(() => {
+    if (!R) return;
     const activeStep = R.steps.find(s => s.active || s.kind === "tool-pending");
     if (!activeStep) return;
     setArrivedIx(activeStep.ix);
     const t = setTimeout(() => setArrivedIx(null), 1200);
     return () => clearTimeout(t);
-  }, []);
+  }, [R]);
 
-  // 전체 트랜스크립트(steps/memories/tools)는 데모 데이터상 RUN_DETAIL(run_82c0f1a) 에만 있다.
-  // 그 외 runId 로 진입하면 LIVE_RUNS/RECENT_RUNS 에서 해당 run 을 찾아 요약 뷰를 보여준다.
-  const hasFullDetail = !runId || runId === R.id;
   if (!hasFullDetail) {
-    // 요약 뷰는 mock Run 형태(started/duration)를 기대하므로 로컬 데이터를 우선 사용한다.
-    const summary = [...HM_DATA.LIVE_RUNS, ...HM_DATA.RECENT_RUNS].find(r => r.id === runId);
-    return <RunSummaryDetail runId={runId} run={summary} onBack={onBack} fullRunId={R.id} runVm={runVm} onDecided={onDecided}/>;
+    // 조회 중이면 로딩 표기(아직 not-found 로 단정하지 않는다).
+    if (loading && !runVm) {
+      return (
+        <div style={{ padding: "40px 0" }}>
+          <button className="btn btn-icon btn-sm" onClick={onBack} style={{ marginBottom: 16 }}><Icon name="chevronLeft" size={14}/></button>
+          <Empty icon="activity" title="불러오는 중…" sub="실행 정보를 조회하고 있어요."/>
+        </div>
+      );
+    }
+    // 요약 뷰는 Run 형태(started/duration)를 기대하므로 RunVM 필드를 정규화한다.
+    const run = runVm
+      ? { ...runVm, started: runVm.started ?? runVm.startedAt, duration: runVm.duration ?? 0 }
+      : null;
+    return <RunSummaryDetail runId={runId} run={run} onBack={onBack} fullRunId={FLAGSHIP_RUN_ID} runVm={runVm} onDecided={onDecided}/>;
   }
 
   // Allow page to enter awaiting state via prop(실 phase/approval 또는 mock 데모)
@@ -175,7 +194,7 @@ function HmRunDetail({ runId, onBack, awaitingMode, runVm, onDecided }: any) {
         <HmCard>
           <div style={{display:"flex", flexDirection:"column", gap:6}}>
             <span style={{fontFamily:"var(--font-sans)", fontSize:11.5, color:"var(--on-surface-muted)", fontWeight:600}}>소요 시간</span>
-            <span style={{fontFamily:"var(--font-sans)", fontSize:26, fontWeight:800, color:"var(--on-surface)", letterSpacing:"-0.02em"}}>{fmtDuration(Math.max(0, (HM_DATA.NOW.getTime() - new Date(R.started).getTime()) / 1000))}</span>
+            <span style={{fontFamily:"var(--font-sans)", fontSize:26, fontWeight:800, color:"var(--on-surface)", letterSpacing:"-0.02em"}}>{fmtDuration(Math.max(0, (DEMO_NOW.getTime() - new Date(R.started).getTime()) / 1000))}</span>
           </div>
         </HmCard>
       </div>
@@ -453,7 +472,7 @@ function ApprovalPanel({ runId, requestedAt, prTitle, diffLines, reasons, onDeci
   const [rejectReason, setRejectReason] = useS_RD("");
 
   const remainMin = requestedAt
-    ? Math.round(APPROVAL_TTL_MIN - Math.max(0, (HM_DATA.NOW.getTime() - new Date(requestedAt).getTime()) / 60000))
+    ? Math.round(APPROVAL_TTL_MIN - Math.max(0, (DEMO_NOW.getTime() - new Date(requestedAt).getTime()) / 60000))
     : null;
   const expiresLabel = remainMin == null ? null : remainMin > 0 ? `${remainMin}분 후 만료` : "만료됨";
 

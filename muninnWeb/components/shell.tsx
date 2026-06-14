@@ -5,15 +5,16 @@ import React from "react";
 import { Icon } from "@/components/icons";
 import { Avatar, IconButton } from "@/components/ui";
 import { BrandLogo, StatusDot, HealthDots } from "@/components/common";
-import { HM_DATA } from "@/lib/data";
+import { useWorkspace } from "@/lib/workspace-context";
 
 const { useState: useS_HMS, useEffect: useE_HMS, useRef: useR_HMS } = React;
 
 function WorkspaceSwitcher({ workspaceId, onSwitch, onManage }: any) {
-  const D = HM_DATA;
+  // 워크스페이스 목록/현재 선택은 전역 Context(=/api/workspaces 조회)에서 받는다.
+  const { workspaces, workspace } = useWorkspace();
   const [open, setOpen] = useS_HMS(false);
   const ref = useR_HMS<any>(null);
-  const ws = D.WORKSPACES.find(w => w.id === workspaceId) || D.WORKSPACES[0];
+  const ws = workspace;
 
   useE_HMS(() => {
     const onDoc = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -35,7 +36,7 @@ function WorkspaceSwitcher({ workspaceId, onSwitch, onManage }: any) {
       {open && (
         <div className="hm-ws-menu">
           <div className="hm-ws-menu-label">전환할 Workspace</div>
-          {D.WORKSPACES.map(w => (
+          {workspaces.map(w => (
             <button key={w.id} className={`hm-ws-item ${w.id === workspaceId ? "is-current" : ""}`}
                     onClick={() => { onSwitch(w.id); setOpen(false); }}>
               <span className="hm-ws-badge" style={{background: w.color}}>{w.name[0]}</span>

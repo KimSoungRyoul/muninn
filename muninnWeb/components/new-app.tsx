@@ -2,15 +2,17 @@
 import React from "react";
 import { Icon } from "@/components/icons";
 import { Button, Badge } from "@/components/ui";
-import { HM_DATA } from "@/lib/data";
+import { useWorkspace } from "@/lib/workspace-context";
 // Huginn & Muninn — New Application registration page
 // Single-page form with sectioned cards + live preview sidebar.
 
 const { useState: useS_NA } = React;
 
 function HmNewApp({ workspaceId, onCancel, onCreated }: any) {
-  const D = HM_DATA;
-  const ws = D.WORKSPACES.find(w => w.id === workspaceId) || D.WORKSPACES[0];
+  const { workspaces, workspace } = useWorkspace();
+  const ws = workspaces.find(w => w.id === workspaceId) || workspace;
+  const [submitting, setSubmitting] = useS_NA(false);
+  const [submitError, setSubmitError] = useS_NA<string | null>(null);
 
   const [form, setForm] = useS_NA({
     name: "",
@@ -42,6 +44,30 @@ function HmNewApp({ workspaceId, onCancel, onCreated }: any) {
 
   const canSubmit = Object.keys(errors).length === 0;
 
+  // HuginnAgent 생성 — /api/apps POST(콘솔→API). 미연결 시 라우트가 mock 응답을 돌려준다.
+  async function submit() {
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/apps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...form, workspaceId }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const created = await res.json().catch(() => form);
+      onCreated && onCreated(created);
+    } catch (e: any) {
+      setSubmitError(e?.message || "등록 실패");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <>
       <div className="hm-newapp-head">
@@ -53,11 +79,16 @@ function HmNewApp({ workspaceId, onCancel, onCreated }: any) {
             Huginn 이 자율 운영할 새 서비스를 등록합니다.
           </div>
         </div>
-        <div style={{display:"flex", gap:6}}>
+        <div style={{display:"flex", gap:6, alignItems:"center"}}>
+          {submitError && (
+            <span style={{fontSize:12.5, color:"var(--error-50)", fontWeight:600, display:"inline-flex", alignItems:"center", gap:4}}>
+              <Icon name="alert" size={13}/> {submitError}
+            </span>
+          )}
           <Button size="sm" variant="ghost" onClick={onCancel}>취소</Button>
-          <Button size="sm" variant="primary" leftIcon="check" disabled={!canSubmit}
-                  onClick={() => onCreated && onCreated(form)}>
-            Application 등록
+          <Button size="sm" variant="primary" leftIcon="check" disabled={!canSubmit || submitting}
+                  onClick={submit}>
+            {submitting ? "등록 중…" : "Application 등록"}
           </Button>
         </div>
       </div>
