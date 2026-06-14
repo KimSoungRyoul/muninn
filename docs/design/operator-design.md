@@ -180,10 +180,22 @@ resume=Issue, 영속=App (불일치)         ✓ resume(=Issue) 내 attempt 는 
 
 **RWO vs 병렬성(정직한 한계).** subPath 는 *디렉토리 격리*와 *resume 스코프 정합*을 보장하지만, 단일
 RWO PVC 라는 사실은 그대로다 — 같은 앱의 Issue 들을 **노드를 가로질러 동시 실행**하려면 RWX
-StorageClass 가 필요하다(operator 의 `--storage-class` 로 지정 가능). RWX 미가용 환경에서는 같은 앱의
+StorageClass 가 필요하다(operator env `MUNINN_AGENT_STORAGE_CLASS` 로 지정). RWX 미가용 환경에서는 같은 앱의
 Issue 들이 볼륨 레벨에서 직렬화되지만 데이터 격리·resume 정합은 항상 유지된다. 진정한 앱 내 병렬을
 강제로 원하면 후속에서 **Issue별 PVC**(Issue ownerRef, RWO each)로 갈 수 있으나, PVC 라이프사이클/GC
 비용이 늘어 현 단계에서는 채택하지 않는다.
+
+**보존/정리(운영 노트, 리뷰 R3).** Issue별 subPath 는 같은 앱 PVC(기본 1Gi) 안에 Issue 마다 `<issue>/`
+하위 디렉토리를 누적시킨다 — CR/Job 삭제는 cascade GC 되지만 **PVC 내용은 아무도 지우지 않는다**.
+앱 수명이 길면 과거 Issue transcript 가 무한 누적해 ENOSPC(불투명한 agent 실패로 표면화) 위험이 있다.
+완화: (a) `MUNINN_AGENT_PVC_SIZE`(operator env) 를 앱 트래픽에 맞게 상향, (b) 후속으로 **종료된 Issue 의 subPath GC**(Issue
+finalizer 또는 주기적 reconcile 에서 터미널 Issue 의 `<issue>/` 삭제)를 둔다. 현 단계는 (a) + 사이징
+가이드로 처리하고 (b)는 finalizer 정책(§3) 확정 시 함께 구현한다.
+
+**업그레이드 노트.** 이 변경 이전에 생성된 앱 PVC 는 transcript 가 **루트**에 있다. 업그레이드 후
+*이미 진행 중인 Issue* 의 새 attempt 는 빈 `<issue>/` subPath 를 마운트해 루트의 옛 transcript 를 못 본다
+→ resume 이 미스된다. runner 의 `_has_transcript` preflight 가 이를 감지해 **새 세션으로 안전 폴백**하므로
+attempt 가 실패하거나 retry budget 을 태우지 않는다(진단을 처음부터 다시 할 뿐). 신규 Issue 는 영향 없음.
 
 **왜 runner.py(Agent SDK)를 들어내지 않는가 — 기각된 대안.** "runner.py 를 빼고 `claude` CLI 이미지만
 PVC 마운트해 직접 실행" 안이 제기됐으나 기각한다. runner.py 는 *Claude Code 런처/인스톨러가 아니라*

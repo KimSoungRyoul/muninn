@@ -396,7 +396,9 @@ SDK `query()` 가 반환하는 `AsyncIterator<Message>` 를 Muninn `Step` 으로
 재시도 attempt 가 이어받는다. runner 가 스트림에서 세션 ID 를 잡는 즉시 `status.sessionId`(Agent→API
 소유)로 보고하고, Issue controller 가 다음 attempt Run 에 `MUNINN_RESUME_SESSION_ID` 로 주입하면
 runner 가 SDK `resume` 옵션으로 직전 진단 컨텍스트에서 계속한다. **resume 범위는 Issue 내 attempt
-간으로 한정** — Issue 간 연속성은 메모리(recall + `~/.claude/CLAUDE.md`)가 담당한다(컨텍스트 오염 방지).
+간으로 한정** — Issue 간 연속성은 **메모리 recall**(§7)이 담당한다(컨텍스트 오염 방지). (이전 초안은
+`~/.claude/CLAUDE.md` 도 cross-issue 연속성 경로로 적었으나, 미구현이며 Issue별 subPath 격리(§2.6)로
+`~/.claude` 가 Issue 단위가 되어 그 경로는 성립하지 않는다 — recall 이 단일 cross-issue 경로다.)
 attempt 간 pod 겹침은 없으므로(Issue controller 가 직전 Run 의 터미널 phase 확인 후에만 다음 attempt
 생성) 동일 세션 이어쓰기가 안전하다. 폴백 2중화: ① controller 는 attempt 역순으로 첫 non-empty
 sessionId 를 고른다(직전이 init 전에 죽어도 세션 체인 유지), ② runner 는 transcript 부재 시
