@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -251,18 +252,48 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		},
 	}
 	var volumes []corev1.Volume
+	var initContainers []corev1.Container
 	if jt.ClaudePVCName != "" {
-		container.VolumeMounts = []corev1.VolumeMount{{Name: claudeVolumeName, MountPath: claudeMountPath}}
+		// SubPath(=Issue 이름, buildJobTemplate)로 앱 PVC 안 Issue별 하위 경로를 ~/.claude 로 마운트한다(§5.5).
+		// 비면(레거시 JobTemplate) PVC 루트를 마운트 — 기존 동작 보존.
+		container.VolumeMounts = []corev1.VolumeMount{{
+			Name: claudeVolumeName, MountPath: claudeMountPath, SubPath: jt.ClaudeSubPath,
+		}}
 		volumes = []corev1.Volume{{
 			Name: claudeVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: jt.ClaudePVCName},
 			},
 		}}
+		// subPath 디렉토리는 kubelet 이 pod 마운트 시 생성하는데, fsGroup chown(볼륨 attach 1회) 이후라
+		// root:root 0755 로 만들어질 수 있다(k8s subPath+fsGroup gap). 그러면 비-root(uid 1000) 런타임이
+		// ~/.claude 하위에 transcript/settings 를 못 써 resume 이 조용히 깨진다(리뷰 R1). initContainer 가
+		// PVC 루트(여기는 fsGroup 으로 그룹쓰기 가능)를 마운트해 subPath 디렉토리를 미리 만들어 소유권을
+		// uid/fsGroup 1000 으로 잡는다 → main 컨테이너의 subPath 마운트가 쓰기 가능해진다. 비-root 하드닝과
+		// 정합(pod SecurityContext 의 RunAsUser/fsGroup 1000 이 init 에도 적용; root 승격 없음). 멱등(mkdir -p).
+		if jt.ClaudeSubPath != "" {
+			initContainers = []corev1.Container{{
+				Name:    claudeHomeInitContainerName,
+				Image:   jt.Image,
+				Command: []string{"sh", "-c", `mkdir -p "$CLAUDE_HOME_DIR"`},
+				Env: []corev1.EnvVar{{
+					Name: "CLAUDE_HOME_DIR", Value: path.Join(claudeStoreInitPath, jt.ClaudeSubPath),
+				}},
+				VolumeMounts: []corev1.VolumeMount{{Name: claudeVolumeName, MountPath: claudeStoreInitPath}},
+				// 작은 명시 요청/제한(리뷰 R2): requests 가 없으면 LimitRange-strict 네임스페이스가 pod 를
+				// 거부하거나 init 단계 QoS 가 BestEffort 가 된다. mkdir 한 번이라 최소값으로 충분.
+				Resources: initContainerResources(),
+				SecurityContext: &corev1.SecurityContext{
+					AllowPrivilegeEscalation: ptr.To(false),
+					Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+				},
+			}}
+		}
 	}
 	return corev1.PodSpec{
 		RestartPolicy:      corev1.RestartPolicyNever,
 		ServiceAccountName: sa,
+		InitContainers:     initContainers,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
 		// SIGTERM(축출/타임아웃) 시 runner.py 가 terminal 보고(final/failed/terminalKind)를 보낼 예산을
