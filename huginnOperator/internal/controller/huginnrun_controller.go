@@ -280,6 +280,9 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 					Name: "CLAUDE_HOME_DIR", Value: path.Join(claudeStoreInitPath, jt.ClaudeSubPath),
 				}},
 				VolumeMounts: []corev1.VolumeMount{{Name: claudeVolumeName, MountPath: claudeStoreInitPath}},
+				// 작은 명시 요청/제한(리뷰 R2): requests 가 없으면 LimitRange-strict 네임스페이스가 pod 를
+				// 거부하거나 init 단계 QoS 가 BestEffort 가 된다. mkdir 한 번이라 최소값으로 충분.
+				Resources: initContainerResources(),
 				SecurityContext: &corev1.SecurityContext{
 					AllowPrivilegeEscalation: ptr.To(false),
 					Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},

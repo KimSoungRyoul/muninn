@@ -108,6 +108,22 @@ func withResumeSession(jt muninniov1beta1.JobTemplate, sessionID string) muninni
 	return jt
 }
 
+// initContainerResources 는 subPath 선생성 initContainer(claude-home-init)의 최소 리소스다(리뷰 R2).
+// mkdir 한 번이라 아주 작게 잡되, requests 를 명시해 LimitRange-strict 네임스페이스의 pod 거부를 막고
+// init 단계 QoS 가 BestEffort 로 떨어지지 않게 한다.
+func initContainerResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10m"),
+			corev1.ResourceMemory: resource.MustParse("16Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		},
+	}
+}
+
 // defaultAgentResources 는 권장 기본 리소스(§5.1).
 func defaultAgentResources() corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{

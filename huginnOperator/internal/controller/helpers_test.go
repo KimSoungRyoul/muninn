@@ -273,6 +273,10 @@ func TestExpandPodSpec(t *testing.T) {
 	if ic.SecurityContext == nil || ic.SecurityContext.AllowPrivilegeEscalation == nil || *ic.SecurityContext.AllowPrivilegeEscalation {
 		t.Error("init allowPrivilegeEscalation 은 false 여야 함(비-root 하드닝)")
 	}
+	// init 리소스 요청 명시(리뷰 R2): LimitRange-strict 네임스페이스 거부/BestEffort QoS 방지.
+	if len(ic.Resources.Requests) == 0 {
+		t.Error("init container 에 리소스 requests 가 명시돼야 함(LimitRange 대비)")
+	}
 
 	// 비-root 하드닝(§5.1, §6.1): pod fsGroup/runAsNonRoot + 컨테이너 capability 드롭.
 	if ps.SecurityContext == nil || ps.SecurityContext.RunAsNonRoot == nil || !*ps.SecurityContext.RunAsNonRoot {
