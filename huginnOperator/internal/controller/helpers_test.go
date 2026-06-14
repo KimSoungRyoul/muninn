@@ -301,3 +301,16 @@ func TestBackoffReady(t *testing.T) {
 		t.Error("maxBackoff 초과 경과면 ready 여야 함")
 	}
 }
+
+// TestWebhookURLFor 는 status.webhookUrl 이 실 수신 라우트 POST /api/hooks/{app} 와 정합하는지 검증한다(§4.5).
+// `/api` 접두가 빠지면 복사한 URL 이 404 가 나므로 회귀 방지로 고정한다.
+func TestWebhookURLFor(t *testing.T) {
+	// 커스텀 base: /api/hooks/{name} 경로로 발급.
+	if got, want := webhookURLFor("https://muninn.example.com", "billing-api"), "https://muninn.example.com/api/hooks/billing-api"; got != want {
+		t.Errorf("webhookURLFor(custom) = %q, want %q", got, want)
+	}
+	// 빈 base: defaultAPIBaseURL 로 폴백하되 경로는 동일하게 /api/hooks/{name}.
+	if got, want := webhookURLFor("", "payments"), defaultAPIBaseURL+"/api/hooks/payments"; got != want {
+		t.Errorf("webhookURLFor(default) = %q, want %q", got, want)
+	}
+}

@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -87,8 +86,8 @@ func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// 3) webhookUrl 발급(§4.5).
-	agent.Status.WebhookURL = fmt.Sprintf("%s/hooks/%s", orDefault(r.APIBaseURL, defaultAPIBaseURL), agent.Name)
+	// 3) webhookUrl 발급(§4.5) — 실 수신 라우트 POST /api/hooks/{app} 와 정합(webhookURLFor).
+	agent.Status.WebhookURL = webhookURLFor(r.APIBaseURL, agent.Name)
 
 	// 4) activeIssues 집계(§8.4).
 	active, err := r.countActiveIssues(ctx, &agent)
