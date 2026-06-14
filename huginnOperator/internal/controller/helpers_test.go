@@ -255,6 +255,24 @@ func TestExpandPodSpec(t *testing.T) {
 		ps.Volumes[0].PersistentVolumeClaim.ClaimName != "pvc-claude-app" {
 		t.Errorf("PVC volume = %+v", ps.Volumes)
 	}
+	// subPath 디렉토리 선생성 initContainer(리뷰 R1): PVC 루트를 claudeStoreInitPath 에 (subPath 없이)
+	// 마운트하고 ClaudeSubPath 디렉토리를 mkdir 한다 → uid 1000 쓰기 가능 보장.
+	if len(ps.InitContainers) != 1 {
+		t.Fatalf("initContainers = %d, want 1 (subPath 선생성)", len(ps.InitContainers))
+	}
+	ic := ps.InitContainers[0]
+	if ic.Image != "img:1" {
+		t.Errorf("init image = %q, want img:1 (동일 이미지 재사용)", ic.Image)
+	}
+	if len(ic.VolumeMounts) != 1 || ic.VolumeMounts[0].MountPath != claudeStoreInitPath || ic.VolumeMounts[0].SubPath != "" {
+		t.Errorf("init volumeMount = %+v (PVC 루트를 subPath 없이 마운트해야 함)", ic.VolumeMounts)
+	}
+	if e, ok := envByName(ic.Env, "CLAUDE_HOME_DIR"); !ok || e.Value != claudeStoreInitPath+"/issue-7" {
+		t.Errorf("init CLAUDE_HOME_DIR = %+v, want %s/issue-7", ic.Env, claudeStoreInitPath)
+	}
+	if ic.SecurityContext == nil || ic.SecurityContext.AllowPrivilegeEscalation == nil || *ic.SecurityContext.AllowPrivilegeEscalation {
+		t.Error("init allowPrivilegeEscalation 은 false 여야 함(비-root 하드닝)")
+	}
 
 	// 비-root 하드닝(§5.1, §6.1): pod fsGroup/runAsNonRoot + 컨테이너 capability 드롭.
 	if ps.SecurityContext == nil || ps.SecurityContext.RunAsNonRoot == nil || !*ps.SecurityContext.RunAsNonRoot {
@@ -270,10 +288,19 @@ func TestExpandPodSpec(t *testing.T) {
 		t.Error("컨테이너 capability 드롭 미설정")
 	}
 
-	// ClaudePVCName 비면 볼륨/마운트 미부착.
+	// ClaudePVCName 비면 볼륨/마운트/init 미부착.
 	ps2 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:2"})
-	if len(ps2.Volumes) != 0 || len(ps2.Containers[0].VolumeMounts) != 0 {
-		t.Error("ClaudePVCName 비었는데 볼륨이 부착됨")
+	if len(ps2.Volumes) != 0 || len(ps2.Containers[0].VolumeMounts) != 0 || len(ps2.InitContainers) != 0 {
+		t.Error("ClaudePVCName 비었는데 볼륨/init 이 부착됨")
+	}
+
+	// 레거시 JobTemplate(PVC 있고 SubPath 비어있음): PVC 루트 마운트(SubPath ""), init 미부착 — 하위호환.
+	ps3 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:3", ClaudePVCName: "pvc-legacy"})
+	if len(ps3.Containers[0].VolumeMounts) != 1 || ps3.Containers[0].VolumeMounts[0].SubPath != "" {
+		t.Errorf("레거시 SubPath 는 빈값(루트 마운트)이어야 함: %+v", ps3.Containers[0].VolumeMounts)
+	}
+	if len(ps3.InitContainers) != 0 {
+		t.Errorf("레거시(SubPath 빈값)엔 init 미부착이어야 함: %d", len(ps3.InitContainers))
 	}
 }
 

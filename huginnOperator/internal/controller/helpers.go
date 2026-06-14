@@ -41,6 +41,13 @@ const (
 	claudeMountPath = "/home/node/.claude"
 	agentSkillCmd   = "/usr/local/bin/claude_skill.sh"
 
+	// claudeHomeInitContainerName / claudeStoreInitPath: subPath(~/.claude) 디렉토리를 미리 만드는
+	// initContainer 배선(§5.5, 리뷰 R1). init 은 PVC 루트(fsGroup 으로 그룹쓰기 가능)를 claudeStoreInitPath
+	// 에 마운트해 ClaudeSubPath 디렉토리를 mkdir -p 한다 — kubelet 이 root 소유로 만들어 uid 1000 쓰기가
+	// 막히는 subPath+fsGroup gap 을 회피한다.
+	claudeHomeInitContainerName = "claude-home-init"
+	claudeStoreInitPath         = "/claude-store"
+
 	// agentRunAsUser: agent-runtime 이미지의 비-root 사용자(node). PVC fsGroup/securityContext 에 사용.
 	agentRunAsUser int64 = 1000
 

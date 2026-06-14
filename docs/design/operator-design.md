@@ -155,6 +155,15 @@ resume 으로 attempt 를 태우는 대신 새 세션으로 폴백한다.
 `expandPodSpec` 이 그 값을 `VolumeMount.SubPath` 로 적용해 **앱 PVC 안의 Issue별 하위 경로**를 `~/.claude` 로
 마운트한다. 영속 경계를 resume 경계(Issue)와 일치시킨다.
 
+subPath 디렉토리는 kubelet 이 pod 마운트 시 생성하는데, fsGroup chown(볼륨 attach 1회) *이후*라
+`root:root 0755` 로 만들어질 수 있다(k8s subPath+fsGroup gap). 그러면 비-root(uid 1000) 런타임이
+`~/.claude` 하위에 transcript/`settings.json` 를 못 써 resume 이 **조용히 깨진다**(기존 루트 마운트엔 없던
+회귀). 이를 막기 위해 `expandPodSpec` 은 subPath 가 채워질 때 **initContainer(`claude-home-init`)** 를
+함께 단다 — PVC 루트를 `/claude-store` 에 (subPath 없이) 마운트하고 `mkdir -p` 로 subPath 디렉토리를 미리
+만든다. 루트는 fsGroup 으로 그룹쓰기가 가능하므로 uid 1000 init 이 디렉토리를 만들면 소유권이 1000 으로
+잡혀 main 컨테이너의 subPath 마운트가 쓰기 가능해진다. init 은 pod SecurityContext(RunAsUser/fsGroup 1000,
+root 승격 없음)를 그대로 따르고 `mkdir -p` 라 멱등하다.
+
 ```
 BEFORE                                  AFTER
 pvc-claude-<app> (RWO)                  pvc-claude-<app> (RWO)
