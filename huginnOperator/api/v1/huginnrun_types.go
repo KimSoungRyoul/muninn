@@ -49,6 +49,11 @@ type JobTemplate struct {
 	// claudePVCName: ~/.claude 로 마운트할 앱별 PVC(§5.5). 비면 볼륨 미마운트.
 	// +optional
 	ClaudePVCName string `json:"claudePVCName,omitempty"`
+	// claudeSubPath: 앱 PVC 안에서 ~/.claude 로 마운트할 하위 경로(§5.5). Issue 이름으로 채워
+	// Issue별로 transcript/설정을 물리 격리한다 — resume 경계(=Issue, withResumeSession 참조)와
+	// 영속 경계를 일치시켜 Issue 간 ~/.claude 동시쓰기 오염을 막는다. 비면 PVC 루트를 마운트(레거시).
+	// +optional
+	ClaudeSubPath string `json:"claudeSubPath,omitempty"`
 }
 
 // HuginnRunSpec defines the desired state of HuginnRun.

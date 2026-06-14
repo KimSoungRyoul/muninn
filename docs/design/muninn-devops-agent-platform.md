@@ -384,7 +384,13 @@ SDK `query()` 가 반환하는 `AsyncIterator<Message>` 를 Muninn `Step` 으로
 - **B. 공유 PVC + `/.claude/run/{runId}.lock` 분산 락**(MVP 권장)
 - **C. `ReadWriteOncePod` + 장기 Issue Pod 1개**(Claude session 컨텍스트 재사용 시)
 
-**MVP = A(앱별 PVC) 또는 B**. 동일 앱의 동시 Run 은 Claude session 디렉토리를 `~/.claude/run/{runId}` 로 분리해 충돌을 줄인다.
+**구현 = A(앱별 PVC) + Issue별 subPath**. 앱별 PVC(`pvc-claude-<app>`) 안에서 **Issue 이름**을 subPath 로
+`~/.claude` 에 마운트한다(`JobTemplate.ClaudeSubPath`) — 분리 단위를 Run 이 아니라 **Issue** 로 잡는 것이
+핵심이다(아래 resume 범위가 Issue 내 attempt 간이므로, 같은 Issue 의 attempt 들은 같은 `~/.claude` 를
+공유해야 transcript resume 이 동작한다). 이로써 같은 앱의 **다른 Issue** 들의 transcript/설정이 물리적으로
+격리되어 동시쓰기 오염이 사라진다 — 영속 경계(subPath)와 resume 경계(Issue)가 일치한다. RWO PVC 의
+노드 간 동시 마운트 제약 때문에 같은 앱 Issue 들의 *진정한 병렬* 실행은 RWX StorageClass 가 필요하다
+(미가용 시 볼륨 레벨 직렬화되나 격리·resume 정합은 유지). 상세: `operator-design.md §2.6`.
 
 **세션 resume (구현됨)**: PVC 에 남는 Claude 세션 transcript(`~/.claude/projects/…`)를 같은 Issue 의
 재시도 attempt 가 이어받는다. runner 가 스트림에서 세션 ID 를 잡는 즉시 `status.sessionId`(Agent→API

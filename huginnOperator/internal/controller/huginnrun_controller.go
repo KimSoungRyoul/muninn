@@ -252,7 +252,11 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 	}
 	var volumes []corev1.Volume
 	if jt.ClaudePVCName != "" {
-		container.VolumeMounts = []corev1.VolumeMount{{Name: claudeVolumeName, MountPath: claudeMountPath}}
+		// SubPath(=Issue 이름, buildJobTemplate)로 앱 PVC 안 Issue별 하위 경로를 ~/.claude 로 마운트한다(§5.5).
+		// 비면(레거시 JobTemplate) PVC 루트를 마운트 — 기존 동작 보존.
+		container.VolumeMounts = []corev1.VolumeMount{{
+			Name: claudeVolumeName, MountPath: claudeMountPath, SubPath: jt.ClaudeSubPath,
+		}}
 		volumes = []corev1.Volume{{
 			Name: claudeVolumeName,
 			VolumeSource: corev1.VolumeSource{

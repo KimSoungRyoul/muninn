@@ -191,5 +191,10 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 		Resources:          defaultAgentResources(),
 		ServiceAccountName: serviceAccountName,
 		ClaudePVCName:      pvcNameForAgent(agent.Name),
+		// ClaudeSubPath=Issue 이름: 앱 PVC 안에서 Issue별 하위 경로를 ~/.claude 로 마운트한다(§5.5).
+		// resume 경계가 Issue 이므로(withResumeSession), 영속 경계도 Issue 로 맞춰 transcript/설정을
+		// 물리 격리한다 → 같은 앱의 다른 Issue 가 ~/.claude(settings·projects)를 동시에 더럽히지 않는다.
+		// 같은 Issue 의 attempt 들은 같은 subPath 를 공유하므로 세션 resume 이 그대로 동작한다.
+		ClaudeSubPath: issue.Name,
 	}
 }

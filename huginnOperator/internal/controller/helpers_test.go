@@ -64,6 +64,10 @@ func TestBuildJobTemplate(t *testing.T) {
 	if jt.ClaudePVCName != "pvc-claude-ai-router-svc" {
 		t.Errorf("claudePVCName = %q", jt.ClaudePVCName)
 	}
+	// ClaudeSubPath=Issue 이름: 앱 PVC 안에서 Issue별 ~/.claude 격리(§5.5).
+	if jt.ClaudeSubPath != "issue-1" {
+		t.Errorf("claudeSubPath = %q, want issue-1", jt.ClaudeSubPath)
+	}
 	if jt.ServiceAccountName != serviceAccountName {
 		t.Errorf("serviceAccountName = %q", jt.ServiceAccountName)
 	}
@@ -216,6 +220,7 @@ func TestExpandPodSpec(t *testing.T) {
 		Image:         "img:1",
 		Env:           []corev1.EnvVar{{Name: "X", Value: "y"}},
 		ClaudePVCName: "pvc-claude-app",
+		ClaudeSubPath: "issue-7",
 		// Command/Resources/ServiceAccountName 비움 → 기본값 적용 검증
 	}
 	ps := expandPodSpec(jt)
@@ -241,6 +246,10 @@ func TestExpandPodSpec(t *testing.T) {
 	}
 	if len(c.VolumeMounts) != 1 || c.VolumeMounts[0].MountPath != claudeMountPath {
 		t.Errorf("volumeMount = %+v", c.VolumeMounts)
+	}
+	// SubPath=Issue 이름: 앱 PVC 안에서 Issue별 하위 경로를 ~/.claude 로 마운트(§5.5 격리).
+	if c.VolumeMounts[0].SubPath != "issue-7" {
+		t.Errorf("volumeMount.SubPath = %q, want issue-7", c.VolumeMounts[0].SubPath)
 	}
 	if len(ps.Volumes) != 1 || ps.Volumes[0].PersistentVolumeClaim == nil ||
 		ps.Volumes[0].PersistentVolumeClaim.ClaimName != "pvc-claude-app" {

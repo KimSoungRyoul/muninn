@@ -139,6 +139,67 @@ resume 으로 attempt 를 태우는 대신 새 세션으로 폴백한다.
 (step/cost/tokens/output·outcome — Agent→API 소유 필드만; §2.2) → `POST {MUNINN_MEMORY_ENDPOINT}/api/memories`(결과 기억화).
 `MUNINN_PR_MODE=dry-run` 이면 실제 `gh pr create` 대신 **PR 계획(title/요약/diff)** 을 output 으로 보고한다(실 PR 은 후속).
 
+### 2.6 `~/.claude` PVC 스코프 — Issue별 subPath 격리 (실행 어댑터 설계 노트)
+
+**문제(이전 설계).** 앱별 PVC(`pvc-claude-<app>`, `ensurePVC`, RWO)를 모든 Run 이 `~/.claude` 루트에 그대로
+마운트했다. 그런데 **resume 경계는 Issue**(`withResumeSession` — attempt 간만, Issue 간 컨텍스트 오염 방지)
+인데 **영속 경계는 App** 이라 스코프가 어긋났다. 결과:
+
+- 같은 앱의 **서로 다른 Issue** 들의 transcript(`projects/<cwd-hash>/*.jsonl`)·설정(`settings.json`)이
+  한 디렉토리에 물리적으로 뒤섞인다(§5.5 의 "Issue 간 오염 방지" 의도가 resume 의 session-id 매칭에만
+  의존하고 파일 레이아웃으로는 보장되지 않음).
+- RWO PVC 라 같은 앱의 두 Issue Pod 가 다른 노드에 스케줄되면 Multi-Attach 로 두 번째가 Pending,
+  같은 노드면 `~/.claude` 공유 파일 동시쓰기 경합.
+
+**변경.** `JobTemplate.ClaudeSubPath` 필드를 추가하고 `buildJobTemplate` 이 이를 **Issue 이름**으로 채운다.
+`expandPodSpec` 이 그 값을 `VolumeMount.SubPath` 로 적용해 **앱 PVC 안의 Issue별 하위 경로**를 `~/.claude` 로
+마운트한다. 영속 경계를 resume 경계(Issue)와 일치시킨다.
+
+```
+BEFORE                                  AFTER
+pvc-claude-<app> (RWO)                  pvc-claude-<app> (RWO)
+└ ~/.claude/         ← 모든 Issue 공유   ├ <issue-A>/  → Run(A·attempt들)  ~/.claude
+  ├ settings.json    ⚠ 동시쓰기 경합     └ <issue-B>/  → Run(B·attempt들)  ~/.claude
+  └ projects/*.jsonl ⚠ Issue 혼재               ↑ subPath 로 물리 격리
+                                        ✓ Issue 간 ~/.claude 오염 제거
+resume=Issue, 영속=App (불일치)         ✓ resume(=Issue) 내 attempt 는 같은 subPath → 정상
+```
+
+- **같은 Issue 의 attempt 들**은 같은 subPath 를 공유 → 세션 transcript 가 남아 resume 이 그대로 동작
+  (`withResumeSession` / `_has_transcript` 불변).
+- **비면(레거시 JobTemplate)** PVC 루트를 마운트 — 기존 동작 보존(하위호환).
+
+**RWO vs 병렬성(정직한 한계).** subPath 는 *디렉토리 격리*와 *resume 스코프 정합*을 보장하지만, 단일
+RWO PVC 라는 사실은 그대로다 — 같은 앱의 Issue 들을 **노드를 가로질러 동시 실행**하려면 RWX
+StorageClass 가 필요하다(operator 의 `--storage-class` 로 지정 가능). RWX 미가용 환경에서는 같은 앱의
+Issue 들이 볼륨 레벨에서 직렬화되지만 데이터 격리·resume 정합은 항상 유지된다. 진정한 앱 내 병렬을
+강제로 원하면 후속에서 **Issue별 PVC**(Issue ownerRef, RWO each)로 갈 수 있으나, PVC 라이프사이클/GC
+비용이 늘어 현 단계에서는 채택하지 않는다.
+
+**왜 runner.py(Agent SDK)를 들어내지 않는가 — 기각된 대안.** "runner.py 를 빼고 `claude` CLI 이미지만
+PVC 마운트해 직접 실행" 안이 제기됐으나 기각한다. runner.py 는 *Claude Code 런처/인스톨러가 아니라*
+**Muninn 통합 어댑터**다(이미지에 `claude` CLI 가 baked-in, 런타임 설치 없음). SDK `query()` 루프는
+~30줄뿐이고 나머지는 전부 플랫폼 계약이다: status 보고(§2.2 Agent→API 소유 필드), 메모리 recall/store,
+HITL 승인 게이트·폴링(§C-HITL), SIGTERM→terminal 보고 내구성(incident 'running' 고착 방지). bare CLI 로
+바꾸면 이 어댑터가 사라지는 게 아니라 사이드카/wrapper 로 **이동**할 뿐이며(stream-json 손파싱), 타입
+메시지·resume·usage 추출을 재구현해 더 나빠진다.
+
+| 대안 | 결정 | 이유 |
+|------|------|------|
+| bare `claude` CLI (runner.py 제거) | 기각 | Muninn 어댑터를 사이드카로 이동시킬 뿐 — 복잡도 감소 아님, 타입 메시지 상실 |
+| raw Messages API + 자체 루프 | 기각 | 에이전트 루프·도구 실행기·resume 재발명 = 더 큰 복잡도 |
+| Managed Agents (self-hosted sandbox) | 기각 | in-cluster 실행은 가능하나 루프 오케스트레이션이 Anthropic 쪽 → operator 의 `HuginnRun.phase` 소유권(§2.2) 충돌, beta, memory_store/env-credential 미지원 |
+| Python SDK → CLI `--output-format stream-json` | 보류 | Python SDK 의존 1개 제거되나 session_id/usage 손파싱 필요 → 순효과 wash |
+
+→ **실행 모델(self-host + Agent SDK in K8s Job)은 유지가 정답.** 클러스터 자격으로 운영하는 에이전트를
+호스팅 샌드박스로 옮길 수 없다. runner.py 의 응집도 문제(루프+보고+HITL+시그널 혼재)는 *구조 변경이
+아니라 모듈 분리*(`report.py`/`memory.py`/`approval.py`)로 푸는 **후속 리팩터링**으로 남긴다(동작 불변).
+
+> **인증 정책(2026-06-15~).** Anthropic 이 6/15 부터 Agent SDK·프로그래밍 사용을 구독 풀이 아니라 별도
+> 크레딧 풀(표준 API 요금)로 분리한다. 운영 기본 자격은 `ANTHROPIC_API_KEY`(종량제 키), 구독
+> `CLAUDE_CODE_OAUTH_TOKEN` 은 로컬 개발/테스트 한정으로 둔다(2월 ToS 상 OAuth 는 Claude Code/Claude.ai
+> 한정). 코드는 이미 dual-mode(`claude_skill.sh`, `copilot-anthropic.ts`)라 키 주입만 바꾸면 된다.
+
 ---
 
 ## 3. Finalizer (§11-7 구체화)
