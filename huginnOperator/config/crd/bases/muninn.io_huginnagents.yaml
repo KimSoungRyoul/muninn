@@ -454,7 +454,7 @@ spec:
                 - Degraded
                 type: string
               webhookUrl:
-                description: 'webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/hooks/{name}'
+                description: 'webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/api/hooks/{name}'
                 type: string
             type: object
         required:
@@ -904,7 +904,7 @@ spec:
                 - Degraded
                 type: string
               webhookUrl:
-                description: 'webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/hooks/{name}'
+                description: 'webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/api/hooks/{name}'
                 type: string
             type: object
         required:

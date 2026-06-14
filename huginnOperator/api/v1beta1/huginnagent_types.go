@@ -247,7 +247,7 @@ const (
 
 // HuginnAgentStatus defines the observed state of HuginnAgent.
 type HuginnAgentStatus struct {
-	// webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/hooks/{name}
+	// webhookUrl: Operator 가 발급(§4.5). https://{muninn-api-fqdn}/api/hooks/{name}
 	// +optional
 	WebhookURL string `json:"webhookUrl,omitempty"`
 	// +optional

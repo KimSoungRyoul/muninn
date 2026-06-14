@@ -70,6 +70,14 @@ const (
 	approvalRunTimeoutSeconds int64 = 7200
 )
 
+// webhookURLFor 는 HuginnAgent 의 status.webhookUrl 을 발급한다(§4.5). 경로는 실제 Muninn API
+// 수신 라우트(muninnWeb `app/api/hooks/[app]/route.ts` = POST /api/hooks/{app})와 정합한다 —
+// `/api` 접두가 빠지면 사용자가 status.webhookUrl 을 그대로 복사해 Grafana 등에 꽂을 때 404 가 난다.
+// base 가 비면 defaultAPIBaseURL(placeholder FQDN)을 쓴다.
+func webhookURLFor(base, agentName string) string {
+	return fmt.Sprintf("%s/api/hooks/%s", orDefault(base, defaultAPIBaseURL), agentName)
+}
+
 // runTimeoutSeconds 는 Run 의 Job activeDeadlineSeconds(=Spec.TimeoutSeconds)를 결정한다.
 // agent 의 PR 정책이 승인 게이트를 켜면(requireApprovalOnWorkflowChange) 승인 대기(최대 90m)가
 // 60m activeDeadline 에 SIGKILL 당하는 모순을 막기 위해 7200s 로 상향한다(CONTRACT §C-HITL).
