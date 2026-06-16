@@ -59,6 +59,11 @@ claude_skill.sh [run|selftest|<cmd>]
 | `MUNINN_PERMISSION_MODE` | SDK permission_mode(기본 `bypassPermissions`) |
 
 > 인증 키는 **PVC 가 아니라 env(K8s Secret)로만** 주입한다(§5.1, §6.2).
+>
+> **운영 자격 정책(2026-06-15~).** Anthropic 이 6/15 부터 Agent SDK·프로그래밍 사용을 구독 풀이 아니라
+> 별도 크레딧 풀(표준 API 요금)로 분리한다. 또한 OAuth 토큰은 2월 ToS 상 Claude Code/Claude.ai 한정이다.
+> 따라서 **운영 기본 = `ANTHROPIC_API_KEY`(종량제 키)**, `CLAUDE_CODE_OAUTH_TOKEN` 은 **로컬 개발/테스트
+> 한정**으로 쓴다(둘 다 지원하므로 주입 키만 교체). 상세: `docs/design/operator-design.md §2.6`.
 
 ### selftest 센티넬
 

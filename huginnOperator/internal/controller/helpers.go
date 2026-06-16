@@ -41,6 +41,13 @@ const (
 	claudeMountPath = "/home/node/.claude"
 	agentSkillCmd   = "/usr/local/bin/claude_skill.sh"
 
+	// claudeHomeInitContainerName / claudeStoreInitPath: subPath(~/.claude) 디렉토리를 미리 만드는
+	// initContainer 배선(§5.5, 리뷰 R1). init 은 PVC 루트(fsGroup 으로 그룹쓰기 가능)를 claudeStoreInitPath
+	// 에 마운트해 ClaudeSubPath 디렉토리를 mkdir -p 한다 — kubelet 이 root 소유로 만들어 uid 1000 쓰기가
+	// 막히는 subPath+fsGroup gap 을 회피한다.
+	claudeHomeInitContainerName = "claude-home-init"
+	claudeStoreInitPath         = "/claude-store"
+
 	// agentRunAsUser: agent-runtime 이미지의 비-root 사용자(node). PVC fsGroup/securityContext 에 사용.
 	agentRunAsUser int64 = 1000
 
@@ -107,6 +114,22 @@ func withResumeSession(jt muninniov1beta1.JobTemplate, sessionID string) muninni
 	jt.Env = append(append([]corev1.EnvVar(nil), jt.Env...),
 		corev1.EnvVar{Name: "MUNINN_RESUME_SESSION_ID", Value: sessionID})
 	return jt
+}
+
+// initContainerResources 는 subPath 선생성 initContainer(claude-home-init)의 최소 리소스다(리뷰 R2).
+// mkdir 한 번이라 아주 작게 잡되, requests 를 명시해 LimitRange-strict 네임스페이스의 pod 거부를 막고
+// init 단계 QoS 가 BestEffort 로 떨어지지 않게 한다.
+func initContainerResources() corev1.ResourceRequirements {
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("10m"),
+			corev1.ResourceMemory: resource.MustParse("16Mi"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("100m"),
+			corev1.ResourceMemory: resource.MustParse("64Mi"),
+		},
+	}
 }
 
 // defaultAgentResources 는 권장 기본 리소스(§5.1).
@@ -199,5 +222,10 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 		Resources:          defaultAgentResources(),
 		ServiceAccountName: serviceAccountName,
 		ClaudePVCName:      pvcNameForAgent(agent.Name),
+		// ClaudeSubPath=Issue 이름: 앱 PVC 안에서 Issue별 하위 경로를 ~/.claude 로 마운트한다(§5.5).
+		// resume 경계가 Issue 이므로(withResumeSession), 영속 경계도 Issue 로 맞춰 transcript/설정을
+		// 물리 격리한다 → 같은 앱의 다른 Issue 가 ~/.claude(settings·projects)를 동시에 더럽히지 않는다.
+		// 같은 Issue 의 attempt 들은 같은 subPath 를 공유하므로 세션 resume 이 그대로 동작한다.
+		ClaudeSubPath: issue.Name,
 	}
 }
