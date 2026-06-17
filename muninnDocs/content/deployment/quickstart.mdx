@@ -5,7 +5,7 @@ import { Callout } from 'nextra/components'
 Muninn 플랫폼을 kind/클러스터에 빠르게 올리는 경로다. **metaDB(PostgreSQL, 텍스트 검색 전용)는 Helm chart 가 번들하지 않는다** — 운영(HA·백업·업그레이드)을 [CloudNativePG(CNPG)](https://cloudnative-pg.io/) operator 에 위임하고, chart 는 그 연결 Secret 만 가리킨다. chart 가 가벼워지고 DB 수명주기가 분리된다.
 
 <Callout type="warning">
-operator/web 이미지는 아직 CI 미발행이다. 아래 흐름을 기본 이미지 값 그대로 따라하면 operator/web 이 `ImagePullBackOff` 로 멈춘다. 가장 쉬운 경로는 루트 `make run-local` — kind 생성·이미지 3종 빌드/적재·metaDB·helm 설치를 한 번에 한다. 아래 CNPG quickstart 를 직접 따라갈 때는 4단계의 이미지 로컬 빌드·`kind load`·`--set *.image.*` override 를 반드시 함께 수행하라([Helm 차트](/deployment/helm)의 "로컬 이미지로 kind 설치" 참고).
+operator/web 이미지는 아직 CI 미발행이다. 아래 흐름을 기본 이미지 값 그대로 따라하면 operator/web 이 `ImagePullBackOff` 로 멈춘다. 가장 쉬운 경로는 루트 `make run-kind` — kind 생성·이미지 3종 빌드/적재·metaDB·helm 설치를 한 번에 한다. 아래 CNPG quickstart 를 직접 따라갈 때는 4단계의 이미지 로컬 빌드·`kind load`·`--set *.image.*` override 를 반드시 함께 수행하라([Helm 차트](/deployment/helm)의 "로컬 이미지로 kind 설치" 참고).
 </Callout>
 
 전체 구성은 다음과 같다.

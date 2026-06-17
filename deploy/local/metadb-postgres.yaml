@@ -1,4 +1,4 @@
-# 로컬 풀스택(`make run-local`)용 metaDB — stock postgres.
+# 로컬 풀스택(`make run-kind`)용 metaDB — stock postgres.
 # 검색은 텍스트(to_tsvector/ts_rank_cd)만 쓰므로 pgvector·확장 불필요 → 어떤 postgres 이미지든 동작.
 #
 # namespace 는 `kubectl apply -n` 가 정한다(매니페스트에 박지 않음 → NAMESPACE override 호환).

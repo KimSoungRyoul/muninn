@@ -34,18 +34,18 @@ webhook 비활성(기본)에서는 cert-manager 없이 바로 뜬다.
 
 > ⚠️ operator/web 이미지는 **CI 미발행**이다 — 기본 이미지 값 그대로면 `ImagePullBackOff` 가 난다.
 > 로컬 빌드 후 `kind load` + `--set *.image.*` override 가 필요하다(아래 "로컬 이미지로 kind 설치" 또는
-> 루트 `make run-local`). agent Job 의 보고/메모리 endpoint(MUNINN_API_ENDPOINT/MUNINN_MEMORY_ENDPOINT)는
+> 루트 `make run-kind`). agent Job 의 보고/메모리 endpoint(MUNINN_API_ENDPOINT/MUNINN_MEMORY_ENDPOINT)는
 > `web.enabled=true` 일 때 chart 가 이 릴리스의 muninn-web Service 로 배선한다(namespace 무관). `web.enabled=false`
 > 면 operator 가 코드 fallback 을 쓰므로 보고가 동작하지 않는다.
 
 ### 로컬 이미지로 kind 설치 (Podman)
 
-**권장: 루트 `make run-local`** — kind 생성 + 이미지 3종 빌드/적재 + metaDB + 이 chart 설치를 한 번에 한다.
+**권장: 루트 `make run-kind`** — kind 생성 + 이미지 3종 빌드/적재 + metaDB + 이 chart 설치를 한 번에 한다.
 완전수식 이미지 이름(`ghcr.io/kimsoungryoul/muninn/*`)으로 빌드해 podman 의 `localhost/` 접두 문제를 피하고,
 helm 값을 자동 배선한다(아래 수동 절차는 내부에서 일어나는 일을 풀어쓴 것).
 
 ```bash
-make run-local                      # 루트에서. (자격이 있으면 CLAUDE_CODE_OAUTH_TOKEN=... make run-local)
+make run-kind                       # 루트에서. (자격이 있으면 CLAUDE_CODE_OAUTH_TOKEN=... make run-kind)
 ```
 
 수동으로 하려면:

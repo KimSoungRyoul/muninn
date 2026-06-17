@@ -2,7 +2,7 @@ import { Callout } from 'nextra/components'
 
 # 시작하기
 
-로컬에서 Muninn 풀스택을 띄우는 가장 빠른 길은 루트 `Makefile` 의 `make run-local` 이다. 컴포넌트 하나만 빠르게 개발하려면 아래 컴포넌트별 경로를 쓴다.
+로컬에서 Muninn 풀스택을 띄우는 가장 빠른 길은 루트 `Makefile` 의 `make run-kind` 이다. 컴포넌트 하나만 빠르게 개발하려면 아래 컴포넌트별 경로를 쓴다.
 
 ## 사전 요구
 
@@ -15,14 +15,14 @@ import { Callout } from 'nextra/components'
 | Go | huginnOperator 개발 시 |
 | pnpm | muninnWeb 개발 시 |
 
-## 풀스택 한 줄 기동 — `make run-local` (권장)
+## 풀스택 한 줄 기동 — `make run-kind` (권장)
 
 루트 `Makefile` 이 kind 클러스터를 만들고, 세 이미지(operator·web·agent-runtime)를 로컬 빌드해 적재한 뒤, Helm 으로 플랫폼 전체(operator + web + metaDB)를 클러스터 **안** 에 띄운다.
 
 ```bash
-make run-local                      # kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install (Podman 기본)
+make run-kind                       # kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install (Podman 기본)
 # (선택) 자격이 있으면 코파일럿/agent 까지 활성화:
-CLAUDE_CODE_OAUTH_TOKEN=... make run-local
+CLAUDE_CODE_OAUTH_TOKEN=... make run-kind
 make status                         # 배포 상태 (deploy/svc/pod + HuginnAgent/HuginnIssue/HuginnRun)
 make down                           # kind 클러스터 삭제(정리)
 ```
@@ -41,14 +41,14 @@ kubectl -n muninn rollout restart deploy/muninn-web
 ```
 
 <Callout type="info">
-**`run-local` 과 `run-kind` 는 다르다.** `run-local`(루트)은 operator 까지 Helm 으로 클러스터 **안** 에 배포하고, `run-kind`(huginnOperator)는 operator 를 클러스터 **밖**(host `go run`)에서 실행하는 빠른 컨트롤러 개발 루프다.
+**루트 `make run-kind` 와 `huginnOperator` 의 `make run-kind` 는 이름만 같고 다르다.** 루트(이 페이지)는 operator 까지 Helm 으로 클러스터 **안** 에 배포하고, `huginnOperator` 의 `run-kind` 는 operator 를 클러스터 **밖**(host `go run`)에서 실행하는 빠른 컨트롤러 개발 루프다.
 </Callout>
 
 ### 루트 Makefile 주요 타깃
 
 | 타깃 | 설명 |
 |------|------|
-| `make run-local` | kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install (클러스터 안 전체 기동) |
+| `make run-kind` | kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install (클러스터 안 전체 기동) |
 | `make images` | 세 컨테이너 이미지 로컬 빌드 (Podman 기본) |
 | `make status` | 로컬 풀스택 리소스 상태 |
 | `make down` | kind 클러스터 삭제 (`make kind-delete` 와 동일) |
