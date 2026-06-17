@@ -106,10 +106,7 @@ export const muninnServerTools = [
   }),
   defineTool({
     name: "get_application",
-    description:
-      "앱(HuginnAgent) 1개 상세(런타임 이미지·소스 repo·식별자·가드레일·bindings)를 조회한다. app 은 name. " +
-      "spec.bindings 는 이 앱 에이전트가 사용할 Platform Tool(MCP 서버: deployment/observability/registry) 집합이라 " +
-      "'이 앱 에이전트가 쓸 수 있는 도구는?' 질문의 근거다.",
+    description: "앱(HuginnAgent) 1개 상세(런타임 이미지·소스 repo·식별자·가드레일)를 조회한다. app 은 name.",
     parameters: z.object({ app: z.string().describe("앱 name") }),
     execute: async ({ app }) => {
       if (!k8sEnabled()) return K8S_OFF;
@@ -122,8 +119,6 @@ export const muninnServerTools = [
         spec: {
           kind: cr?.spec?.kind, output: cr?.spec?.output, source: cr?.spec?.source,
           agent: cr?.spec?.agent, guardrails: cr?.spec?.guardrails, identity: cr?.spec?.identity,
-          // bindings = 에이전트가 쓸 Platform Tool(MCP) 집합 — "이 앱이 쓸 수 있는 도구는?" 의 근거(§3.1).
-          bindings: cr?.spec?.bindings,
         },
       };
     },

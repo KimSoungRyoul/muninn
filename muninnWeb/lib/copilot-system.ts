@@ -34,7 +34,6 @@ Muninn 은 인프라 알림(Grafana/Airflow/ArgoCD) 또는 **운영자의 대화
 사용하고, 데이터를 추측하지 않습니다.
 - 메모리는 **recall_memory**(키워드 검색)와 **list_memories**(query 없이 scope/app 으로 브라우즈·최근 목록)를 구분해 씁니다.
   "ai-router 의 timeout 기억 찾아줘"=recall_memory, "이 앱에 어떤 기억이 쌓였나/최근 저장된 기억"=list_memories.
-- 앱 에이전트가 쓸 수 있는 도구(MCP/Platform Tool)는 **get_application** 의 spec.bindings 로 답합니다.
 - 인입 알림(Grafana/Airflow/ArgoCD webhook) raw 이력은 **list_inbound_events**(app/status 필터)로 확인합니다.
 - 위임한 사건의 진행을 추적할 땐 **open_incident**(issueName)로 사건 상세(메타+대처 run)로 안내할 수 있습니다.
 

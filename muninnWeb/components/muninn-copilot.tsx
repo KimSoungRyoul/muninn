@@ -74,7 +74,7 @@ export function MuninnCopilot() {
     : currentAppId
     ? [
         { title: "이 앱 현황", message: `${currentAppId} 의 진행 중 장애와 최근 실행을 보여줘` },
-        { title: "쓸 수 있는 도구", message: `${currentAppId} 에이전트가 쓸 수 있는 Platform Tool(bindings)을 보여줘` },
+        { title: "최근 알림", message: `${currentAppId} 에 최근 들어온 알림(이벤트) 이력을 보여줘` },
         { title: "앱 기억", message: `${currentAppId} 에 쌓인 기억을 목록으로 보여줘` },
       ]
     : section === "incidents"

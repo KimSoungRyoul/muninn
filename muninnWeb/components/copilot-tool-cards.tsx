@@ -15,7 +15,7 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
-import { useRenderTool } from "@copilotkit/react-core/v2";
+import { useRenderTool, useDefaultRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
 import { StatusLabel, fmtMoney, fmtTimeAgo } from "@/components/common";
 
@@ -449,9 +449,9 @@ export function useMuninnToolRenderers() {
   });
 
   // catch-all: 위에서 처리하지 않은 tool(store_memory/summarize_incident/list_applications/
-  // get_application/get_issue_runs/list_incidents_history 등)의 JSON blob 정돈.
-  useRenderTool({
-    name: "*",
-    render: (p: any) => (p.status !== "complete" ? <Progress label={p.name} /> : <CatchAll name={p.name} data={parse(p.result)} />),
+  // get_application/list_incidents_history 등)의 JSON blob 정돈. 라이브러리 권장 API(useDefaultRenderTool)로
+  // 와일드카드 폴백을 등록한다(수기 useRenderTool({name:"*"}) 대신 — 정규 타이핑·내장 default 메커니즘).
+  useDefaultRenderTool({
+    render: (p) => (p.status !== "complete" ? <Progress label={p.name} /> : <CatchAll name={p.name} data={parse(p.result)} />),
   });
 }
