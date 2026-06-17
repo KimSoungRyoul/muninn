@@ -61,6 +61,7 @@ make test-e2e              # 격리된 e2e (별도 클러스터 huginnoperator-t
 
 ## 규약
 
+- **하위호환은 필수가 아니다 — 모순/데드필드는 개편을 우선 검토하라.** 프로토타입이므로 "기존에 있다"는 이유로 보존하지 마라. 설계 모순·데드필드(operator 가 안 읽는 `spec.bindings`·`AgentSpec.Runtime`, mock 자격 폼)·claude-편향 네이밍은 점진 호환보다 **깔끔한 재설계/제거를 기본 선택지**로. 호환 레이어는 *운영 데이터 유실 위험이 있을 때만* 정당화. 제안 시 "유지 vs 개편" 비용·이득을 명시.
 - **operator 타깃은 `CONTAINER_TOOL=docker` 가 기본** — root/web/runtime Makefile 은 podman 이 기본이므로 operator 타깃엔 `CONTAINER_TOOL=podman` 을 명시하라.
 - **이미지 레지스트리**는 메인테이너의 GHCR 네임스페이스(`ghcr.io/kimsoungryoul/muninn/*`)로 publish 한다. 중립 placeholder(`acme` 등)는 CR·mock 데이터의 예제 org/repo/host 이름에만 쓴다.
 - **kubebuilder 생성 파일은 손대지 마라**(`config/crd/bases/*`, `config/rbac/role.yaml`, `**/zz_generated.*`, `PROJECT`) — `make manifests generate` 로 재생성. 전체 kubebuilder 메커니즘은 `huginnOperator/AGENTS.md` 참고.
