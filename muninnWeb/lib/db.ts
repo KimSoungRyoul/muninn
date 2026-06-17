@@ -349,6 +349,53 @@ export async function markInboundEvent(
     .where(eq(inboundEvent.id, id));
 }
 
+export interface InboundEventRow {
+  id: number;
+  app: string | null;
+  source: string | null;
+  severity: string | null;
+  title: string | null;
+  fingerprint: string | null;
+  status: string;
+  failReason: string | null;
+  issueName: string | null;
+  receivedAt: string | null;
+  processedAt: string | null;
+}
+
+/**
+ * 인입 이벤트(알림 webhook) 목록 조회 — app/status 필터, 최근(received_at) 우선.
+ * 원본 payload(JSON)는 크기 때문에 제외한다(코파일럿 컨텍스트 절약). 코파일럿이 raw 알림
+ * (Grafana/Airflow/ArgoCD)을 회상·진단 근거로 볼 수 있게 한다.
+ */
+export async function listInboundEvents(
+  opts: { app?: string; status?: string; limit?: number } = {},
+): Promise<InboundEventRow[]> {
+  await ensureSchema();
+  const conds = [];
+  if (opts.app) conds.push(eq(inboundEvent.app, opts.app));
+  if (opts.status) conds.push(eq(inboundEvent.status, opts.status));
+  const rows = await db()
+    .select()
+    .from(inboundEvent)
+    .where(conds.length ? and(...conds) : undefined)
+    .orderBy(desc(inboundEvent.receivedAt))
+    .limit(opts.limit ?? 30);
+  return rows.map((r) => ({
+    id: r.id,
+    app: r.app,
+    source: r.source,
+    severity: r.severity,
+    title: r.title,
+    fingerprint: r.fingerprint,
+    status: r.status,
+    failReason: r.failReason,
+    issueName: r.issueName,
+    receivedAt: r.receivedAt ? r.receivedAt.toISOString() : null,
+    processedAt: r.processedAt ? r.processedAt.toISOString() : null,
+  }));
+}
+
 /** Claude 로 결과/사건을 1~2줄 한국어 요약(기억화 전 distill). */
 export async function summarize(text: string): Promise<string> {
   const { text: out } = await generateText({

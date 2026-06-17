@@ -30,6 +30,24 @@ export function getCopilotWorkspace(): string {
   return _copilotWs.getStore() ?? defaultWorkspace();
 }
 
+// 위임(불가역) 앞단 인증 게이트(§C2)용 — 요청이 인증을 통과했는지(콘솔 same-origin 포함)를 ALS 에 담아
+// server tool(delegate_incident)이 authEnabled() && !authed 시 거부하게 한다. 조회/read 도구는 막지 않는다.
+const _copilotAuthed = new AsyncLocalStorage<boolean>();
+
+/** 요청별 인증 통과 여부를 ALS 에 담아 fn 을 실행한다(코파일럿 런타임 진입점에서 래핑). */
+export function runWithCopilotAuth<T>(authed: boolean, fn: () => T): T {
+  return _copilotAuthed.run(authed, fn);
+}
+
+/**
+ * 현재 코파일럿 요청이 인증을 통과했는지. **fail-closed**: ALS 미설정(래퍼 밖 호출)이면 false 를 반환해
+ * 인증 환경에서 위임이 우회로 열리지 않게 한다. dev(인증 비활성)에서는 호출부 delegate_incident 가
+ * `authEnabled() && !getCopilotAuthed()` 로 게이트하므로 authEnabled()=false 가 흡수 → 기존 동작 불변.
+ */
+export function getCopilotAuthed(): boolean {
+  return _copilotAuthed.getStore() ?? false;
+}
+
 /**
  * 인증된(토큰/OIDC) 요청에서만 클라이언트 workspace 헤더/값을 신뢰해 workspace 를 결정한다.
  * 미인증(콘솔 sec-fetch-site)·dev 모드에서는 서버 기본 workspace(env/'default')만 쓴다(§C3).

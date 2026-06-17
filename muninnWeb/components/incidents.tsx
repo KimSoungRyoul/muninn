@@ -174,3 +174,112 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
     </div>
   );
 }
+
+// ---- 단일 사건 상세 (/incidents/[id]) — 위임 후 폴링/추적용. 코파일럿 open_incident 의 도착지 ----
+export function HmIncidentDetail({
+  issueName, onOpenRun, onBack,
+}: { issueName: string; onOpenRun?: (id: string) => void; onBack?: () => void }) {
+  const [inc, setInc] = useState<(IncidentVM & { outcome?: string | null }) | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/issues/${encodeURIComponent(issueName)}`, { cache: "no-store" });
+      if (res.status === 404) { setInc(null); setError("사건(HuginnIssue)을 찾을 수 없습니다"); return; }
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      setInc(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "조회 실패");
+      setInc(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [issueName]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // 위임 직후 진입 시 run 이 아직 없을 수 있다 — phase 가 active 인 동안만 5s 폴링(terminal 도달 시 중단).
+  useEffect(() => {
+    if (!inc || !["Pending", "Running", "AwaitingApproval"].includes(inc.phase)) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [inc, load]);
+
+  const ph = inc ? (PHASE_MAP[inc.phase] ?? { status: "queued", label: inc.phase }) : null;
+
+  return (
+    <div className="hm-page">
+      <HmPageHead rune="runs" title="사건 상세" sub={issueName}>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={onBack}>← 목록</Button>
+          <Button variant="ghost" size="sm" leftIcon="refresh" onClick={load}>새로고침</Button>
+        </div>
+      </HmPageHead>
+
+      {loading && <div className="dim" style={{ padding: 24 }}>불러오는 중…</div>}
+      {error && !loading && (
+        <Empty icon="alert" title={error} sub="클러스터에 연결되지 않았거나 해당 사건이 없습니다." />
+      )}
+
+      {inc && !loading && ph && (
+        <HmCard>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ width: 32, height: 32, borderRadius: 8, background: "var(--primary-95)", color: "var(--primary-40)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
+                {appInitials(inc.app)}
+              </span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span className="app-link" style={{ fontWeight: 700 }}>{inc.app}</span>
+                <span className="hm-mono dim" style={{ fontSize: 11.5 }}>{inc.issue}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Badge tone={SEV_TONE[inc.severity] ?? "default"}>{inc.severity}</Badge>
+              <Badge tone="default">{SOURCE_LABEL[inc.source] ?? inc.source}</Badge>
+              <StatusLabel status={ph.status}>{ph.label}</StatusLabel>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 13.5, color: "var(--on-surface)" }}>{inc.title || inc.goal}</div>
+          {inc.goal && inc.goal !== inc.title && (
+            <div className="dim" style={{ marginTop: 4, fontSize: 12.5 }}>목표: {inc.goal}</div>
+          )}
+          <div className="dim" style={{ marginTop: 6, fontSize: 12, display: "flex", gap: 14, flexWrap: "wrap" }}>
+            {inc.issuingUser && <span>개시자 {inc.issuingUser}</span>}
+            {inc.dedup > 0 && <span>dedup {inc.dedup}</span>}
+            <span>대처 {inc.runs.length}건</span>
+            {inc.outcome && <span>결과 {inc.outcome}</span>}
+          </div>
+
+          {inc.runs.length > 0 ? (
+            <table className="hm-table" style={{ marginTop: 12 }}>
+              <thead>
+                <tr><th>Run</th><th>상태</th><th>단계</th><th>비용</th><th>결과</th></tr>
+              </thead>
+              <tbody>
+                {inc.runs.map((r) => (
+                  <tr key={r.id} onClick={() => onOpenRun?.(r.id)} style={{ cursor: onOpenRun ? "pointer" : "default" }}>
+                    <td><span className="hm-mono" style={{ fontSize: 12.5 }}>{r.id}</span></td>
+                    <td><StatusLabel status={r.status}>{RUN_LABEL[r.status] ?? r.status}{r.approval ? ` · ${r.approval}` : ""}</StatusLabel></td>
+                    <td className="hm-mono">{r.step != null ? `${r.step}/${r.max}` : `–/${r.max}`}</td>
+                    <td className="hm-mono">{fmtMoney(r.cost)}</td>
+                    <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.output || <span className="dim">–</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="dim" style={{ marginTop: 12, fontSize: 12.5, padding: "8px 0" }}>
+              대처(HuginnRun) 생성 대기 중…
+            </div>
+          )}
+        </HmCard>
+      )}
+    </div>
+  );
+}
