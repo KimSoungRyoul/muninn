@@ -10,7 +10,7 @@ import { Icon } from "@/components/icons";
 import { HmPageHead, HmCard, StatusLabel, fmtMoney, fmtTimeAgo } from "@/components/common";
 import { Badge, Chip, Empty, Button } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace-context";
-import { HM_DATA } from "@/lib/data";
+import { useApi } from "@/lib/use-api";
 
 const { useState, useEffect, useCallback } = React;
 
@@ -72,9 +72,8 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
   // 다른 페이지(대시보드·앱 목록)와 동일하게 현재 워크스페이스로 스코프한다.
   // /api/issues 는 단일 app 필터만 지원하므로, 워크스페이스의 앱 집합으로 클라이언트에서 필터.
   const { workspaceId } = useWorkspace();
-  const wsAppNames = new Set(
-    HM_DATA.APPS.filter((a) => a.workspaceId === workspaceId).map((a) => a.name)
-  );
+  const { data: apps = [] } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
+  const wsAppNames = new Set((apps ?? []).map((a) => a.name));
   const visible = items.filter((i) => wsAppNames.has(i.app));
 
   const activeCount = visible.filter((i) => ["Pending", "Running", "AwaitingApproval"].includes(i.phase)).length;

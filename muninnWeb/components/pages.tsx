@@ -5,7 +5,8 @@ import { Icon } from "@/components/icons";
 import { Button, IconButton, TextInput, Textarea, Select, Toggle, Badge, Tabs, Empty } from "@/components/ui";
 import { fmtMoney, fmtDuration, fmtTimeAgo, fmtClock, StatusDot, StatusLabel, HmPageHead, HmKpi, HmCard } from "@/components/common";
 import { MarkdownView, MarkdownEditor } from "@/components/markdown";
-import { HM_DATA } from "@/lib/data";
+import { useApi } from "@/lib/use-api";
+import { useWorkspace } from "@/lib/workspace-context";
 import { defaultAgentConfig, defaultCredentials } from "@/lib/agent-config";
 
 const { useState: useS_HP, useEffect: useE_HP } = React;
@@ -14,9 +15,9 @@ const { useState: useS_HP, useEffect: useE_HP } = React;
 // /apps — list
 // ===================================================================
 function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
-  const D = HM_DATA;
-  const ws = D.WORKSPACES.find(w => w.id === workspaceId) || D.WORKSPACES[0];
-  const apps = D.APPS.filter(a => a.workspaceId === workspaceId);
+  const { workspace } = useWorkspace();
+  const ws = workspace;
+  const { data: apps = [] } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
   return (
     <>
       <HmPageHead title="Applications" sub={`${ws.name} 워크스페이스 · 등록된 ${apps.length}개 · 1개 DAG = 1개 Application`}>
@@ -87,11 +88,25 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
 // /apps/[id] — detail (Overview / Events / Bindings)
 // ===================================================================
 function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
-  const D = HM_DATA;
-  const a = D.APPS.find(x => x.id === appId) || D.APPS[0];
   const [tab, setTab] = useS_HP(initialTab || "overview");
-  const appEvents = D.EVENTS.filter(e => e.appId === a.id);
-  const appRuns = D.RECENT_RUNS.filter(r => r.app === a.name);
+  // mock 직접 참조 대신 API 로 조회(미연결 시 라우트가 mock fallback).
+  const { data: a, loading } = useApi<any>(`/api/apps/${encodeURIComponent(appId)}`);
+  const { data: events = [] } = useApi<any[]>(`/api/apps/${encodeURIComponent(appId)}/events`);
+  const { data: mems } = useApi<any>(`/api/apps/${encodeURIComponent(appId)}/memories`);
+  const { data: allRuns = [] } = useApi<any[]>(`/api/runs`);
+
+  const appEvents = events ?? [];
+  const appRuns = a?.runs ?? [];
+  const memCount = (mems?.app?.length ?? 0);
+
+  if (loading || !a) {
+    return (
+      <div style={{ padding: "40px 0" }}>
+        <button className="btn btn-icon btn-sm" onClick={onBack} style={{ marginBottom: 16 }}><Icon name="chevronLeft" size={16}/></button>
+        <Empty icon="layers" title="불러오는 중…" sub="Application 정보를 조회하고 있어요."/>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -120,15 +135,15 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
         <Tabs value={tab} onChange={setTab} tabs={[
           {label:"개요", value:"overview"},
           {label:"Events", value:"events", count: appEvents.length},
-          {label:"Memories", value:"memories", count: HM_DATA.MEMORIES.filter(m => m.appId === a.id).length},
+          {label:"Memories", value:"memories", count: memCount},
           {label:"Platform tools", value:"bindings"},
           {label:"설정", value:"settings"},
         ]}/>
       </div>
 
       {tab === "overview" && <OverviewTab a={a} appEvents={appEvents} appRuns={appRuns} onOpenRun={onOpenRun} setTab={setTab}/>}
-      {tab === "events"   && <EventsTab a={a} events={appEvents} onOpenRun={onOpenRun}/>}
-      {tab === "memories" && <AppMemoriesTab app={a}/>}
+      {tab === "events"   && <EventsTab a={a} events={appEvents} allRuns={allRuns} onOpenRun={onOpenRun}/>}
+      {tab === "memories" && <AppMemoriesTab app={a} mems={mems}/>}
       {tab === "bindings" && <BindingsTab app={a}/>}
       {tab === "settings" && <AgentSettingsTab app={a}/>}
     </>
@@ -377,10 +392,8 @@ function OverviewTab({ a, appEvents, appRuns, onOpenRun, setTab }: any) {
 // ===================================================================
 // Events tab — events with nested runs (1:N)
 // ===================================================================
-function EventsTab({ a, events, onOpenRun }: any) {
+function EventsTab({ a, events, allRuns = [], onOpenRun }: any) {
   const [expanded, setExpanded] = useS_HP(new Set([events[0]?.id]));
-  const D = HM_DATA;
-  const allRuns = D.RECENT_RUNS;
 
   const toggle = (id) => {
     setExpanded(s => {
@@ -555,13 +568,13 @@ function BindingsTab({ app: a }: any) {
 // ===================================================================
 // App detail — Memories tab (this app's memories + recallable global ones)
 // ===================================================================
-function AppMemoriesTab({ app: a }: any) {
-  const D = HM_DATA;
+function AppMemoriesTab({ app: a, mems }: any) {
   const [q, setQ] = useS_HP("");
   const [includeGlobal, setIncludeGlobal] = useS_HP(true);
 
-  const appMems = D.MEMORIES.filter(m => m.appId === a.id);
-  const globalMems = D.MEMORIES.filter(m => m.scope === "global");
+  // /api/apps/[id]/memories → { app: Memory[], global: Memory[] }
+  const appMems = mems?.app ?? [];
+  const globalMems = mems?.global ?? [];
   const list = q
     ? [...appMems, ...(includeGlobal ? globalMems : [])].filter(m => m.fact.toLowerCase().includes(q.toLowerCase()) || m.tags.some(t => t.includes(q.toLowerCase())))
     : [...appMems, ...(includeGlobal ? globalMems : [])];
@@ -674,7 +687,8 @@ function MemoryCard({ m, scope, onEdit, onDelete, admin }: any) {
 // Settings > Memories — admin manages global + per-app memories
 // ===================================================================
 function HmMemories() {
-  const D = HM_DATA;
+  // Application 필터 드롭다운 소스도 mock 직접 참조 대신 /api/apps 로 조회.
+  const { data: apps = [] } = useApi<any[]>("/api/apps");
   // 페이지와 recall(copilot/API)이 동일 소스를 보도록 /api/memories 를 통한다.
   // (DATABASE_URL 있으면 postgres, 없으면 API 가 mock(HM_DATA)으로 graceful fallback.)
   const [all, setAll] = useS_HP<any[]>([]);
@@ -753,7 +767,7 @@ function HmMemories() {
             <label style={{display:"block", marginBottom:6, fontSize:12, color:"var(--on-surface-muted)", fontWeight:600}}>Application</label>
             <Select value={appFilter} onChange={e => setAppFilter(e.target.value)} options={[
               {value:"all", label:"전체"},
-              ...D.APPS.map(a => ({ value: a.id, label: a.name })),
+              ...(apps ?? []).map(a => ({ value: a.id, label: a.name })),
             ]}/>
           </div>
         </div>

@@ -10,16 +10,20 @@ export default function RunDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const [vm, setVm] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
 
   // 실제 run 상태를 조회해 phase/approval 로 승인 패널을 노출한다(하드코딩 run id 비교 제거).
   // dual-mode: k8s 연결 시 실 CR, 아니면 mock 폴백(source:"mock"). 조회 실패는 무시(데모 뷰 유지).
+  // 단일 조회로 flagship 전체 트랜스크립트(steps) 또는 요약(RunVM)을 모두 받는다.
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     fetch(`/api/runs/${encodeURIComponent(params.id)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (!cancelled) setVm(data); })
-      .catch(() => { if (!cancelled) setVm(null); });
+      .catch(() => { if (!cancelled) setVm(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [params.id, reloadKey]);
 
@@ -36,6 +40,7 @@ export default function RunDetailPage() {
       runId={params.id}
       awaitingMode={awaitingMode}
       runVm={vm}
+      loading={loading}
       onDecided={onDecided}
       onBack={() => router.push("/apps")}
     />

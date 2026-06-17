@@ -11,8 +11,9 @@ import type {
   RunDetail,
   Workspace,
 } from "./types";
+import { DEMO_NOW } from "./demo-clock";
 
-const HM_NOW = new Date("2026-05-21T14:33:40+09:00");
+const HM_NOW = DEMO_NOW;
 const isoMinus = (m: number) => new Date(HM_NOW.getTime() - m * 60_000).toISOString();
 
 const APPS: Application[] = [
