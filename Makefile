@@ -3,12 +3,13 @@
 # 두 가지 역할:
 #  1) 하위 프로젝트(huginnOperator/ · huginnAgentRuntime/ · muninnWeb/)로 위임하는
 #     일관된 어휘(build · image · lint · test · help)를 한곳에서 노출한다.
-#  2) `make run-local` — kind 클러스터를 만들고, 세 이미지를 로컬 빌드해서 적재한 뒤,
+#  2) `make run-kind` — kind 클러스터를 만들고, 세 이미지를 로컬 빌드해서 적재한 뒤,
 #     Helm 으로 플랫폼 전체를 클러스터 *안* 에 띄운다(operator + web + metaDB).
 #
 # 컨테이너 런타임은 Podman 기본(이 레포 규약 — Docker 아님). kind 는 podman provider 를 쓴다.
-# operator 의 `make run-kind` 와의 차이: run-kind 는 operator 를 클러스터 *밖*(host `go run`)으로
-# 띄우는 빠른 개발 루프이고, run-local 은 helm 으로 operator 까지 클러스터 *안* 에 배포한다.
+# huginnOperator/ 의 `make run-kind` 와 이름은 같지만 다르다: operator 의 것은 operator 를
+# 클러스터 *밖*(host `go run`)으로 띄우는 빠른 컨트롤러 개발 루프이고, 이 루트 타깃은
+# helm 으로 operator 까지 클러스터 *안* 에 배포한다.
 
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
@@ -24,8 +25,10 @@ ifeq ($(CONTAINER_TOOL),podman)
 export KIND_EXPERIMENTAL_PROVIDER = podman
 endif
 
-# ── run-local 설정 ───────────────────────────────────────────────────────────
-CLUSTER   ?= muninn-local
+# ── run-kind 설정 ────────────────────────────────────────────────────────────
+# CLUSTER 기본값은 kind 의 기본 클러스터명(`kind`) — `kind create cluster --name kind` 는
+# 별도 이름 없는 `kind create cluster` 와 동일하다. 다른 이름을 쓰려면 `make run-kind CLUSTER=foo`.
+CLUSTER   ?= kind
 NAMESPACE ?= muninn
 RELEASE   ?= muninn
 CHART     ?= deploy/helm/muninn
@@ -84,8 +87,8 @@ images: ## 세 컨테이너 이미지 로컬 빌드(Podman 기본).
 
 ##@ 로컬 풀스택 (kind + helm)
 
-.PHONY: run-local
-run-local: kind-create images kind-load metadb-up secrets helm-install ## kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install(클러스터 안 전체 기동).
+.PHONY: run-kind
+run-kind: kind-create images kind-load metadb-up secrets helm-install ## kind 생성 → 이미지 3종 빌드/적재 → metaDB → helm install(클러스터 안 전체 기동).
 	@echo ""
 	@echo ">> Muninn 풀스택 기동 완료 (cluster=$(CLUSTER), ns=$(NAMESPACE), release=$(RELEASE))."
 	@echo ">> 콘솔 접속:"

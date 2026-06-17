@@ -39,7 +39,7 @@
 
 ## 명령어
 
-**루트 `Makefile`** — `make run-local` / `images` / `status` / `down` / `help`. 코파일럿/agent 까지 가려면 `CLAUDE_CODE_OAUTH_TOKEN=... make run-local`. `run-local` ≠ operator 의 `run-kind`: run-local 은 operator 까지 helm 으로 클러스터 *안* 배포, run-kind 는 operator 를 host `go run` 으로 클러스터 *밖* 실행.
+**루트 `Makefile`** — `make run-kind` / `images` / `status` / `down` / `help`. 코파일럿/agent 까지 가려면 `CLAUDE_CODE_OAUTH_TOKEN=... make run-kind`. 루트 `run-kind` ≠ operator 의 `run-kind`(이름만 같다): 루트는 operator 까지 helm 으로 클러스터 *안* 배포, operator(huginnOperator/)는 operator 를 host `go run` 으로 클러스터 *밖* 실행.
 
 **huginnOperator/** (Go) — 표준 kubebuilder 타깃은 `make help`. 비자명한 부분:
 ```bash
