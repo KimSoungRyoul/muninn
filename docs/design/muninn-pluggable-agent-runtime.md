@@ -152,6 +152,16 @@ flowchart TB
 | claude-code | `/home/node/.claude` | `claudeMountPath`(현행) | `projects/<cwd-hash>/<id>.jsonl`(claude CLI 소유) |
 | huginn-self | `/home/node/.huginn` | `huginnMountPath`(신규) | `sessions/<id>.jsonl`(자체 소유) |
 
+```
+pvc-agent-<app>  (앱별 1개, RWO, subPath=Issue 로 물리 격리)
+   ├ <issue-A>/  ──(mountPath, runtime별 분기)──▶  claude-code: ~/.claude → projects/<hash>/<id>.jsonl
+   │                                              huginn-self: ~/.huginn → sessions/<id>.jsonl
+   └ <issue-B>/  ──▶ …
+        ▲ initContainer 가 PVC 루트(/claude-store)에 <issue>/ 를 mkdir(소유권 uid 1000)
+          → 이 디렉토리는 mountPath(.claude/.huginn)와 무관(PVC 안 같은 경로). main 은 mountPath 만 분기.
+   한 Issue = 한 백엔드(effectiveRuntime 동결) → subPath 안엔 항상 한 종류 → 비호환 transcript 안 섞임
+```
+
 - **PVC 는 앱별 1개로 공유**, `subPath=Issue.Name`(operator 부여). **한 Issue=한 백엔드**(§5 effectiveRuntime 동결 채택 시)이므로 subPath 안엔 항상 한 종류만 들어간다 → PVC 공유 안전, **마운트 경로(mountPath)만 runtime 별 분기**.
 - **initContainer 는 mountPath 와 무관하게 그대로 재사용된다**(코드 확인): 현재 `claude-home-init` 은 PVC 루트를 `claudeStoreInitPath`(`/claude-store`)로 마운트하고 그 안의 `subPath`(=Issue) 디렉토리를 `mkdir -p` 해 소유권을 uid/fsGroup 1000 으로 잡는다(`huginnrun_controller.go`). **이 디렉토리는 main 이 `.claude` 로 붙이든 `.huginn` 으로 붙이든 PVC 안에서 동일한 `<issue>/`** 다 — init 은 "PVC 안 subPath 디렉토리 선생성"만 하므로 mountPath 를 알 필요가 없다. 따라서 huginn-self 에서도 fsGroup·쓰기권한 문제 없이 동작한다. main 컨테이너의 `VolumeMount.MountPath` 만 runtime 별로 `claudeMountPath`↔`huginnMountPath` 로 분기하면 된다.
 - **네이밍 개편(권장, §10-6)**: `claudeStoreInitPath`/`CLAUDE_HOME_DIR`/`claude-home-init` 은 백엔드 무관인데 claude-편향이다 → `agentStoreInitPath`/`AGENT_HOME_DIR`/`agent-home-init` 로 **리네임**(기능 무변경, 하위호환 불요 — CLAUDE.md 규약).
@@ -163,6 +173,17 @@ flowchart TB
 ### 2.5 session 모델 — 클라이언트 JSONL replay (claude-code 동작 = huginn-self 재현 근거)
 
 claude code 의 session 은 **100% 클라이언트 측 파일 기반이고 Anthropic API 는 stateless** 다(공식 문서 `code.claude.com/docs/en/sessions`, `.../how-claude-code-works` 실측). 이 사실이 huginn-self 가 resume 을 **동등 재현 가능**한 근거다:
+
+```
+[turn 마다]  메시지 1줄씩 append ─▶ <id>.jsonl
+[API 호출]   jsonl 전체 history ─▶ messages[] 로 매번 재전송   (서버=stateless, 세션 기억 안 함)
+[resume]     jsonl 읽어 messages[] 복원 ─▶ 이어서 append       (서버 측 상태 의존 0)
+
+  claude-code  ~/.claude/projects/<cwd-hash>/<id>.jsonl   (cwd=/workspace 고정 → hash 안정)
+  huginn-self  ~/.huginn/sessions/<id>.jsonl              (직접 경로 → cwd-hash 불필요)
+        └ 둘 다 같은 "로컬 replay" 모델 → huginn-self 가 resume 동등 재현 가능
+        ⚠ 진짜 난제는 resume 이 아니라 history 누적 시 compaction (§6-1)
+```
 
 - **저장**: 매 turn 메시지 객체(user/assistant/tool_use/tool_result)를 `<id>.jsonl` 에 **append**.
 - **API 호출**: 서버는 세션을 기억하지 않음 → 매 호출마다 **jsonl 전체 history 를 messages[] 로 다시 전송**(연속성 = 클라이언트가 history 첨부).
@@ -184,6 +205,20 @@ claude code 의 session 은 **100% 클라이언트 측 파일 기반이고 Anthr
 ### 2.7 도구 자격 구성 — `configure_auth` 동등 계약 (백엔드 무관)
 
 §2.1(b)의 도구 자격은 **env 로 주입(operator 책임, 백엔드 무관)** 되고, 각 백엔드는 부팅 시 이를 **운영 CLI 가 쓸 수 있는 형태로 구성**해야 한다. claude-code 는 `claude_skill.sh configure_auth()` 가 담당 — huginn-self 는 **Go 바이너리 부팅(init) 단계에 동등물**을 둔다. 이 구성 단계가 SPI 행위 계약이다:
+
+```
+muninnWeb 앱설정       K8s Secret              operator(백엔드 무관 주입)        백엔드 "사용"
+──────────────────────────────────────────────────────────────────────────────────────────
+GITHUB_PAT       ┐                                                       claude-code   huginn-self
+ARGOCD_*         ├─입력─▶ agent-secrets ──▶ buildJobTemplate ──env──▶  configure_auth   부팅 init
+GRAFANA_TOKEN    │      / source.secretRef      │ (자격 env)            (claude_skill)  (Go 동등물)
+KUBECONFIG/SA    ┘                              │                       · git/gh         · git/gh
+spec.bindings ───┐                             │                       · argocd         · argocd
+ (ToolBinding     └ inheritedBindings ─────────┘                       · kubectl(SA)    · kubectl(SA)
+  .secretRef)       operator 가 secretRef → 도구별 표준 env 주입            │                │
+                                                                       MCP 또는 CLI     §4.4 tool/HTTP
+  ★ 자격 "주입"(operator→env)·"구성"(부팅)은 백엔드 무관 = 공통 SPI. 다른 건 "사용 방식"(MCP vs CLI/HTTP)뿐.
+```
 
 | 자격 | 구성 동작(두 백엔드 공통 의무) |
 |------|--------------------------------|
