@@ -290,6 +290,9 @@ export async function listRunsVM(opts: { status?: RunStatus; app?: string } = {}
 // operator 가 HuginnIssue→HuginnRun 을 비동기 생성하므로, 코파일럿은 이걸로 run 등장→완료를 추적한다.
 export async function getIssueRuns(issueName: string): Promise<{
   issue: string; phase: string; outcome: string | null; runRefs: string[]; runs: RunVM[];
+  // 이슈 메타(폴링/상세 UI 근거; 리뷰 P2) — query_incidents 와 동일 파생으로 일관 노출.
+  app: string; source: string; severity: string; title: string; goal: string;
+  issuingUser: string | null; dedup: number;
 } | null> {
   if (!k8s.k8sEnabled()) return null;
   let issue: any;
@@ -304,13 +307,43 @@ export async function getIssueRuns(issueName: string): Promise<{
   const runs = (await k8s.listHuginnRuns(ns(), issueSel))
     .filter((r: any) => r?.spec?.issueRef === issueName)
     .map(runView);
+  const ev = issue?.spec?.event ?? {};
   return {
     issue: issueName,
     phase: issue?.status?.phase ?? "Pending",
     outcome: issue?.status?.outcome ?? null,
     runRefs: issue?.status?.runRefs ?? runs.map((r) => r.id),
     runs,
+    // queryIncidents 와 동일 파생(source/severity/title/goal/issuingUser/dedup) — 폴링 시 이슈 컨텍스트 제공.
+    app: issue?.spec?.agentRef ?? "",
+    source: ev.source ?? "manual",
+    severity: ev.severity ?? "warning",
+    title: ev.title ?? issue?.spec?.goal ?? "",
+    goal: issue?.spec?.goal ?? "",
+    issuingUser: issue?.spec?.issuingUser ?? null,
+    dedup: num(issue?.status?.dedupCount),
   };
+}
+
+/**
+ * 단일 사건(HuginnIssue) 상세 — 상세 페이지/open_incident 용. 실 클러스터는 getIssueRuns
+ * (확장 메타 + outcome/runRefs), dev/mock 은 queryIncidents 전체에서 issue name 매칭으로 폴백한다.
+ */
+export async function getIncidentDetail(
+  issueName: string,
+): Promise<(IncidentVM & { outcome?: string | null; runRefs?: string[] }) | null> {
+  const real = await getIssueRuns(issueName);
+  if (real) {
+    return {
+      issue: real.issue, app: real.app, source: real.source, severity: real.severity,
+      title: real.title, goal: real.goal, phase: real.phase, dedup: real.dedup,
+      issuingUser: real.issuingUser, runs: real.runs, dataSource: "k8s",
+      outcome: real.outcome, runRefs: real.runRefs,
+    };
+  }
+  // fallback: 전체 목록(mock 포함)에서 issue name 매칭(k8s 미연결 dev 에서도 상세 렌더).
+  const all = await queryIncidents({ status: "all" });
+  return all.find((i) => i.issue === issueName) ?? null;
 }
 
 export async function getRunStatus(runId: string): Promise<RunVM | null> {

@@ -15,13 +15,14 @@
 
 import { defineTool } from "@copilotkit/runtime/v2";
 import { z } from "zod";
-import { dbEnabled, recall, store, summarize, listIncidents } from "./db";
+import { dbEnabled, recall, store, summarize, listIncidents, listMemories, listInboundEvents } from "./db";
 import {
   listApplications, getApplicationCr, queryIncidents, listRunsVM, getRunStatus, getIssueRuns,
   delegateIncident, MAX_GOAL_LENGTH,
 } from "./incidents";
 import { k8sEnabled } from "./k8s";
-import { getCopilotWorkspace } from "./workspace";
+import { authEnabled } from "./auth";
+import { getCopilotWorkspace, getCopilotAuthed } from "./workspace";
 import { sendTaskToA2AAgentTool } from "./a2a/client-tool";
 
 const K8S_OFF = { error: "k8s-disabled", note: "이 muninnWeb 인스턴스는 클러스터에 연결돼 있지 않습니다(로컬 dev). 위임/조회는 kind/클러스터 배포에서 동작합니다." };
@@ -77,6 +78,24 @@ export const muninnServerTools = [
       return { summary: await summarize(text) };
     },
   }),
+  defineTool({
+    name: "list_memories",
+    description:
+      "Muninn 메모리를 **브라우즈/목록**한다(recall=키워드 검색과 달리, query 없이 scope/app 으로 최근·큐레이션 우선 목록을 본다). " +
+      "'이 앱에 어떤 기억이 쌓여 있나', '최근 저장된 기억' 같은 질문에 사용. query 를 주면 검색 + 무매칭 시 최근 항목으로 폴백.",
+    parameters: z.object({
+      scope: z.enum(["global", "app"]).optional().describe("global=공통 지식, app=특정 앱 한정"),
+      app: z.string().optional().describe("app scope 일 때 앱 id/name"),
+      query: z.string().optional().describe("주면 검색(무매칭 시 최근 항목 폴백). 없으면 전체 목록"),
+      limit: z.number().int().positive().max(100).optional().describe("최대 개수(기본 50, 검색 시 20)"),
+    }),
+    execute: async ({ scope, app, query, limit }) => {
+      if (!dbEnabled()) return DB_OFF;
+      // 멀티테넌시(§C3/§4): 요청 컨텍스트(ALS)의 workspace 로 격리.
+      const rows = await listMemories({ workspace: getCopilotWorkspace(), scope, appId: app, query, limit });
+      return { count: rows.length, items: rows };
+    },
+  }),
 
   // ---- 조회(HuginnAgent/Issue/Run) ----
   defineTool({
@@ -87,7 +106,10 @@ export const muninnServerTools = [
   }),
   defineTool({
     name: "get_application",
-    description: "앱(HuginnAgent) 1개 상세(런타임 이미지·소스 repo·식별자·가드레일)를 조회한다. app 은 name.",
+    description:
+      "앱(HuginnAgent) 1개 상세(런타임 이미지·소스 repo·식별자·가드레일·bindings)를 조회한다. app 은 name. " +
+      "spec.bindings 는 이 앱 에이전트가 사용할 Platform Tool(MCP 서버: deployment/observability/registry) 집합이라 " +
+      "'이 앱 에이전트가 쓸 수 있는 도구는?' 질문의 근거다.",
     parameters: z.object({ app: z.string().describe("앱 name") }),
     execute: async ({ app }) => {
       if (!k8sEnabled()) return K8S_OFF;
@@ -100,6 +122,8 @@ export const muninnServerTools = [
         spec: {
           kind: cr?.spec?.kind, output: cr?.spec?.output, source: cr?.spec?.source,
           agent: cr?.spec?.agent, guardrails: cr?.spec?.guardrails, identity: cr?.spec?.identity,
+          // bindings = 에이전트가 쓸 Platform Tool(MCP) 집합 — "이 앱이 쓸 수 있는 도구는?" 의 근거(§3.1).
+          bindings: cr?.spec?.bindings,
         },
       };
     },
@@ -148,6 +172,23 @@ export const muninnServerTools = [
       return { items: await listIncidents(limit ?? 30) };
     },
   }),
+  defineTool({
+    name: "list_inbound_events",
+    description:
+      "인입 알림 이벤트(Grafana/Airflow/ArgoCD webhook)의 최근 이력을 조회한다(metaDB inbound_event). " +
+      "'어떤 알림이 들어왔나', '이 앱에 최근 어떤 경보가 왔나' 같은 raw 신호 확인·진단 근거에 사용. " +
+      "status=received|delegated|deduped|below-threshold|failed 로 처리 결과를 구분한다.",
+    parameters: z.object({
+      app: z.string().optional().describe("대상 앱(HuginnAgent) name 필터"),
+      status: z.enum(["received", "delegated", "deduped", "below-threshold", "failed"]).optional(),
+      limit: z.number().int().positive().max(100).optional().describe("최대 개수(기본 30)"),
+    }),
+    execute: async ({ app, status, limit }) => {
+      if (!dbEnabled()) return DB_OFF;
+      const items = await listInboundEvents({ app, status, limit });
+      return { count: items.length, items };
+    },
+  }),
 
   // ---- 위임/승인(상태 변경) ----
   defineTool({
@@ -168,6 +209,11 @@ export const muninnServerTools = [
     }),
     execute: async (args) => {
       if (!args.app || !args.goal) return { error: "bad_input", note: "app 과 goal 은 필수입니다." };
+      // 인증 게이트(§C2): 인증이 켜진 환경에서는 인증 통과(또는 same-origin 콘솔) 요청만 위임 가능.
+      // dev(인증 비활성)에서는 authEnabled()=false 라 무효 — 기존 동작 불변. 조회 도구는 게이트하지 않는다.
+      if (authEnabled() && !getCopilotAuthed()) {
+        return { error: "unauthorized", note: "위임은 인증된 운영자만 가능합니다(이 환경은 인증이 켜져 있습니다). 콘솔에 로그인 후 다시 시도하세요." };
+      }
       // 불가역 액션 게이트: 명시 동의 전에는 실행하지 않고 확인 요청을 돌려준다(시스템 강제).
       if (!args.confirmed) {
         return {
