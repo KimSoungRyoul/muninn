@@ -201,6 +201,13 @@ export function HmIncidentDetail({
 
   useEffect(() => { load(); }, [load]);
 
+  // 위임 직후 진입 시 run 이 아직 없을 수 있다 — phase 가 active 인 동안만 5s 폴링(terminal 도달 시 중단).
+  useEffect(() => {
+    if (!inc || !["Pending", "Running", "AwaitingApproval"].includes(inc.phase)) return;
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [inc, load]);
+
   const ph = inc ? (PHASE_MAP[inc.phase] ?? { status: "queued", label: inc.phase }) : null;
 
   return (

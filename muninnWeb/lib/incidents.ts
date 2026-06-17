@@ -69,6 +69,26 @@ const ns = () => k8s.DEFAULT_NAMESPACE;
 const num = (v: unknown): number => (v == null ? 0 : Number(v) || 0);
 
 /**
+ * HuginnIssue CR → 사건 메타(app/source/severity/title/goal/issuingUser/dedup) 단일 파생.
+ * queryIncidents/getIssueRuns 가 공유해 default(예: severity 'warning') 드리프트를 막는다.
+ */
+function issueMetaFromCr(i: any): {
+  app: string; source: string; severity: string; title: string; goal: string;
+  issuingUser: string | null; dedup: number;
+} {
+  const ev = i?.spec?.event ?? {};
+  return {
+    app: i?.spec?.agentRef ?? "",
+    source: ev.source ?? "manual",
+    severity: ev.severity ?? "warning",
+    title: ev.title ?? i?.spec?.goal ?? "",
+    goal: i?.spec?.goal ?? "",
+    issuingUser: i?.spec?.issuingUser ?? null,
+    dedup: num(i?.status?.dedupCount),
+  };
+}
+
+/**
  * 보고 입력의 recalledMemoryIds 를 status.recalledMemoryIds(RecalledMemory[]) 로 정규화.
  * id 가 없는 항목은 버린다(빈/undefined id 가 status 에 들어가지 않게).
  */
@@ -232,17 +252,10 @@ export async function queryIncidents(opts: { status?: "active" | "all"; app?: st
       .map<IncidentVM>((i: any) => {
         const name = i?.metadata?.name ?? "";
         const st = i?.status ?? {};
-        const ev = i?.spec?.event ?? {};
         return {
           issue: name,
-          app: i?.spec?.agentRef ?? "",
-          source: ev.source ?? "manual",
-          severity: ev.severity ?? "warning",
-          title: ev.title ?? i?.spec?.goal ?? "",
-          goal: i?.spec?.goal ?? "",
+          ...issueMetaFromCr(i),
           phase: st.phase ?? "Pending",
-          dedup: num(st.dedupCount),
-          issuingUser: i?.spec?.issuingUser ?? null,
           runs: (runsByIssue.get(name) ?? []).map(runView),
           dataSource: "k8s" as DataSource,
         };
@@ -307,21 +320,14 @@ export async function getIssueRuns(issueName: string): Promise<{
   const runs = (await k8s.listHuginnRuns(ns(), issueSel))
     .filter((r: any) => r?.spec?.issueRef === issueName)
     .map(runView);
-  const ev = issue?.spec?.event ?? {};
   return {
     issue: issueName,
     phase: issue?.status?.phase ?? "Pending",
     outcome: issue?.status?.outcome ?? null,
     runRefs: issue?.status?.runRefs ?? runs.map((r) => r.id),
     runs,
-    // queryIncidents 와 동일 파생(source/severity/title/goal/issuingUser/dedup) — 폴링 시 이슈 컨텍스트 제공.
-    app: issue?.spec?.agentRef ?? "",
-    source: ev.source ?? "manual",
-    severity: ev.severity ?? "warning",
-    title: ev.title ?? issue?.spec?.goal ?? "",
-    goal: issue?.spec?.goal ?? "",
-    issuingUser: issue?.spec?.issuingUser ?? null,
-    dedup: num(issue?.status?.dedupCount),
+    // 사건 메타(source/severity/title/goal/issuingUser/dedup) — queryIncidents 와 동일 파생(공유 헬퍼).
+    ...issueMetaFromCr(issue),
   };
 }
 

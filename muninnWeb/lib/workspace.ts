@@ -39,9 +39,13 @@ export function runWithCopilotAuth<T>(authed: boolean, fn: () => T): T {
   return _copilotAuthed.run(authed, fn);
 }
 
-/** 현재 코파일럿 요청이 인증을 통과했는지(미설정 시 true — 인증 비활성 dev. 호출부가 authEnabled 로 게이트). */
+/**
+ * 현재 코파일럿 요청이 인증을 통과했는지. **fail-closed**: ALS 미설정(래퍼 밖 호출)이면 false 를 반환해
+ * 인증 환경에서 위임이 우회로 열리지 않게 한다. dev(인증 비활성)에서는 호출부 delegate_incident 가
+ * `authEnabled() && !getCopilotAuthed()` 로 게이트하므로 authEnabled()=false 가 흡수 → 기존 동작 불변.
+ */
 export function getCopilotAuthed(): boolean {
-  return _copilotAuthed.getStore() ?? true;
+  return _copilotAuthed.getStore() ?? false;
 }
 
 /**
