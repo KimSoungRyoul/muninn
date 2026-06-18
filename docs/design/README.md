@@ -10,6 +10,8 @@
   (대화형 위임 1급화: muninnWeb=Muninn API, recall→delegate→run→report→approve→store→summarize 시퀀스, CR 계약/manual 필드, Muninn API 라우트, 기억 모델(postgres 텍스트 검색 FTS·`ts_rank_cd`≈BM25 — pgvector·임베딩 제거, 의미 검색은 후속), agentRuntime 보고 계약, kind 토폴로지/검증)
 - **[operator-design.md](./operator-design.md)** — Operator 구현 설계
   (kubebuilder 선택 정당화, controller↔리소스 watch 토폴로지, 재시도 모델/status 소유권/취소 전파, admission webhook 범위, RBAC, Job→phase 매핑) — 실제 구현은 [`huginnOperator/`](../../huginnOperator/)
+- **[muninn-pluggable-agent-runtime.md](./muninn-pluggable-agent-runtime.md)** — Pluggable 실행 백엔드 설계(제안)
+  (`AgentSpec.runtime` selector 로 `claude-code`(Claude Agent SDK, 현행)와 `huginn-self`(Anthropic Messages API 직접 구동 자체 Go 루프) 중 선택; 두 백엔드 공통 SPI 계약(env/HTTP/status 소유권/resume), operator 분기, conformance 테스트, `operator-design.md §2.6` 기각 결정 재검토)
 - **[muninn-a2a-integration.md](./muninn-a2a-integration.md)** — A2A 통합 설계(제안)
   (A2A Task 모델 ≡ CR 모델 매핑(`contextId`≡Issue/`task.id`≡Run/`input-required`≡AwaitingApproval), 통합 3벡터(코파일럿=A2A 클라이언트 / HuginnAgent=A2A 서버 / in-cluster 하위위임), 역방향 터널 무용론·승인 폴링 대체, 보안·롤아웃) — PoC 스캐폴딩 [`muninnWeb/lib/a2a`](../../muninnWeb/lib/a2a/)
 - CopilotKit 콘솔 요청 흐름: [`muninnWeb/docs/copilotkit-request-flow.md`](../../muninnWeb/docs/copilotkit-request-flow.md)
