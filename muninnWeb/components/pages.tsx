@@ -3,7 +3,7 @@ import React from "react";
 // Huginn & Muninn — Apps list, App detail (with Events→Runs), Platform Tools, Memories, Settings
 import { Icon } from "@/components/icons";
 import { Button, IconButton, TextInput, Textarea, Select, Toggle, Badge, Tabs, Empty } from "@/components/ui";
-import { fmtMoney, fmtDuration, fmtTimeAgo, fmtClock, StatusDot, StatusLabel, HmPageHead, HmKpi, HmCard } from "@/components/common";
+import { fmtMoney, fmtDuration, fmtTimeAgo, fmtClock, StatusDot, StatusLabel, HmPageHead, HmKpi, HmCard, runStatusLabel, appInitials } from "@/components/common";
 import { MarkdownView, MarkdownEditor } from "@/components/markdown";
 import { useApi } from "@/lib/use-api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -47,7 +47,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
                 <td>
                   <div style={{display:"flex", alignItems:"center", gap:10}}>
                     <span style={{width:30,height:30,borderRadius:8,background:"var(--primary-95)",color:"var(--primary-40)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,letterSpacing:"-0.02em"}}>
-                      {a.name.split("-").map(s => s[0]).slice(0,2).join("").toUpperCase()}
+                      {appInitials(a.name)}
                     </span>
                     <div style={{display:"flex", flexDirection:"column", gap:2}}>
                       <span className="app-link">{a.name}</span>
@@ -115,7 +115,7 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
         <div style={{flex:1, minWidth:0}}>
           <div style={{display:"flex", alignItems:"center", gap:12}}>
             <span style={{width:36,height:36,borderRadius:10,background:"var(--primary-95)",color:"var(--primary-40)",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,letterSpacing:"-0.02em"}}>
-              {a.name.split("-").map(s => s[0]).slice(0,2).join("").toUpperCase()}
+              {appInitials(a.name)}
             </span>
             <h1 style={{margin:0, fontFamily:"var(--font-sans)", fontSize:24, fontWeight:800, letterSpacing:"-0.025em"}}>{a.name}</h1>
             <Badge tone="default">{a.kind}</Badge>
@@ -455,7 +455,7 @@ function EventsTab({ a, events, allRuns = [], onOpenRun }: any) {
                         <div key={r.id} style={{display:"grid", gridTemplateColumns:"20px 140px 100px 100px 100px 1fr 20px", gap:12, alignItems:"center", padding:"10px 12px", background:"var(--surface)", border:"1px solid var(--border-subtle)", borderRadius:8, cursor:"pointer"}}
                              onClick={(ev) => { ev.stopPropagation(); onOpenRun(r.id); }}>
                           <span style={{fontFamily:"var(--font-mono)", fontSize:11, color:"var(--on-surface-muted)", fontWeight:600}}>#{i + 1}</span>
-                          <StatusLabel status={r.status === "awaiting" ? "awaiting" : r.status}>{r.status === "running" ? "실행 중" : r.status === "awaiting" ? "승인 대기" : r.status === "succeeded" ? "성공" : r.status === "failed" ? "실패" : r.status === "cancelled" ? "취소" : r.status}</StatusLabel>
+                          <StatusLabel status={r.status}>{runStatusLabel(r.status)}</StatusLabel>
                           <span className="hm-mono" style={{fontSize:12.5}}>{fmtClock(r.started)}</span>
                           <span className="hm-mono" style={{fontSize:12.5}}>{fmtDuration(r.duration)}</span>
                           <span className="hm-mono" style={{fontSize:12.5, fontWeight:600}}>{r.cost > 0 ? fmtMoney(r.cost) : "—"}</span>
@@ -970,21 +970,6 @@ function ToolSubTabs({ tabs, value, onChange }: any) {
     </div>
   );
 }
-
-function ToolCategoryHeader({ name, desc, tools }: any) {
-  return (
-    <header className="hm-subcat-head">
-      <div className="hm-subcat-text">
-        <h2 className="hm-subcat-name">{name}</h2>
-        {desc && <p className="hm-subcat-desc">{desc}</p>}
-      </div>
-      {tools && <span className="hm-subcat-tools">{tools}</span>}
-    </header>
-  );
-}
-// Back-compat alias (no longer used directly but kept for safety)
-const ObsCategory = ToolCategoryHeader;
-const ToolCategory = ToolCategoryHeader;
 
 function ObservabilitySection() {
   const obsCols = [

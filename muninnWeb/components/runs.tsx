@@ -16,6 +16,8 @@ import {
   HmCard,
   RavenMark,
   highlightJson,
+  runStatusLabel,
+  escapeHtml,
 } from "@/components/common";
 import { DEMO_NOW } from "@/lib/demo-clock";
 import { useApi } from "@/lib/use-api";
@@ -25,7 +27,7 @@ import { useApi } from "@/lib/use-api";
 // 데모 flagship run — 전체 트랜스크립트(steps/recall/tools)가 존재하는 유일한 mock run.
 const FLAGSHIP_RUN_ID = "run_82c0f1a";
 
-const { useState: useS_RD, useEffect: useE_RD, useMemo: useM_RD } = React;
+const { useState: useS_RD, useEffect: useE_RD } = React;
 
 function HmRunsList({ onOpenRun }: any) {
   const [filter, setFilter] = useS_RD("all");
@@ -81,7 +83,7 @@ function HmRunsList({ onOpenRun }: any) {
           <tbody>
             {filtered.map(r => (
               <tr key={r.id} onClick={() => onOpenRun(r.id)}>
-                <td><StatusLabel status={r.status === "awaiting" ? "awaiting" : r.status}>{r.status === "running" ? "실행 중" : r.status === "awaiting" ? "승인 대기" : r.status === "succeeded" ? "성공" : r.status === "failed" ? "실패" : r.status === "cancelled" ? "취소" : r.status}</StatusLabel></td>
+                <td><StatusLabel status={r.status}>{runStatusLabel(r.status)}</StatusLabel></td>
                 <td>
                   <div style={{display:"flex", flexDirection:"column", gap:1}}>
                     <span className="app-link">{r.app}</span>
@@ -309,7 +311,6 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId, runVm, onDecided }: a
       </div>
     );
   }
-  const kLabel = (s) => s === "running" ? "실행 중" : s === "awaiting" ? "승인 대기" : s === "succeeded" ? "성공" : s === "failed" ? "실패" : s === "queued" ? "대기 중" : s === "cancelled" ? "취소" : s;
   // 승인 대기 판정 — mock run.status 또는 실 runVm 의 phase/approval 중 하나라도 awaiting 이면.
   const isAwaiting = run.status === "awaiting"
     || runVm?.status === "awaiting" || runVm?.phase === "AwaitingApproval" || runVm?.approval === "Pending";
@@ -323,7 +324,7 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId, runVm, onDecided }: a
             <RavenMark which="huginn" size={18}/>
             <h1 style={{margin:0, fontFamily:"var(--font-sans)", fontSize:24, fontWeight:800, letterSpacing:"-0.025em"}}>{run.id}</h1>
             <StatusLabel status={run.status}>
-              <span style={{fontFamily:"var(--font-sans)", fontSize:13, fontWeight:600}}>{kLabel(run.status)}</span>
+              <span style={{fontFamily:"var(--font-sans)", fontSize:13, fontWeight:600}}>{runStatusLabel(run.status)}</span>
             </StatusLabel>
           </div>
           <div style={{fontSize:13, color:"var(--on-surface-muted)", marginTop:6, fontFamily:"var(--font-sans)"}}>
@@ -443,8 +444,7 @@ const DEMO_PR_TITLE = "fix(triton): raise memory limit and lock numpy 1.26.4";
 
 // diff 텍스트를 안전하게 HTML 로 — 각 라인 텍스트는 escape, 클래스만 코드에서 부여.
 function escDiffHtml(lines: Array<{ k: string; t: string }>): string {
-  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return lines.map((l) => `<span class="${l.k}">${esc(l.t)}</span>`).join("\n");
+  return lines.map((l) => `<span class="${l.k}">${escapeHtml(l.t)}</span>`).join("\n");
 }
 
 // 거절된 Run 의 사유·결정자 표면화(관측성, 리뷰 LOW) — runView 가 채운 approvalReason/approvalDecidedBy 소비처.

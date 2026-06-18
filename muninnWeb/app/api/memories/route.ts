@@ -5,7 +5,7 @@
 // DATABASE_URL 미설정 시 mock(HM_DATA)으로 graceful fallback(마이그레이션 중).
 
 import { NextRequest } from "next/server";
-import { ok, created, badRequest, serverError } from "@/lib/api";
+import { ok, created, badRequest, serverError, parseJsonBody } from "@/lib/api";
 import { requireAuth } from "@/lib/auth";
 import { dbEnabled, listMemories, store } from "@/lib/db";
 import { workspaceFromRequest } from "@/lib/workspace";
@@ -48,12 +48,8 @@ export async function POST(req: NextRequest) {
   const denied = await requireAuth(req);
   if (denied) return denied;
   if (!dbEnabled()) return badRequest("memory(postgres) 비활성 — DATABASE_URL 미설정");
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("invalid JSON body");
-  }
+  const body = await parseJsonBody(req);
+  if (body instanceof Response) return body;
   if (!body?.fact || typeof body.fact !== "string") return badRequest("fact(string) 필수");
 
   // 메모리 sanitize — 공백 제거 후 최소/최대 길이 검증(빈/잡음/거대 입력으로 메모리 오염 방지).

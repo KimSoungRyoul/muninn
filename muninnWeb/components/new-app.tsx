@@ -2,6 +2,7 @@
 import React from "react";
 import { Icon } from "@/components/icons";
 import { Button, Badge } from "@/components/ui";
+import { appInitials } from "@/components/common";
 import { useWorkspace } from "@/lib/workspace-context";
 // Huginn & Muninn — New Application registration page
 // Single-page form with sectioned cards + live preview sidebar.
@@ -380,7 +381,7 @@ function SeverityRow({ value, onChange }: any) {
 }
 
 function NewAppPreview({ form, ws, canSubmit, errors }: any) {
-  const initials = (form.name.split("-").map(s => s[0]).slice(0,2).join("") || "?").toUpperCase();
+  const initials = appInitials(form.name) || "?";
   const bound = Object.entries(form.bindings).filter(([,v]) => v).map(([k]) => k);
   const sevColor = {
     info:"var(--on-surface-muted)", warning:"var(--warning-50)",

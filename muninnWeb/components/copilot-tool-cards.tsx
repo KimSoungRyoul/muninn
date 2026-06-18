@@ -17,7 +17,7 @@ import React from "react";
 import { useRouter } from "next/navigation";
 import { useRenderTool, useDefaultRenderTool } from "@copilotkit/react-core/v2";
 import { z } from "zod";
-import { StatusLabel, fmtMoney, fmtTimeAgo } from "@/components/common";
+import { StatusLabel, fmtMoney, fmtTimeAgo, runStatusLabel, RUN_STATUS_LABEL, PHASE_TO_STATUS } from "@/components/common";
 
 // useRenderTool 의 name-scoped 오버로드는 parameters 스키마를 요구한다. 우리는 props.result
 // 만 렌더하므로 args 는 느슨하게(검증 throw 없이) 받는다.
@@ -33,11 +33,6 @@ function parse(result: unknown): any {
     return { _raw: result };
   }
 }
-
-const RUN_LABEL: Record<string, string> = {
-  queued: "대기", running: "실행 중", awaiting: "승인 대기",
-  succeeded: "성공", failed: "실패", cancelled: "취소",
-};
 
 // ---- 공용 프리미티브(인라인 스타일 + 테마 var fallback — 사이드바에서도 안전하게 렌더) ----
 const frameStyle: React.CSSProperties = {
@@ -108,7 +103,7 @@ function RunCard({ vm, router }: any) {
     <Frame icon="ᚺ" title="HuginnRun 상태">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <span style={mono}>{vm.id}</span>
-        <StatusLabel status={vm.status}>{RUN_LABEL[vm.status] ?? vm.phase}</StatusLabel>
+        <StatusLabel status={vm.status}>{RUN_STATUS_LABEL[vm.status] ?? vm.phase}</StatusLabel>
         {vm.source === "mock" ? <span style={{ fontSize: 10, opacity: 0.6 }}>(mock)</span> : null}
       </div>
       <table style={{ borderCollapse: "collapse" }}>
@@ -263,7 +258,7 @@ function RunsTable({ data, router }: any) {
             <tr key={r.id} style={{ borderTop: "1px solid var(--outline-variant, rgba(127,127,127,.18))" }}>
               <td style={{ ...cellStyle, ...mono }}>{r.id}</td>
               <td style={cellStyle}>{r.app}</td>
-              <td style={cellStyle}><StatusLabel status={r.status}>{RUN_LABEL[r.status] ?? r.status}</StatusLabel></td>
+              <td style={cellStyle}><StatusLabel status={r.status}>{runStatusLabel(r.status)}</StatusLabel></td>
               <td style={cellStyle}>
                 <button type="button" onClick={() => router.push(`/runs/${encodeURIComponent(r.id)}`)} style={btnStyle}>열기 →</button>
               </td>
@@ -306,11 +301,6 @@ function DelegateCard({ data }: any) {
   }
   return null;
 }
-
-const PHASE_TO_STATUS: Record<string, string> = {
-  Pending: "queued", Queued: "queued", Running: "running", AwaitingApproval: "awaiting",
-  Succeeded: "succeeded", Failed: "failed", Cancelled: "cancelled",
-};
 
 // ---- list_inbound_events → 인입 알림 표 ----
 function EventsList({ data }: any) {
@@ -366,7 +356,7 @@ function IssueRunsCard({ data, router }: any) {
             {data.runs.map((r: any) => (
               <tr key={r.id} style={{ borderTop: "1px solid var(--outline-variant, rgba(127,127,127,.18))" }}>
                 <td style={{ ...cellStyle, ...mono }}>{r.id}</td>
-                <td style={cellStyle}><StatusLabel status={r.status}>{RUN_LABEL[r.status] ?? r.status}</StatusLabel></td>
+                <td style={cellStyle}><StatusLabel status={r.status}>{runStatusLabel(r.status)}</StatusLabel></td>
                 <td style={cellStyle}>
                   <button type="button" onClick={() => router.push(`/runs/${encodeURIComponent(r.id)}`)} style={btnStyle}>열기 →</button>
                 </td>
