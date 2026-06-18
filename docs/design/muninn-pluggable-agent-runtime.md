@@ -344,7 +344,7 @@ selector 는 복잡도를 *제거*하지 않고 *영구 분기*로 고정한다.
 | 항목 | claude-code 단독 | + huginn-self |
 |------|:---:|:---:|
 | 이미지 빌드/멀티아치 push/공급망(SBOM·checksum·base) | 1 | **2** |
-| e2e conformance 매트릭스(runtime∈{…}) | 1 | **2**(시간·flake) |
+| e2e conformance 매트릭스(runtime 2종: claude-code·huginn-self) | 1 | **2**(시간·flake) |
 | §6 결함(8개) 유지보수 | 0 | **영구** |
 | 문서/SOUL/스킬/runbook 분기 | 1 | **2** |
 
