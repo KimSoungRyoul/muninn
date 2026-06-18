@@ -25,7 +25,6 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
@@ -190,17 +189,7 @@ func (r *HuginnRunReconciler) mapJobToRunStatus(run *muninniov1beta1.HuginnRun, 
 	default:
 		// 활성 상태. AwaitingApproval(API 소유 전이)은 보존한다(§2.2) — 단, 승인 완료는 예외.
 		if run.Status.Phase == muninniov1beta1.RunAwaitingApproval {
-			// 승인 후 phase 복귀(리뷰 MEDIUM): web 의 approve 경로(incidents.ts approveRun)는
-			// status.approval.state=Approved 만 패치하고 phase 는 건드리지 않는다. Job 이 아직
-			// 살아 있으면(에이전트가 승인 후 작업 계속) operator 가 Running 으로 복귀시켜야
-			// 콘솔/집계가 AwaitingApproval 에 고착되지 않는다(§2.2 보존 가드의 명시적 예외).
-			if run.Status.Approval != nil && run.Status.Approval.State == muninniov1beta1.ApprovalApproved {
-				run.Status.Phase = muninniov1beta1.RunRunning
-				setRunCondition(run, "Running", metav1.ConditionTrue, "Approved", "승인됨 — 실행 재개")
-				r.recordEvent(run, corev1.EventTypeNormal, "Approved", "운영자 승인 — phase 를 Running 으로 복귀")
-				return
-			}
-			// 아직 미승인(Pending) — API 소유 전이 존중, 보존만 한다.
+			r.reconcileApprovalPhase(run)
 			return
 		}
 		if (job.Status.Ready != nil && *job.Status.Ready > 0) || job.Status.Active > 0 {
@@ -211,6 +200,22 @@ func (r *HuginnRunReconciler) mapJobToRunStatus(run *muninniov1beta1.HuginnRun, 
 			setRunCondition(run, "Running", metav1.ConditionFalse, "PodPending", "Pod 시작 대기")
 		}
 	}
+}
+
+// reconcileApprovalPhase 는 AwaitingApproval(API 소유 전이) Run 의 phase 보존/복귀를 in-place 로 처리한다(§2.2).
+// 승인 완료(approval.state=Approved)면 Running 으로 복귀시키고, 미승인이면 API 소유 전이를 존중해 보존만 한다.
+func (r *HuginnRunReconciler) reconcileApprovalPhase(run *muninniov1beta1.HuginnRun) {
+	// 승인 후 phase 복귀(리뷰 MEDIUM): web 의 approve 경로(incidents.ts approveRun)는
+	// status.approval.state=Approved 만 패치하고 phase 는 건드리지 않는다. Job 이 아직
+	// 살아 있으면(에이전트가 승인 후 작업 계속) operator 가 Running 으로 복귀시켜야
+	// 콘솔/집계가 AwaitingApproval 에 고착되지 않는다(§2.2 보존 가드의 명시적 예외).
+	if run.Status.Approval != nil && run.Status.Approval.State == muninniov1beta1.ApprovalApproved {
+		run.Status.Phase = muninniov1beta1.RunRunning
+		setRunCondition(run, "Running", metav1.ConditionTrue, "Approved", "승인됨 — 실행 재개")
+		r.recordEvent(run, corev1.EventTypeNormal, "Approved", "운영자 승인 — phase 를 Running 으로 복귀")
+		return
+	}
+	// 아직 미승인(Pending) — API 소유 전이 존중, 보존만 한다.
 }
 
 // markFinished 는 종료 phase 와 finishedAt/duration 을 설정한다(Operator 소유).
@@ -402,15 +407,7 @@ func (r *HuginnRunReconciler) deleteJob(ctx context.Context, run *muninniov1beta
 // 거부되어 requeue 된다. 이로써 API 가 직전에 쓴 phase=AwaitingApproval 등을 stale 캐시 기반
 // Pending→Running 계산이 역전시키는 race 를 막는다(신선한 캐시로 재판정).
 func (r *HuginnRunReconciler) patchStatus(ctx context.Context, base, run *muninniov1beta1.HuginnRun) (ctrl.Result, error) {
-	if err := r.Status().Patch(ctx, run, client.MergeFromWithOptions(base,
-		client.MergeFromWithOptimisticLock{})); err != nil {
-		if apierrors.IsConflict(err) {
-			// 다른 writer(API/Agent)가 그사이 status 를 갱신 — 충돌은 정상 동작이므로 조용히 requeue.
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchStatusObj(ctx, r.Client, base, run)
 }
 
 func isRunTerminal(p muninniov1beta1.RunPhase) bool {
@@ -436,13 +433,7 @@ func jobFailureReason(job *batchv1.Job) string {
 }
 
 func setRunCondition(run *muninniov1beta1.HuginnRun, condType string, status metav1.ConditionStatus, reason, msg string) {
-	apimeta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
-		Type:               condType,
-		Status:             status,
-		Reason:             reason,
-		Message:            msg,
-		ObservedGeneration: run.Generation,
-	})
+	setCondition(&run.Status.Conditions, run.Generation, condType, status, reason, msg)
 }
 
 // childLabels 는 부모 라벨 중 식별 라벨만 자식에 전파한다.
