@@ -386,8 +386,9 @@ def _gate_terminal_kind(gate_outcome: str) -> str:
 
 # ---- SPI 보고/회상 페이로드 빌더(설계 §8, conformance 층1) — 순수 함수 ----
 # operator-design §2.2a 의 Agent→API 보고 SPI 를 코드로 고정한다. golden_report_payloads.json 이
-# 이 함수들의 출력과 muninnWeb report route 의 수용 스키마를 동시에 묶어 cross-language drift 를 막는다
-# (codegen 부재 → conformance 가 단일 방어선). 향후 huginn-self 백엔드도 동일 출력형을 내야 한다.
+# 두 *producer*(Python runner ↔ Go huginn-self)를 같은 계약에 묶어 cross-language producer drift 를 막는다
+# (codegen 부재 → conformance 가 producer 측 방어선). muninnWeb report route(consumer) 측 골든 검증은
+# 후속(report-contract.test.ts) — 그때 producer↔consumer drift 까지 닫힌다.
 
 
 def build_report_patch(step: int, cost: float, tokens: int, output: str, outcome: str,

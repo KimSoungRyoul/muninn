@@ -205,9 +205,14 @@ agent:
     name: huginn-agent
     annotations: {}
 
-  # 참고용 기본 이미지. 실제 이미지는 HuginnAgent CR 의 spec.agent.image 로 지정한다.
-  image:
+  # runtime 별 operator 기본 이미지(§10-5). HuginnAgent CR 이 spec.agent.image 를 생략하면 operator 가
+  # 이 값을 --claude-code-image/--huginn-self-image 로 받아 runtime 에 맞춰 채운다(deployment.yaml args).
+  # CR 에 image 를 명시하면 그 값이 우선한다.
+  image: # claude-code 백엔드 기본 이미지
     repository: ghcr.io/kimsoungryoul/muninn/agent-runtime
+    tag: latest
+  huginnSelfImage: # huginn-self 백엔드 기본 이미지
+    repository: ghcr.io/kimsoungryoul/muninn/huginn-self
     tag: latest
 
   # agent-secrets Secret (operator 가 Job env 로 주입: anthropic-api-key / claude-code-oauth-token /

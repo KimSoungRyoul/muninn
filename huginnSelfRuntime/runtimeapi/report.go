@@ -2,8 +2,9 @@
 //
 // 이 빌더들은 huginnAgentRuntime/agent/runner.py 의 build_report_patch / build_recall_payload 와
 // 바이트 동형이어야 한다 — 같은 골든(huginnAgentRuntime/agent/conformance/golden_report_payloads.json)을
-// Python producer 와 Go producer 가 동시에 통과해 cross-language drift 를 닫는다(codegen 부재 → conformance
-// 가 단일 방어선, 설계 §4.5). k8s import 없음(Q5).
+// Python producer(runner)와 Go producer(huginn-self)가 동시에 통과해 cross-language *producer* drift 를
+// 닫는다(codegen 부재 → conformance 가 producer 측 방어선, §4.5). muninnWeb report route(consumer) 검증은
+// 후속. k8s import 없음(Q5).
 package runtimeapi
 
 import "fmt"
@@ -51,17 +52,32 @@ func BuildRecallPayload(recalled []any) []map[string]any {
 		if !ok {
 			continue
 		}
-		id, ok := m["id"]
-		if !ok || id == nil || id == "" {
+		// Python build_recall_payload 의 `if m.get("id")` 와 동형: falsy id(없음/nil/""/0/false)는 drop.
+		if id, ok := m["id"]; !ok || isFalsyID(id) {
 			continue
 		}
-		item := map[string]any{"id": id}
+		item := map[string]any{"id": m["id"]}
 		if s, ok := m["score"]; ok && s != nil {
 			item["score"] = scoreToString(s)
 		}
 		out = append(out, item)
 	}
 	return out
+}
+
+// isFalsyID 는 Python truthiness 와 동형으로 id 의 falsy 여부를 판정한다(없음/nil/""/0/false → drop).
+func isFalsyID(id any) bool {
+	switch v := id.(type) {
+	case nil:
+		return true
+	case string:
+		return v == ""
+	case float64:
+		return v == 0
+	case bool:
+		return !v
+	}
+	return false
 }
 
 // scoreToString 은 Python str(score) 와 동일하게 score 를 문자열화한다. JSON 수치는 float64 로 들어오며

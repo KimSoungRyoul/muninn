@@ -304,10 +304,11 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		InitContainers:     initContainers,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
-		// 격리 baseline(§6.2-5): SA 토큰 자동마운트 차단. 현재 huginn-agent SA 는 Role 미바인딩이라
-		// 토큰은 불필요한 공격 표면(prompt-injection 시 API server 접근)이다(docs/review SECURITY HIGH).
-		// huginn-self §6.2-5 kubectl_ro(최소권한 Role) 도입 시 runtime 별로 재개방하거나 KUBECONFIG
-		// Secret 마운트로 전환한다 — 그 전까지는 fail-closed 가 안전하다.
+		// 격리 baseline(§6.2-5): SA 토큰 자동마운트를 끈 fail-closed 상태. huginn-agent SA 에는 최소권한
+		// Role(pods/log·deployments read, secrets 제외)이 바인딩돼 있으나(ensureAgentRBAC), 도구 루프(kubectl_ro)가
+		// 아직 없는 text-only 단계에선 토큰을 마운트할 이유가 없고, 마운트하면 prompt-injection 시 그 Role 권한이
+		// 노출되는 공격 표면이 된다(docs/review SECURITY HIGH). 도구 루프 도입 시 토큰 자동마운트를 runtime 별로
+		// 재개방하거나 KUBECONFIG Secret 마운트로 전환한다 — Role 인프라는 ensureAgentRBAC 로 이미 준비돼 있다.
 		AutomountServiceAccountToken: ptr.To(false),
 		// SIGTERM(축출/타임아웃) 시 runner.py 가 terminal 보고(final/failed/terminalKind)를 보낼 예산을
 		// 확보한다. runner 의 SIGTERM 보고 예산(기본 ~20s) + 여유 → 60s. K8s 기본 30s 는 API 지연 시

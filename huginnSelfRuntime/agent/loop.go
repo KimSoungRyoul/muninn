@@ -40,12 +40,13 @@ type Runner struct {
 	chat *llm.Client
 	logf func(string, ...any)
 
-	sessionID string
-	step      int
-	cost      float64
-	tokens    int
-	lastText  string
-	finalSent bool
+	sessionID   string
+	step        int
+	cost        float64
+	tokens      int
+	lastText    string
+	lastOutcome string // sendFinal 이 계산한 outcome — emitResultLine 의 stdout 결과 라인과 일치시킴(관측성).
+	finalSent   bool
 }
 
 // New 는 Runner 를 만든다.
@@ -131,7 +132,7 @@ func (r *Runner) gateApproval(ctx context.Context) string {
 	for {
 		select {
 		case <-ctx.Done():
-			return "approval-timeout" // SIGTERM 등 — 상위에서 거절 선점 확인 후 terminal 보고.
+			return "sigterm" // SIGTERM/취소 — Run 이 sendFinal 하지 말고 main 의 FinalizeOnAbort(거절 선점 확인)에 위임.
 		default:
 		}
 		switch r.api.ApprovalState(time.Time{}) {
@@ -147,7 +148,7 @@ func (r *Runner) gateApproval(ctx context.Context) string {
 		}
 		select {
 		case <-ctx.Done():
-			return "approval-timeout"
+			return "sigterm"
 		case <-time.After(r.cfg.ApprovalPoll):
 		}
 	}
@@ -189,6 +190,7 @@ func (r *Runner) sendFinal(failed bool, abortReason, outcomeOverride, terminalKi
 	if abortReason != "" && outcome == "" {
 		outcome = "aborted: " + abortReason
 	}
+	r.lastOutcome = outcome // emitResultLine 이 stdout 결과 라인에 동일 outcome 을 싣도록 보관(관측성).
 	patch := runtimeapi.BuildReportPatch(r.step, r.cost, r.tokens, output, outcome, true, failed, r.sessionID, terminalKind)
 	ok := r.api.Report(patch, deadline)
 	if !ok {
@@ -220,12 +222,18 @@ func (r *Runner) Run(ctx context.Context) int {
 	// 3) HITL 게이트(위험 작업 전). 거절/만료/타임아웃 → 정상 중단(failed=false except timeout 백스톱).
 	if r.cfg.RequireApproval {
 		outcome := r.gateApproval(ctx)
+		if outcome == "sigterm" {
+			// SIGTERM/취소: sendFinal 을 여기서 하지 않는다 — main 의 FinalizeOnAbort 가 거절 선점(suspend→
+			// SIGTERM 으로 reject 가 폴링을 선점했을 수 있음)을 1회 확인한 뒤 terminalKind=rejected|aborted 로
+			// 보고한다(ctx.Err()!=nil 경로). 여기서 곧장 aborted 로 보고하면 거절을 'aborted' 로 오기록한다.
+			r.logf("승인 게이트 중 취소(SIGTERM) → FinalizeOnAbort 에 위임")
+			return 1
+		}
 		if outcome != "" {
 			tk := gateTerminalKind(outcome)
-			failed := false
-			r.sendFinal(failed, "", outcome, tk, time.Time{})
+			r.sendFinal(false, "", outcome, tk, time.Time{})
 			r.logf("종료(승인 게이트): outcome=%q terminalKind=%q", outcome, tk)
-			r.emitResultLine(true, outcome)
+			r.emitResultLine(true)
 			return 0
 		}
 	}
@@ -251,7 +259,9 @@ func (r *Runner) Run(ctx context.Context) int {
 		r.appendTranscript(m)
 	}
 
-	r.logf("live 시작: max_turns=%d, max_budget_usd=%v, pr_mode=%s, model=%s, goal=%q",
+	// 주의(PoC): MaxBudgetUSD 는 아직 *집행하지 않는다* — 게이트웨이가 per-call cost 를 안 주면 추정이 필요한데
+	// text-only PoC 범위 밖이다(cost 는 0 으로 보고). 도구 루프 단계에서 토큰×단가 추정으로 집행 예정(§2.3a).
+	r.logf("live 시작: max_turns=%d, max_budget_usd=%v(미집행, PoC), pr_mode=%s, model=%s, goal=%q",
 		r.cfg.MaxTurns, r.cfg.MaxBudgetUSD, r.cfg.PRMode, r.chat.Model, truncate(r.cfg.Goal, 120))
 
 	res, err := r.chat.Chat(ctx, messages)
@@ -263,7 +273,7 @@ func (r *Runner) Run(ctx context.Context) int {
 		}
 		r.logf("ERROR: 모델 호출 실패: %v", err)
 		r.sendFinal(true, fmt.Sprintf("exception: %v", err), "", "", time.Time{})
-		r.emitResultLine(false, "")
+		r.emitResultLine(false)
 		return 1
 	}
 	r.step++
@@ -287,7 +297,7 @@ func (r *Runner) Run(ctx context.Context) int {
 		}
 		r.api.StoreMemory(fact, tags)
 	}
-	r.emitResultLine(true, "")
+	r.emitResultLine(true)
 	return 0
 }
 
@@ -306,19 +316,22 @@ func (r *Runner) FinalizeOnAbort(reason string, budget time.Duration) {
 	r.sendFinal(true, reason, "", "aborted", deadline)
 }
 
-func (r *Runner) emitResultLine(ok bool, outcome string) {
+// emitResultLine 은 stdout 결과 라인을 낸다. outcome 은 sendFinal 이 계산해 둔 r.lastOutcome 를 쓴다
+// (보고 patch 의 outcome 과 stdout 라인이 일치 — 관측성, Python runner 의 최종 JSON 라인과 동형).
+func (r *Runner) emitResultLine(ok bool) {
 	line := map[string]any{
 		"mode": "live", "ok": ok, "tokens": r.tokens, "cost_usd": r.cost,
-		"outcome": outcome, "session_id": r.sessionID, "pr_mode": r.cfg.PRMode,
+		"outcome": r.lastOutcome, "session_id": r.sessionID, "pr_mode": r.cfg.PRMode,
 		"backend": "huginn-self",
 	}
 	b, _ := json.Marshal(line)
 	fmt.Println(string(b))
 }
 
+// firstNonEmptyLine 은 첫 비어있지 않은 줄을 양끝의 '#'/공백을 떼어 반환한다(Python strip('# ') 와 동형).
 func firstNonEmptyLine(s string) string {
 	for _, ln := range strings.Split(s, "\n") {
-		t := strings.TrimSpace(strings.TrimLeft(ln, "# "))
+		t := strings.TrimSpace(strings.Trim(ln, "# "))
 		if t != "" {
 			return t
 		}

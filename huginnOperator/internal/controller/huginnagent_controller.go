@@ -129,8 +129,6 @@ func (r *HuginnAgentReconciler) ensurePVC(ctx context.Context, agent *muninniov1
 	var pvc corev1.PersistentVolumeClaim
 	err := r.Get(ctx, client.ObjectKey{Namespace: agent.Namespace, Name: name}, &pvc)
 	if err == nil {
-		// 신규 PVC 이미 존재 — 리네임(§10-7) 전 잔존 PVC 가 있으면 정리(best-effort).
-		r.cleanupLegacyPVC(ctx, agent)
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
@@ -159,31 +157,14 @@ func (r *HuginnAgentReconciler) ensurePVC(ctx context.Context, agent *muninniov1
 	if err := controllerutil.SetControllerReference(agent, &pvc, r.Scheme); err != nil {
 		return err
 	}
-	if err := r.Create(ctx, &pvc); err != nil {
-		return err
-	}
-	// 신규 PVC 보장 후 레거시(pvc-claude-*) orphan 정리(best-effort).
-	r.cleanupLegacyPVC(ctx, agent)
-	return nil
+	return r.Create(ctx, &pvc)
 }
 
-// cleanupLegacyPVC 는 리네임(§10-7) 전 이름(pvc-claude-<agent>)의 잔존 PVC 를 best-effort 로 정리한다.
-// 이름만으로 삭제하지 않고 LabelAgent==agent.Name 가드 하에서만 삭제해 오삭제(수동 생성/타 소유 PVC)를
-// 막는다. 신규 PVC(pvc-agent-*)와 접두가 분리돼 이름이 겹칠 일은 없다. 삭제 실패는 로깅만 하고
-// reconcile 을 막지 않는다 — 미부착 orphan 정리이지 운영 데이터 경로가 아니다(§10-7 옵션 a).
-func (r *HuginnAgentReconciler) cleanupLegacyPVC(ctx context.Context, agent *muninniov1beta1.HuginnAgent) {
-	legacy := legacyPVCNameForAgent(agent.Name)
-	var pvc corev1.PersistentVolumeClaim
-	if err := r.Get(ctx, client.ObjectKey{Namespace: agent.Namespace, Name: legacy}, &pvc); err != nil {
-		return // NotFound(정상) 또는 일시 오류 — 다음 reconcile 에서 재시도.
-	}
-	if pvc.Labels[LabelAgent] != agent.Name {
-		return // 우리 소유 PVC 가 아니면 건드리지 않는다(이름 충돌 안전장치).
-	}
-	if err := r.Delete(ctx, &pvc); err != nil && !apierrors.IsNotFound(err) {
-		logf.FromContext(ctx).Info("legacy PVC 정리 실패(무시)", "pvc", legacy, "err", err.Error())
-	}
-}
+// 리네임(§10-6,7) 노트: 구 PVC 이름(pvc-claude-<agent>)은 *eager 삭제하지 않는다*. 구 PVC 는 과거
+// ensurePVC 가 SetControllerReference(agent)로 만든 *소유* PVC 라 orphan 이 아니며 agent 삭제 시 GC 된다
+// (orphan 누적 없음). 게다가 구 PVC 엔 Issue 별 ~/.claude transcript/resume(§5.5) 가 들어 있어, 이를
+// reconcile 중 삭제하면 in-place 업그레이드에서 운영 데이터가 소실된다. 따라서 cleanup 로직을 제거했다
+// — kind(throwaway)는 재생성으로 해소되고, 실 클러스터는 구 PVC 가 owned 라 자연 GC 된다(데이터 보존).
 
 func (r *HuginnAgentReconciler) ensureServiceAccount(ctx context.Context, namespace string) error {
 	var sa corev1.ServiceAccount

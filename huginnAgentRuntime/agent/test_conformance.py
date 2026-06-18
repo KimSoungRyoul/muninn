@@ -3,8 +3,9 @@
 
 runner 의 Agent→API 보고/회상 페이로드 빌더(build_report_patch / build_recall_payload)가
 conformance/golden_report_payloads.json 의 기대 출력과 정확히 일치하는지 검증한다. 같은 골든을
-muninnWeb 측(report-contract.test.ts, 후속)이 consumer 로 소비하면 cross-language drift 가 닫힌다 —
-한쪽이 계약을 바꾸면 양쪽 테스트가 동시에 실패한다(codegen 부재 → conformance 가 단일 방어선, §4.5).
+같은 골든을 huginn-self Go producer(runtimeapi)도 통과한다 → 두 *producer* 가 같은 계약에 묶인다(한쪽이
+계약을 바꾸면 Python/Go 양쪽 테스트가 동시에 실패). muninnWeb report route(consumer) 측 골든 검증은 후속
+(report-contract.test.ts) — 그때 producer↔consumer drift 까지 닫힌다(codegen 부재 → conformance 가 방어선, §4.5).
 
 표준 라이브러리(unittest)만 사용(새 의존성 금지). 네트워크/SDK 불필요(빌더는 순수 함수).
 실행: `python3 agent/test_conformance.py` (또는 pytest agent/).

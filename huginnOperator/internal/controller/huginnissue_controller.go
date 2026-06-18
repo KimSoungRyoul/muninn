@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -144,6 +145,12 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			base = issue.DeepCopy() // 이후 patchStatus 의 optimistic lock 이 stale RV 로 409 나지 않게 갱신.
 		}
 		if err := r.createRun(ctx, &issue, &agent, 1, ""); err != nil {
+			if errors.Is(err, errMissingImage) {
+				log.Error(err, "MissingImage — Issue 종결(Failed)")
+				issue.Status.Phase = muninniov1beta1.IssueFailed
+				setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "MissingImage", err.Error())
+				return r.patchStatus(ctx, base, &issue)
+			}
 			return ctrl.Result{}, err
 		}
 		log.Info("최초 Run 생성", "attempt", 1, "effectiveRuntime", issue.Status.EffectiveRuntime)
@@ -218,6 +225,12 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// 세션 보고 전에 죽었어도(init 전 크래시 등) 그 이전 attempt 의 transcript 는 PVC 에 남아
 			// 있으므로 뒤에서부터 첫 non-empty sessionId 를 고른다. 전부 비면 새 세션.
 			if err := r.createRun(ctx, &issue, &agent, next, lastSessionID(runs)); err != nil {
+				if errors.Is(err, errMissingImage) {
+					log.Error(err, "MissingImage — Issue 종결(Failed)")
+					issue.Status.Phase = muninniov1beta1.IssueFailed
+					setIssueCondition(&issue, "Reconciled", metav1.ConditionFalse, "MissingImage", err.Error())
+					return r.patchStatus(ctx, base, &issue)
+				}
 				return ctrl.Result{}, err
 			}
 			log.Info("재시도 Run 생성", "attempt", next)
@@ -272,6 +285,11 @@ func (r *HuginnIssueReconciler) suspendRuns(ctx context.Context, issue *muninnio
 	return nil
 }
 
+// errMissingImage: agent.image 도 operator 기본 이미지(--claude-code-image/--huginn-self-image)도 없는
+// 비복구성 오류. requeue(무한 재시도)로 표면화되면 운영자가 원인을 못 보므로, Reconcile 이 이를 잡아
+// Issue 를 Phase=Failed + condition(reason=MissingImage)로 종결한다(§10-5).
+var errMissingImage = errors.New("MissingImage")
+
 // createRun 은 attempt 번째 HuginnRun 을 만든다. resumeSessionID 가 있으면(재시도 attempt 한정)
 // MUNINN_RESUME_SESSION_ID env 로 주입해 runner 가 직전 attempt 의 Claude 세션을 resume 한다(§5.5).
 func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1beta1.HuginnIssue,
@@ -284,8 +302,8 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 	// 이로써 진행 중 agent.runtime 변경이 같은 Issue 의 후속 attempt 백엔드를 바꾸지 못한다(resume 일치 가드).
 	resolved := resolveAgentForRun(agent, issue.Status.EffectiveRuntime, r.ClaudeCodeImage, r.HuginnSelfImage)
 	if resolved.Spec.Agent.Image == "" {
-		return fmt.Errorf("MissingImage: agent %q 의 image 가 비어 있고 runtime=%q 의 operator 기본 이미지도 미설정(--claude-code-image/--huginn-self-image)",
-			agent.Name, effectiveRuntimeOf(resolved))
+		return fmt.Errorf("%w: agent %q 의 image 가 비어 있고 runtime=%q 의 operator 기본 이미지도 미설정(--claude-code-image/--huginn-self-image)",
+			errMissingImage, agent.Name, effectiveRuntimeOf(resolved))
 	}
 
 	run := &muninniov1beta1.HuginnRun{

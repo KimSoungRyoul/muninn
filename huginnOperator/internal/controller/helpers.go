@@ -151,16 +151,10 @@ func resolveAgentForRun(agent *muninniov1beta1.HuginnAgent, effRuntime, claudeCo
 	return &cp
 }
 
-// pvcNameForAgent 은 앱별 격리 PVC 이름(§5.5 MVP=A). (구 pvc-claude-* 에서 백엔드 중립명으로 리네임, §10-6,7.)
+// pvcNameForAgent 은 앱별 격리 PVC 이름(§5.5 MVP=A). (구 pvc-claude-* 에서 백엔드 중립명으로 리네임, §10-6.)
+// 구 PVC 는 owned 라 agent 삭제 시 GC 되므로 eager cleanup 하지 않는다(데이터 보존 — ensurePVC 노트 참조).
 func pvcNameForAgent(agentName string) string {
 	return "pvc-agent-" + agentName
-}
-
-// legacyPVCNameForAgent 은 리네임 전(구) PVC 이름이다(§10-7 orphan cleanup). ensurePVC 가 신규 PVC
-// 보장 후 이 이름의 잔존 PVC 를 best-effort 로 정리한다 — 이름만 매칭하지 않고 LabelAgent/ownerRef 가드
-// 하에서만 삭제해 오삭제를 막는다.
-func legacyPVCNameForAgent(agentName string) string {
-	return "pvc-claude-" + agentName
 }
 
 // withResumeSession 은 직전 attempt 의 Claude Code 세션을 잇는 env 를 JobTemplate 에 덧붙인다(§5.5).
@@ -300,22 +294,6 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 		{Name: "MUNINN_APPROVAL_TIMEOUT", Value: fmt.Sprintf("%d", approvalTimeoutSeconds)},
 		{Name: "MUNINN_MEMORY_ENDPOINT", Value: memoryEndpoint},
 		{Name: "MUNINN_API_ENDPOINT", Value: apiEndpoint},
-		// 인증: env(Secret)로만(§5.1, §6.2). API 키 또는 OAuth 토큰 중 하나면 충분 →
-		// 둘 다 optional 로 주입하고 "최소 하나 존재"는 런타임(claude_skill.sh)이 강제한다.
-		{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
-				Key:                  anthropicKeyName,
-				Optional:             ptr.To(true),
-			},
-		}},
-		{Name: "CLAUDE_CODE_OAUTH_TOKEN", ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
-				Key:                  oauthTokenKeyName,
-				Optional:             ptr.To(true),
-			},
-		}},
 		// MUNINN_API_TOKEN: 런타임이 Muninn API(보고/승인/메모리) 호출을 인증하는 토큰(§5.6).
 		// 인증 키와 동일 패턴(agent-secrets, optional) — 미배포 환경에서도 Pod 가 뜨도록 optional.
 		{Name: "MUNINN_API_TOKEN", ValueFrom: &corev1.EnvVarSource{
@@ -325,6 +303,29 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 				Optional:             ptr.To(true),
 			},
 		}},
+	}
+	// Anthropic 직접 인증(§5.1, §6.2): API 키/OAuth 토큰 중 하나면 충분 → 둘 다 optional secretKeyRef.
+	// **단 authStyle=bearer(게이트웨이 경유)면 주입하지 않는다** — claude CLI/SDK 는 ANTHROPIC_API_KEY 와
+	// ANTHROPIC_AUTH_TOKEN 이 동시 존재하면 x-api-key·Authorization 헤더를 둘 다 실어 보내, 진짜 Anthropic
+	// 키가 ANTHROPIC_BASE_URL 의 제3자 게이트웨이로 누출된다(신뢰경계 위반). bearer 경로는 gatewayEnv 의
+	// ANTHROPIC_AUTH_TOKEN 만 쓴다(상호배타). "최소 하나 존재"는 런타임(claude_skill.sh)이 강제한다.
+	if agent.Spec.Agent.AuthStyle != "bearer" {
+		env = append(env,
+			corev1.EnvVar{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
+					Key:                  anthropicKeyName,
+					Optional:             ptr.To(true),
+				},
+			}},
+			corev1.EnvVar{Name: "CLAUDE_CODE_OAUTH_TOKEN", ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
+					Key:                  oauthTokenKeyName,
+					Optional:             ptr.To(true),
+				},
+			}},
+		)
 	}
 	if agent.Spec.Agent.SoulRef != "" {
 		env = append(env, corev1.EnvVar{Name: "MUNINN_SOUL_REF", Value: "configmap/" + agent.Spec.Agent.SoulRef})

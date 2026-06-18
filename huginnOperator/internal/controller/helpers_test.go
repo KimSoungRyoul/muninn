@@ -182,6 +182,13 @@ func TestResolveAgentForRun(t *testing.T) {
 	if got := resolveAgentForRun(a4, "huginn-self", ccImg, hsImg); got.Spec.Agent.Image != "custom:1" {
 		t.Errorf("명시 image 가 무시됨: %q", got.Spec.Agent.Image)
 	}
+
+	// 5) agent.image 비고 operator 기본 이미지도 빈 문자열 → image="" (createRun 이 MissingImage 로 거부).
+	a5, _ := testFixtures()
+	a5.Spec.Agent.Image = ""
+	if got := resolveAgentForRun(a5, "huginn-self", "", ""); got.Spec.Agent.Image != "" {
+		t.Errorf("기본 이미지 미설정인데 image=%q (MissingImage 여야 함)", got.Spec.Agent.Image)
+	}
 }
 
 // TestBuildJobTemplateHuginnSelf: §4 백엔드 분기 — runtime=huginn-self 면 command/mountPath/env 가
@@ -242,6 +249,13 @@ func TestGatewayEnv(t *testing.T) {
 	}
 	// authStyle=bearer → ANTHROPIC_AUTH_TOKEN 은 agent-secrets/anthropic-auth-token optional secretKeyRef.
 	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_AUTH_TOKEN", agentSecretName, anthropicAuthTokenKeyName)
+	// 보안(리뷰 #3): bearer 게이트웨이 경유 시 진짜 Anthropic 키가 제3자 게이트웨이로 누출되지 않도록
+	// ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN 은 *주입되지 않아야* 한다(ANTHROPIC_AUTH_TOKEN 만).
+	for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if _, ok := envByName(jt.Env, name); ok {
+			t.Errorf("authStyle=bearer 인데 %s 가 주입됨(제3자 게이트웨이로 키 누출 위험)", name)
+		}
+	}
 
 	// authStyle 이 bearer 가 아니면 ANTHROPIC_AUTH_TOKEN 미주입(기존 api-key/oauth 사용).
 	agent.Spec.Agent.AuthStyle = "anthropic"
@@ -252,6 +266,8 @@ func TestGatewayEnv(t *testing.T) {
 	if _, ok := envByName(jt2.Env, "ANTHROPIC_BASE_URL"); !ok {
 		t.Error("authStyle=anthropic 라도 baseUrl 설정 시 ANTHROPIC_BASE_URL 은 주입돼야 함")
 	}
+	// authStyle=anthropic(비-bearer)면 ANTHROPIC_API_KEY 는 주입돼야 한다(직접 Anthropic 경로).
+	assertOptionalSecretRef(t, jt2.Env, "ANTHROPIC_API_KEY", agentSecretName, anthropicKeyName)
 
 	// runtime=huginn-self 는 §3 분기 대상이 아님 → 게이트웨이 env 미주입(§4 별도 분기).
 	agent.Spec.Agent.Runtime = "huginn-self"
