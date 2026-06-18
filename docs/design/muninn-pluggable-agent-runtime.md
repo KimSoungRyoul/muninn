@@ -214,6 +214,61 @@ claude code 의 session 은 **100% 클라이언트 측 파일 기반이고 Anthr
 - **HITL 승인 게이트**: `requireApproval` 시 위험 작업 전 승인 요청(§2.2 이중 적재) → `AwaitingApproval` → 폴링으로 **`Approved`/`Rejected` 종결을 처리**. 매핑: rejected→`rejected`, expired→`expired`, timeout→`aborted`.
   - **`Expired` 도달성(정정).** web `lib/incidents.ts:approvalState()` 가 `expiresAt<=now` 시 표시값을 "Expired" 로 **lazy 계산**해 runner 의 폴링 GET 경로(`runView`)에 노출하도록 **이미 배선돼 있다** — 즉 `runner.py` 의 "Expired 도달 불가" 주석은 **stale 이 맞다**(코드 확인). 다만 v0.3 의 "실제 도달 가능" 단정은 **두 가지를 빠뜨렸다**: (1) **메인스펙 §6.4 도 동반 stale**("만료 데몬 미구현, 후속") — 같은 PR 에서 함께 정정해야 함(§10-2). (2) **5400s race**: runner wall-clock 타임아웃(`MUNINN_APPROVAL_TIMEOUT` 기본 5400s)과 web 승인 TTL(`approvalTtlMinutes` 기본 90m=5400s)이 **같은 값**(operator `helpers.go` 가 "단일 소스"로 정합)이라, 폴링이 web 의 lazy "Expired"(→`expired`)를 먼저 보든 자신의 wall-clock 만료(→`aborted`)를 먼저 보든 **비결정적**이었다.
     - **✅ 결정(2026-06-18, Q7) — runner 폴링 > web TTL**: runner 폴링 타임아웃을 web 승인 TTL **보다 길게**(예: `MUNINN_APPROVAL_TIMEOUT = approvalTtlMinutes×60 + grace`) operator 가 주입해, 마감 시 **항상 web 의 lazy "Expired" 가 먼저 관측**되도록 한다 → `terminalKind=expired` **결정적**. runner 자체 wall-clock 만료(→`aborted`)는 web 이 끝내 응답을 안 줄 때만 발화하는 백스톱이 된다. 이로써 §8 conformance 의 expiry 라운드트립이 결정적 검증으로 가능. 두 백엔드 공통 계약이므로 huginn-self 도 동일. (operator `helpers.go` 의 "단일 소스(5400s 동률)" 를 "web TTL < runner 타임아웃" 으로 변경 — §10-2.)
+
+**그림 — HITL 승인 게이트 흐름 & 4가지 종결:**
+
+```
+              위험 작업 직전
+                    │
+                    ▼
+   report(requestApproval) ──▶ API: phase = AwaitingApproval
+                                    approval.expiresAt = now + 90m (TTL)
+                    │
+                    ▼
+   ┌───────────────────────────────────────┐
+   │  runner 가 GET /api/runs/{id} 폴링 반복   │◀── 사람의 결정 / 시간 경과를 대기
+   └─────────────────┬─────────────────────┘
+                     │ approval.state 관측
+                     ▼
+   ┌──────────┬───────────┬──────────────────┬──────────────────┐
+   │          │           │                  │                  │
+[Approved] [Rejected]  [Expired]                          [폴링 한도 초과]
+   │          │      마감(expiresAt) 경과                        │
+   ▼          ▼      → web 가 lazy 계산                          ▼
+작업 계속  terminalKind        │                            terminalKind
+(kind 없음) = rejected         ▼                             = aborted
+                          terminalKind                       (백스톱)
+                           = expired
+```
+
+**그림 — `expired` vs `aborted` race 와 Q7 결정:**
+
+```
+── 변경 전: 두 시계가 동률(둘 다 5400s) ⇒ 비결정적 ──────────────────────
+
+ t0(승인요청) ─────────────────────────────────▶ t0 + 5400s (마감)
+                                                      ║ 동시 도달
+        web TTL (approvalTtlMinutes 90m) ───── lazy "Expired" ──┐
+        runner timeout (MUNINN_APPROVAL_TIMEOUT 5400s) ─────────┤
+                                                                ▼
+                                       폴링이 "먼저 본" 쪽이 라벨 결정
+                                          ├─ web 먼저   → expired
+                                          └─ runner 먼저 → aborted
+                                                  ⚠ 비결정적 (같은 상황, 다른 라벨)
+
+
+── Q7 결정 후: runner 폴링 > web TTL ⇒ 결정적 ──────────────────────────
+
+ t0 ─────────────────────────▶ t0 + 90m ───────────▶ t0 + 90m + grace
+                                   │                       │
+                             web "Expired"           runner timeout
+                            (항상 먼저 관측)          (web TTL + grace, 더 늦음)
+                                   │                       │
+                                   ▼                       ▼
+                       terminalKind = expired ✅    web 가 끝내 무응답일 때만 발화
+                             (결정적)                = aborted (백스톱)
+```
+
 - **dry-run PR mode**: `MUNINN_PR_MODE=dry-run` 이면 실제 `gh pr create` 금지, **PR 계획을 output 으로**(형식: ① 제목 한 줄, ② 변경 요약, ③ `` ```diff `` fenced). outcome 접두 `DRY-RUN PR:`.
 - **selftest**: API 호출 없이 배선 검증 후 exit(오프라인 CI/kind QA).
 - **guardrail 집행**: §4.3 한계(turn 경계 overshoot, maxTokens 사후추적) 참조.
