@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KimSoungRyoul/muninn/huginnSelfRuntime/internal/strutil"
 	"github.com/KimSoungRyoul/muninn/huginnSelfRuntime/llm"
 	"github.com/KimSoungRyoul/muninn/huginnSelfRuntime/runtimeapi"
 	"github.com/KimSoungRyoul/muninn/huginnSelfRuntime/spi"
@@ -262,7 +263,7 @@ func (r *Runner) Run(ctx context.Context) int {
 	// 주의(PoC): MaxBudgetUSD 는 아직 *집행하지 않는다* — 게이트웨이가 per-call cost 를 안 주면 추정이 필요한데
 	// text-only PoC 범위 밖이다(cost 는 0 으로 보고). 도구 루프 단계에서 토큰×단가 추정으로 집행 예정(§2.3a).
 	r.logf("live 시작: max_turns=%d, max_budget_usd=%v(미집행, PoC), pr_mode=%s, model=%s, goal=%q",
-		r.cfg.MaxTurns, r.cfg.MaxBudgetUSD, r.cfg.PRMode, r.chat.Model, truncate(r.cfg.Goal, 120))
+		r.cfg.MaxTurns, r.cfg.MaxBudgetUSD, r.cfg.PRMode, r.chat.Model, strutil.Truncate(r.cfg.Goal, 120))
 
 	res, err := r.chat.Chat(ctx, messages)
 	if err != nil {
@@ -280,7 +281,7 @@ func (r *Runner) Run(ctx context.Context) int {
 	r.tokens = res.Usage.TotalTokens
 	r.lastText = res.Content
 	r.appendTranscript(llm.Message{Role: "assistant", Content: res.Content})
-	r.logf("assistant: %s", truncate(res.Content, 200))
+	r.logf("assistant: %s", strutil.Truncate(res.Content, 200))
 	r.api.Report(map[string]any{"step": r.step, "cost": fmt.Sprintf("%.4f", r.cost), "tokens": r.tokens}, time.Time{})
 
 	// 5) terminal 보고 + 기억화(성공 시).
@@ -337,12 +338,4 @@ func firstNonEmptyLine(s string) string {
 		}
 	}
 	return ""
-}
-
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) > n {
-		return string(r[:n])
-	}
-	return s
 }

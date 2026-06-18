@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/KimSoungRyoul/muninn/huginnSelfRuntime/internal/strutil"
 )
 
 // Message 는 chat 메시지(role: system|user|assistant).
@@ -80,7 +82,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message) (ChatResult, erro
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return ChatResult{}, fmt.Errorf("llm: HTTP %d: %s", resp.StatusCode, truncate(string(body), 300))
+		return ChatResult{}, fmt.Errorf("llm: HTTP %d: %s", resp.StatusCode, strutil.Truncate(string(body), 300))
 	}
 	var parsed struct {
 		Choices []struct {
@@ -93,18 +95,11 @@ func (c *Client) Chat(ctx context.Context, messages []Message) (ChatResult, erro
 		return ChatResult{}, fmt.Errorf("llm: 응답 파싱: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return ChatResult{}, fmt.Errorf("llm: choices 비어있음: %s", truncate(string(body), 300))
+		return ChatResult{}, fmt.Errorf("llm: choices 비어있음: %s", strutil.Truncate(string(body), 300))
 	}
 	return ChatResult{
 		Content:      parsed.Choices[0].Message.Content,
 		FinishReason: parsed.Choices[0].FinishReason,
 		Usage:        parsed.Usage,
 	}, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
 }
