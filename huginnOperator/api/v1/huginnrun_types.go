@@ -46,14 +46,21 @@ type JobTemplate struct {
 	// serviceAccountName: 비면 기본 huginn-agent(§6.1)
 	// +optional
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
-	// claudePVCName: ~/.claude 로 마운트할 앱별 PVC(§5.5). 비면 볼륨 미마운트.
+	// agentPVCName: 에이전트 홈(claude-code=~/.claude)으로 마운트할 앱별 PVC(§5.5). 비면 볼륨 미마운트.
+	// (구 claudePVCName 에서 백엔드 중립명으로 리네임 — §10-6.)
 	// +optional
-	ClaudePVCName string `json:"claudePVCName,omitempty"`
-	// claudeSubPath: 앱 PVC 안에서 ~/.claude 로 마운트할 하위 경로(§5.5). Issue 이름으로 채워
+	AgentPVCName string `json:"agentPVCName,omitempty"`
+	// agentSubPath: 앱 PVC 안에서 에이전트 홈으로 마운트할 하위 경로(§5.5). Issue 이름으로 채워
 	// Issue별로 transcript/설정을 물리 격리한다 — resume 경계(=Issue, withResumeSession 참조)와
-	// 영속 경계를 일치시켜 Issue 간 ~/.claude 동시쓰기 오염을 막는다. 비면 PVC 루트를 마운트(레거시).
+	// 영속 경계를 일치시켜 Issue 간 홈 동시쓰기 오염을 막는다. 비면 PVC 루트를 마운트(레거시).
+	// (구 claudeSubPath 에서 리네임 — §10-6.)
 	// +optional
-	ClaudeSubPath string `json:"claudeSubPath,omitempty"`
+	AgentSubPath string `json:"agentSubPath,omitempty"`
+	// mountPath: 에이전트 홈 PVC 의 컨테이너 마운트 경로(§2.4 HOME 분리). 백엔드별로 다르다 —
+	// claude-code=/home/node/.claude(runner.py ~/.claude 계약), huginn-self=/home/node/.huginn.
+	// buildJobTemplate 이 runtime 에 따라 채운다. 비면 expandPodSpec 이 claude-code 기본으로 폴백(하위호환).
+	// +optional
+	MountPath string `json:"mountPath,omitempty"`
 }
 
 // HuginnRunSpec defines the desired state of HuginnRun.

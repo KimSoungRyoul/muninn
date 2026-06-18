@@ -440,6 +440,12 @@ spec:
                 description: 'dedupCount: 같은 fingerprint 누적(§4.4). Muninn API 가 갱신.'
                 format: int32
                 type: integer
+              effectiveRuntime:
+                description: |-
+                  effectiveRuntime: 이 Issue 의 실행 백엔드(claude-code|huginn-self)를 최초 attempt 에서 1회 동결한다
+                  (§5·§10-9, Operator 소유). 이후 attempt 는 이 값을 쓴다 — 진행 중 agent.runtime 변경이 같은 Issue 의
+                  transcript/resume 백엔드를 바꿔 cross-backend resume 손상(포맷 비호환)을 일으키는 것을 막는다.
+                type: string
               observedRuns:
                 description: 'observedRuns: 지금까지 생성한 Run 수(재시도 상한 판정용; Operator 소유)'
                 format: int32
@@ -897,6 +903,12 @@ spec:
                 description: 'dedupCount: 같은 fingerprint 누적(§4.4). Muninn API 가 갱신.'
                 format: int32
                 type: integer
+              effectiveRuntime:
+                description: |-
+                  effectiveRuntime: 이 Issue 의 실행 백엔드(claude-code|huginn-self)를 최초 attempt 에서 1회 동결한다
+                  (§5·§10-9, Operator 소유). 이후 attempt 는 이 값을 쓴다 — 진행 중 agent.runtime 변경이 같은 Issue 의
+                  transcript/resume 백엔드를 바꿔 cross-backend resume 손상(포맷 비호환)을 일으키는 것을 막는다.
+                type: string
               observedRuns:
                 description: 'observedRuns: 지금까지 생성한 Run 수(재시도 상한 판정용; Operator 소유)'
                 format: int32

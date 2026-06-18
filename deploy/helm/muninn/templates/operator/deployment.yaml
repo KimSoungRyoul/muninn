@@ -61,6 +61,13 @@ spec:
             {{- if .Values.operator.webhook.enabled }}
             - --webhook-cert-path=/tmp/k8s-webhook-server/serving-certs
             {{- end }}
+            {{- if .Values.agent.image.repository }}
+            # runtime 별 기본 agent 이미지(§10-5) — HuginnAgent CR 이 spec.agent.image 를 생략하면 사용.
+            - --claude-code-image={{ .Values.agent.image.repository }}:{{ .Values.agent.image.tag }}
+            {{- end }}
+            {{- if and .Values.agent.huginnSelfImage .Values.agent.huginnSelfImage.repository }}
+            - --huginn-self-image={{ .Values.agent.huginnSelfImage.repository }}:{{ .Values.agent.huginnSelfImage.tag }}
+            {{- end }}
           env:
             {{- if not .Values.operator.webhook.enabled }}
             # webhook off → main.go 의 webhook setup 을 건너뛴다(cert 불필요).

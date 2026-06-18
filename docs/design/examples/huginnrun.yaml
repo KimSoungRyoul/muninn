@@ -25,12 +25,12 @@ spec:
 
   # jobTemplate: 큐레이트된 실행 recipe(full PodSpec 미임베드 → CRD 슬림).
   # Run controller 가 Job 생성 시 고정 필드(restartPolicy=Never, containerName=agent,
-  # volumeMount /home/node/.claude, claudePVCName→volume, 비-root securityContext)를 더해 full PodSpec 으로 확장한다.
+  # volumeMount /home/node/.claude, agentPVCName→volume, 비-root securityContext)를 더해 full PodSpec 으로 확장한다.
   jobTemplate:
     image: ghcr.io/kimsoungryoul/muninn/agent-runtime:0.1.0  # huginnAgentRuntime/ 이미지(GitHub Packages)
     command: ["/usr/local/bin/claude_skill.sh"]
     serviceAccountName: huginn-agent          # 자기 namespace Secret/CM 만 read(§6.1)
-    claudePVCName: pvc-claude-ai-router-svc # ~/.claude 로 마운트할 앱별 격리 PVC(§5.5)
+    agentPVCName: pvc-agent-ai-router-svc # 에이전트 홈(~/.claude)으로 마운트할 앱별 격리 PVC(§5.5)
     resources:
       requests: { cpu: "500m", memory: "512Mi" }
       limits:   { cpu: "2000m", memory: "2Gi" }

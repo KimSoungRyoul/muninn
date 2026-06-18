@@ -36,8 +36,17 @@ rules:
 - apiGroups: [muninn.io]
   resources: [huginnagents/status, huginnissues/status, huginnruns/status]
   verbs: [get, patch, update]
-# 주의: rolebindings/roles 권한은 두지 않는다 — operator 는 agent SA 에 namespace Role 을 더 이상 만들지 않는다
-# (agent 는 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않음). config/rbac/role.yaml 과 동기.
+# agent SA 최소권한 Role 부여용(§6.2-5): operator 가 agent SA 에 grant 하는 권한을 자신도 보유해야
+# privilege-escalation 거부를 피한다(과거 kind e2e 회귀). secrets/configmaps 는 제외. config/rbac/role.yaml 과 동기.
+- apiGroups: [""]
+  resources: [pods/log]
+  verbs: [get]
+- apiGroups: [apps]
+  resources: [deployments, replicasets]
+  verbs: [get, list, watch]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [roles, rolebindings]
+  verbs: [create, get, list, patch, update, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

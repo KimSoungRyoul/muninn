@@ -1,0 +1,76 @@
+# kind E2E QA 매니페스트 (huginn-self 백엔드, §4) — 비-Claude 모델(gemma-4-31B-it)을 huginn-self
+# 슬림 Go agent loop 가 OpenAI 호환 /chat/completions 게이트웨이로 *직접* 구동하는지 검증한다.
+# claude-code(claude CLI 경유)와 대조 — huginn-self 는 claude CLI 없이 모델 API 를 직접 호출.
+#
+# 사용 순서(QA): operator make run-kind 로 kind+CRD+operator 기동 후, huginn-self 이미지 kind load,
+#   그리고 agent-secrets(anthropic-auth-token=$GATEWAY_API_KEY) 준비(claude-code e2e 와 공유) 후:
+#     kubectl apply -f huginnSelfRuntime/examples/kind-e2e.yaml
+#     kubectl -n ns-huginn-e2e get hissue,hrun,job,pod  # Succeeded 확인
+#     kubectl -n ns-huginn-e2e logs job/<run>           # "live 시작: … model=gemma-4-31B-it" + assistant: HUGINN_OK
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-huginn-e2e
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: huginn-agent
+  namespace: ns-huginn-e2e
+---
+apiVersion: muninn.io/v1beta1
+kind: HuginnAgent
+metadata:
+  name: e2e-huginn-self
+  namespace: ns-huginn-e2e
+  labels:
+    muninn.io/workspace: ns-huginn-e2e
+spec:
+  workspaceId: ns-huginn-e2e
+  displayName: "huginn-self backend E2E probe"
+  kind: other
+  output: github_issue
+  source:
+    provider: github
+    repo: acme/e2e-probe
+    defaultBranch: main
+  trigger:
+    severityThreshold: warning
+  guardrails:
+    maxIterations: 2
+    maxCostUsd: 1
+  identity:
+    k8sNamespace: ns-huginn-e2e
+  agent:
+    runtime: huginn-self                 # ← 자체 Go 백엔드(claude CLI 미경유)
+    image: ghcr.io/kimsoungryoul/muninn/huginn-self:dev
+    baseUrl: https://llm-gateway.example.com   # OpenAI 호환 /chat/completions
+    model: gemma-4-31B-it
+    authStyle: openai                    # → MUNINN_AUTH_STYLE=openai, MUNINN_LLM_API_KEY(agent-secrets/anthropic-auth-token)
+---
+apiVersion: muninn.io/v1beta1
+kind: HuginnIssue
+metadata:
+  name: e2e-huginn-self-issue
+  namespace: ns-huginn-e2e
+  labels:
+    muninn.io/workspace: ns-huginn-e2e
+    muninn.io/agent: e2e-huginn-self
+spec:
+  agentRef: e2e-huginn-self
+  goal: "연결 점검입니다. 도구를 사용하지 말고 정확히 'HUGINN_OK' 한 단어만 출력하세요."
+  event:
+    id: e2e-hs-1
+    source: manual
+    severity: warning
+    fingerprint: e2e-huginn-self-1
+    title: "huginn-self backend QA"
+  inheritedGuardrails:
+    maxIterations: 2
+    maxCostUsd: 1
+  identity:
+    k8sNamespace: ns-huginn-e2e
+  retryPolicy:
+    maxRuns: 1
+    backoff: none

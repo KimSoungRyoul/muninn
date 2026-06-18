@@ -245,24 +245,32 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		Command:   command,
 		Resources: resources,
 		Env:       jt.Env,
-		// 컨테이너 하드닝: 권한 상승 차단 + 모든 capability 드롭(비-root 런타임).
+		// 컨테이너 하드닝: 권한 상승 차단 + 모든 capability 드롭(비-root 런타임) + seccomp(컨테이너 레벨도
+		// 명시 — pod 레벨에 이미 있으나 PSS restricted 정합·명시성). readOnlyRootFilesystem 은 runner 가
+		// $HOME/.npm·.config·/tmp 등에 쓰므로 emptyDir 커버리지(2단계 롤아웃) 확정 후 별도 적용(§6.2-6 잔여).
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: ptr.To(false),
 			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
+	}
+	// 에이전트 홈 마운트 경로(§2.4): JobTemplate.MountPath(runtime별)를 쓰고, 비면 claude-code 기본 폴백(하위호환).
+	mountPath := jt.MountPath
+	if mountPath == "" {
+		mountPath = claudeMountPath
 	}
 	var volumes []corev1.Volume
 	var initContainers []corev1.Container
-	if jt.ClaudePVCName != "" {
-		// SubPath(=Issue 이름, buildJobTemplate)로 앱 PVC 안 Issue별 하위 경로를 ~/.claude 로 마운트한다(§5.5).
+	if jt.AgentPVCName != "" {
+		// SubPath(=Issue 이름, buildJobTemplate)로 앱 PVC 안 Issue별 하위 경로를 에이전트 홈으로 마운트한다(§5.5).
 		// 비면(레거시 JobTemplate) PVC 루트를 마운트 — 기존 동작 보존.
 		container.VolumeMounts = []corev1.VolumeMount{{
-			Name: claudeVolumeName, MountPath: claudeMountPath, SubPath: jt.ClaudeSubPath,
+			Name: agentVolumeName, MountPath: mountPath, SubPath: jt.AgentSubPath,
 		}}
 		volumes = []corev1.Volume{{
-			Name: claudeVolumeName,
+			Name: agentVolumeName,
 			VolumeSource: corev1.VolumeSource{
-				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: jt.ClaudePVCName},
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: jt.AgentPVCName},
 			},
 		}}
 		// subPath 디렉토리는 kubelet 이 pod 마운트 시 생성하는데, fsGroup chown(볼륨 attach 1회) 이후라
@@ -271,15 +279,15 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		// PVC 루트(여기는 fsGroup 으로 그룹쓰기 가능)를 마운트해 subPath 디렉토리를 미리 만들어 소유권을
 		// uid/fsGroup 1000 으로 잡는다 → main 컨테이너의 subPath 마운트가 쓰기 가능해진다. 비-root 하드닝과
 		// 정합(pod SecurityContext 의 RunAsUser/fsGroup 1000 이 init 에도 적용; root 승격 없음). 멱등(mkdir -p).
-		if jt.ClaudeSubPath != "" {
+		if jt.AgentSubPath != "" {
 			initContainers = []corev1.Container{{
-				Name:    claudeHomeInitContainerName,
+				Name:    agentHomeInitContainerName,
 				Image:   jt.Image,
-				Command: []string{"sh", "-c", `mkdir -p "$CLAUDE_HOME_DIR"`},
+				Command: []string{"sh", "-c", `mkdir -p "$AGENT_HOME_DIR"`},
 				Env: []corev1.EnvVar{{
-					Name: "CLAUDE_HOME_DIR", Value: path.Join(claudeStoreInitPath, jt.ClaudeSubPath),
+					Name: "AGENT_HOME_DIR", Value: path.Join(agentStoreInitPath, jt.AgentSubPath),
 				}},
-				VolumeMounts: []corev1.VolumeMount{{Name: claudeVolumeName, MountPath: claudeStoreInitPath}},
+				VolumeMounts: []corev1.VolumeMount{{Name: agentVolumeName, MountPath: agentStoreInitPath}},
 				// 작은 명시 요청/제한(리뷰 R2): requests 가 없으면 LimitRange-strict 네임스페이스가 pod 를
 				// 거부하거나 init 단계 QoS 가 BestEffort 가 된다. mkdir 한 번이라 최소값으로 충분.
 				Resources: initContainerResources(),
@@ -296,6 +304,12 @@ func expandPodSpec(jt muninniov1beta1.JobTemplate) corev1.PodSpec {
 		InitContainers:     initContainers,
 		Containers:         []corev1.Container{container},
 		Volumes:            volumes,
+		// 격리 baseline(§6.2-5): SA 토큰 자동마운트를 끈 fail-closed 상태. huginn-agent SA 에는 최소권한
+		// Role(pods/log·deployments read, secrets 제외)이 바인딩돼 있으나(ensureAgentRBAC), 도구 루프(kubectl_ro)가
+		// 아직 없는 text-only 단계에선 토큰을 마운트할 이유가 없고, 마운트하면 prompt-injection 시 그 Role 권한이
+		// 노출되는 공격 표면이 된다(docs/review SECURITY HIGH). 도구 루프 도입 시 토큰 자동마운트를 runtime 별로
+		// 재개방하거나 KUBECONFIG Secret 마운트로 전환한다 — Role 인프라는 ensureAgentRBAC 로 이미 준비돼 있다.
+		AutomountServiceAccountToken: ptr.To(false),
 		// SIGTERM(축출/타임아웃) 시 runner.py 가 terminal 보고(final/failed/terminalKind)를 보낼 예산을
 		// 확보한다. runner 의 SIGTERM 보고 예산(기본 ~20s) + 여유 → 60s. K8s 기본 30s 는 API 지연 시
 		// terminal 보고가 SIGKILL 로 잘려 incident 가 'running' 으로 고착될 수 있다(리뷰 MEDIUM).

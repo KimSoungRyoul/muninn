@@ -1,0 +1,33 @@
+apiVersion: muninn.io/v1beta1
+kind: HuginnAgent
+metadata:
+  name: e2e-noimg
+  namespace: ns-huginn-e2e
+  labels: { muninn.io/workspace: ns-huginn-e2e }
+spec:
+  workspaceId: ns-huginn-e2e
+  kind: other
+  output: github_issue
+  source: { provider: github, repo: acme/e2e-probe, defaultBranch: main }
+  trigger: { severityThreshold: warning }
+  guardrails: { maxIterations: 2, maxCostUsd: 1 }
+  identity: { k8sNamespace: ns-huginn-e2e }
+  agent:
+    runtime: huginn-self        # image 생략 → operator --huginn-self-image 기본값 사용(§10-5)
+    baseUrl: https://llm-gateway.example.com
+    model: gemma-4-31B-it
+    authStyle: openai
+---
+apiVersion: muninn.io/v1beta1
+kind: HuginnIssue
+metadata:
+  name: e2e-noimg-issue
+  namespace: ns-huginn-e2e
+  labels: { muninn.io/workspace: ns-huginn-e2e, muninn.io/agent: e2e-noimg }
+spec:
+  agentRef: e2e-noimg
+  goal: "도구 없이 정확히 'HUGINN_OK' 만 출력하세요."
+  event: { id: noimg-1, source: manual, severity: warning, fingerprint: noimg-1, title: "image-optional QA" }
+  inheritedGuardrails: { maxIterations: 2, maxCostUsd: 1 }
+  identity: { k8sNamespace: ns-huginn-e2e }
+  retryPolicy: { maxRuns: 1, backoff: none }

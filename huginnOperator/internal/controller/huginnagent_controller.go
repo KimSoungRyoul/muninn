@@ -20,6 +20,7 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -57,11 +58,19 @@ type HuginnAgentReconciler struct {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create
 // 주의: operator 는 Secret/ConfigMap '객체'를 직접 Get/List 하지 않는다(인증은 Pod env 의 secretKeyRef 로만
 // 참조 — 내용 read 아님). 따라서 cluster-wide secrets/configmaps read 마커를 두지 않아 권한 탈취 시 피해 반경을 줄인다(리뷰 MEDIUM).
-// 에이전트 SA 도 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않으므로 namespace Role 을 부여하지 않는다:
-// agent SA Role 의 secrets/configmaps read 는 과잉 권한이었고(리뷰 MEDIUM — 워크스페이스 내 자격 탈취 표면),
-// operator 가 그 권한을 Role 로 grant 하려면 자신도 보유해야 하는데 보유하지 않아 RBAC privilege-escalation 으로
-// 거부됐다(kind e2e 에서 발견된 회귀). agent 가 자기 namespace 리소스를 K8s API 로 직접 다뤄야 하는 기능이 생기면
-// 그때 최소 권한 Role 을 ensureServiceAccount 옆에서 부여하고 여기에 roles;rolebindings create 마커를 다시 추가한다.
+//
+// agent SA 최소권한 Role(§6.2-5·§10-10): kubectl_ro 도구(read-only 진단)를 위한 *최소* 권한만 부여한다 —
+// pods/pods.log·deployments/replicasets read 뿐, **secrets/configmaps 는 제외**(워크스페이스 내 자격 탈취 표면 차단).
+// operator 가 이 권한을 Role 로 grant 하려면 자신도 보유해야 RBAC privilege-escalation 거부를 피하므로(과거 kind e2e
+// 회귀), 아래 rbac 마커로 operator ClusterRole 에 동일 권한 + roles;rolebindings 관리 권한을 부여한다.
+// 단 현재 runtime 은 Pod 의 automountServiceAccountToken=false(격리 baseline, expandPodSpec)라 토큰이 마운트되지
+// 않아 이 Role 은 *아직 소비되지 않는다* — 토큰 마운트(또는 KUBECONFIG Secret)는 도구 루프 도입 시 runtime 별로 게이트한다.
+// Role/RoleBinding 인프라를 미리 멱등 보장해 그때 즉시 활성화되게 한다(privilege-escalation 가드는 지금 검증 가능).
+//
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
+// +kubebuilder:rbac:groups=apps,resources=deployments;replicasets,verbs=get;list;watch
 
 func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -80,9 +89,11 @@ func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.ensurePVC(ctx, &agent); err != nil {
 		return ctrl.Result{}, err
 	}
-	// 2) namespace 공용 ServiceAccount 보장(owned 아님 — 다른 agent 와 공유).
-	// agent 는 자격을 env(secretKeyRef)로만 받고 K8s API 를 직접 호출하지 않으므로 별도 Role 을 부여하지 않는다.
+	// 2) namespace 공용 ServiceAccount + 최소권한 Role/RoleBinding 보장(owned 아님 — 다른 agent 와 공유).
 	if err := r.ensureServiceAccount(ctx, agent.Namespace); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.ensureAgentRBAC(ctx, agent.Namespace); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -149,6 +160,12 @@ func (r *HuginnAgentReconciler) ensurePVC(ctx context.Context, agent *muninniov1
 	return r.Create(ctx, &pvc)
 }
 
+// 리네임(§10-6,7) 노트: 구 PVC 이름(pvc-claude-<agent>)은 *eager 삭제하지 않는다*. 구 PVC 는 과거
+// ensurePVC 가 SetControllerReference(agent)로 만든 *소유* PVC 라 orphan 이 아니며 agent 삭제 시 GC 된다
+// (orphan 누적 없음). 게다가 구 PVC 엔 Issue 별 ~/.claude transcript/resume(§5.5) 가 들어 있어, 이를
+// reconcile 중 삭제하면 in-place 업그레이드에서 운영 데이터가 소실된다. 따라서 cleanup 로직을 제거했다
+// — kind(throwaway)는 재생성으로 해소되고, 실 클러스터는 구 PVC 가 owned 라 자연 GC 된다(데이터 보존).
+
 func (r *HuginnAgentReconciler) ensureServiceAccount(ctx context.Context, namespace string) error {
 	var sa corev1.ServiceAccount
 	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: serviceAccountName}, &sa)
@@ -169,6 +186,42 @@ func (r *HuginnAgentReconciler) ensureServiceAccount(ctx context.Context, namesp
 
 // countActiveIssues 는 phase∈{Pending,Running,AwaitingApproval} 인 세션 수를 센다(§8.4).
 // spec.agentRef field indexer 로 조회한다(namespace 전체 list+필터 회피).
+// agentRoleRules 는 huginn-agent SA 최소권한(§6.2-5): read-only 진단(pods/log·deployments). secrets 제외.
+func agentRoleRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{""}, Resources: []string{"pods/log"}, Verbs: []string{"get"}},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments", "replicasets"}, Verbs: []string{"get", "list", "watch"}},
+	}
+}
+
+// ensureAgentRBAC 는 huginn-agent SA 의 namespace Role/RoleBinding 을 멱등 보장한다(§6.2-5·§10-10).
+// Role rules 는 변하면 갱신하고, RoleBinding 은 roleRef immutable 이라 없을 때만 생성한다. operator 는
+// 위 rbac 마커로 동일 권한을 보유하므로 grant 시 privilege-escalation 거부를 받지 않는다(과거 회귀 해소).
+func (r *HuginnAgentReconciler) ensureAgentRBAC(ctx context.Context, namespace string) error {
+	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: serviceAccountName, Namespace: namespace}}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, role, func() error {
+		role.Rules = agentRoleRules()
+		return nil
+	}); err != nil {
+		return err
+	}
+	var rb rbacv1.RoleBinding
+	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: serviceAccountName}, &rb)
+	if apierrors.IsNotFound(err) {
+		rb = rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: serviceAccountName, Namespace: namespace},
+			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: serviceAccountName},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: serviceAccountName, Namespace: namespace}},
+		}
+		if err := r.Create(ctx, &rb); err != nil && !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		return nil
+	}
+	return err
+}
+
 func (r *HuginnAgentReconciler) countActiveIssues(ctx context.Context, agent *muninniov1beta1.HuginnAgent) (int32, error) {
 	var list muninniov1beta1.HuginnIssueList
 	if err := r.List(ctx, &list, client.InNamespace(agent.Namespace),
