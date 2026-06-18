@@ -22,7 +22,7 @@
 **트레이드오프**: kopf 는 Memory Service(FastAPI/Python)와 언어를 통일한다는 장점(§11-6)이 있으나, 위 표의 K8s-native 요구가 압도적으로 많고 모두 Go 생태계에서 1급으로 지원된다. Operator 는 Memory Service 와 코드 공유가 거의 없는 별도 배포 단위이므로 언어 통일 이점은 작다. → **Go + kubebuilder 확정.**
 
 - 버전: kubebuilder v4, controller-runtime v0.24.1, k8s.io/* v0.36.1, Go 1.26.
-- API: `group=muninn.io`, `version=v1beta1`(설계서 네이밍 규칙). **현재 `v1beta1` 단일 버전**(served+storage). CRD `v1` 승격(conversion webhook)은 **보류** — 사유·체크리스트는 [`../../huginnOperator/docs/crd-versioning.md`](../../huginnOperator/docs/crd-versioning.md). 버저닝/디프리케이션 정책 doc-comment(`api/v1beta1/groupversion_info.go`) + 전략 문서로 기반을 마련했다. **`api/v1` Go 패키지는 실재**하나(타입 정의됨) **served 되지 않고 conversion webhook 도 없다** — selector 의 `Runtime` enum 등 CRD 변경은 v1beta1·v1 **양쪽**에 반영해야 한다(pluggable §1).
+- API: `group=muninn.io`(설계서 네이밍 규칙). **CRD 버전 사실(정정 2026-06-18)**: `config/crd/bases/*.yaml`(3종 동일)상 **`v1`=`served:true`·`storage:true`(hub), `v1beta1`=`served:true`·`storage:false`(deprecated)** — 즉 v1 이 storage hub 이자 served 이고 v1beta1 도 served 다(이전 "v1beta1 단일·v1 served 안 됨" 서술은 stale·오기였음). **conversion webhook 은 없다**(`ConvertTo`/`Hub` 미구현, `config/default` conversion 블록 주석처리). CRD `v1` 의 정식 승격 절차(conversion 포함)는 **보류** — 사유·체크리스트는 [`../../huginnOperator/docs/crd-versioning.md`](../../huginnOperator/docs/crd-versioning.md)(보류인데 v1 이 이미 storage hub 로 served 되는 점은 그 문서와 정합 추적 필요). selector 의 `Runtime` enum 등 CRD 변경은 **둘 다 served 이므로 v1beta1·v1 양쪽**에 반영해야 한다(pluggable §1).
 - 모듈 경로: `github.com/KimSoungRyoul/muninn/huginnOperator`.
 
 ---
