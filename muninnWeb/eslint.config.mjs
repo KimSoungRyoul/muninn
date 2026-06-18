@@ -37,7 +37,7 @@ const eslintConfig = [
       // 프로토타입 데모 컴포넌트(charts/ui/new-app)가 이 규칙들보다 먼저 작성됨 — 동작은
       // 정상이나 패턴이 비순수/렌더내 정의다. 버전 업그레이드 범위를 동작-중립으로 유지하기 위해
       // 에러가 아닌 경고로 두고, React Compiler 정합화는 후속 작업으로 분리한다.
-      "react-hooks/purity": "warn", // Sparkline 의 Math.random id → 후속에서 useId 로
+      "react-hooks/purity": "warn", // 렌더내 Math.random/Date.now 등 → 후속에서 순수화
       "react-hooks/immutability": "warn", // Donut 의 루프 누적 변이
       "react-hooks/static-components": "warn", // new-app 의 렌더내 컴포넌트 정의 → 후속에서 hoist
     },

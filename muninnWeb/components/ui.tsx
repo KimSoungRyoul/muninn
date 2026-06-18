@@ -124,11 +124,6 @@ function Tabs({ tabs, value, onChange, pill = false }: any) {
   );
 }
 
-// ---------- Progress ----------
-function Progress({ value }: any) {
-  return <div className="progress"><div className="progress-bar" style={{width: `${Math.min(100, Math.max(0, value))}%`}}></div></div>;
-}
-
 // ---------- Empty ----------
 function Empty({ icon = "folder", title, sub, action }: any) {
   return (
@@ -141,34 +136,11 @@ function Empty({ icon = "folder", title, sub, action }: any) {
   );
 }
 
-// ---------- Sparkline ----------
-function Sparkline({ data, color = "var(--primary-50)", w = 96, h = 28, fill = true }: any) {
-  const max = Math.max(...data), min = Math.min(...data);
-  const range = max - min || 1;
-  const pts = data.map((v, i) => [(i / (data.length - 1)) * w, h - ((v - min) / range) * (h - 4) - 2]);
-  const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
-  const fillD = fill ? `${d} L${w},${h} L0,${h} Z` : null;
-  const id = "sg-" + Math.random().toString(36).slice(2, 8);
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
-      {fill && <>
-        <defs><linearGradient id={id} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.22"/>
-          <stop offset="100%" stopColor={color} stopOpacity="0"/>
-        </linearGradient></defs>
-        <path d={fillD} fill={`url(#${id})`} />
-      </>}
-      <path d={d} fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  );
-}
-
 export {
   Button, IconButton, TextInput, Textarea, Select,
   Toggle,
   Badge, Chip,
   Avatar,
   Tabs,
-  Progress, Empty,
-  Sparkline,
+  Empty,
 };

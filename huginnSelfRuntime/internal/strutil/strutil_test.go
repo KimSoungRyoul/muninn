@@ -14,6 +14,7 @@ func TestTruncate(t *testing.T) {
 		{"over cap ascii", "hello", 3, "hel"},
 		{"empty", "", 5, ""},
 		{"zero cap", "hello", 0, ""},
+		{"negative cap", "hello", -1, ""},
 		// rune-based: 멀티바이트(한글)에서 깨진 UTF-8 을 만들지 않고 글자 단위로 자른다.
 		// byte 슬라이스였다면 "가나다"[:2] 가 깨진 바이트를 반환했을 것이다.
 		{"multibyte under cap", "가나다", 5, "가나다"},

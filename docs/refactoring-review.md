@@ -37,6 +37,19 @@
 | `self-dockerfile-redundant-copy` | 빌드/CI/설정 | dead-code | huginnSelfRuntime Dockerfile: `COPY go.mod ./` 가 직후 `COPY . .` 으로 무효화 (레이어 캐시 이득 0) |
 | `self-runtime-no-dockerignore` | 빌드/CI/설정 | structure | huginnSelfRuntime 에 .dockerignore 부재 → 빌드 컨텍스트에 examples/ 등 불필요 파일 유입 |
 
+### 구현 범위 정밀화 (표 제목이 실제 변경보다 넓게 읽힐 수 있는 항목)
+
+- **`http-client-three-places`**: 세 http.Client 를 *일원화*한 게 아니다. **LLM 게이트웨이 호출(`buildLLM`)에만** 타임아웃을 도입했다(`io.ReadAll` 무한 hang 방지, 기본 600s, `MUNINN_LLM_HTTP_TIMEOUT_SEC` 로 조정 가능). SPI 클라이언트의 zero-Timeout 은 per-attempt `context.WithTimeout` 으로 이미 방어되는 의도된 설계라 **건드리지 않았다**.
+- **`phase-map-dup`**: 클라이언트 사본 2개(`incidents.tsx`/`copilot-tool-cards.tsx`)를 `common.tsx` 의 단일 소스로 통합했다. **서버 전용 사본(`lib/incidents.ts`)은 server/client 경계상 의도적으로 잔존**한다(두 사본 drift 가드 테스트는 후속 백로그).
+- **queued 라벨 정규화 (의도된 user-visible 변경)**: `runStatusLabel` 통합 과정에서 `queued` 상태 Run 의 표시 라벨이 일부 화면의 "대기" → 콘솔 표준값 **"대기 중"** 으로 통일됐다. running/awaiting/succeeded/failed/cancelled 라벨은 전부 보존. phase 배지(`PHASE_LABEL`)는 불변.
+
+### 라운드 1 셀프리뷰 반영 (추가 정리)
+
+PR 머지 전 다차원 적대 리뷰(blocker/major 0건)에서 나온 minor/nit 을 함께 반영했다:
+
+- `strutil.Truncate` 에 `n <= 0` 가드 추가(음수 cap 슬라이스 패닉 방지) + 음수 케이스 테스트. 현 호출부는 양수 상수라 도달 불가이나 신규 export 유틸의 latent 패닉 제거.
+- 데드 export 완결 정리: `Sparkline`(이 PR 이 유일 소비자 `HmSpark` 를 지워 데드가 됨) + 기존부터 미사용이던 `Progress`(ui.tsx)·`fmtMoneyK`·`HmAnnounce`(common.tsx) 제거. eslint warnings 22→21(Sparkline 의 `Math.random` purity 경고 해소).
+
 ## 후속 백로그 (50건)
 
 아래는 가치는 있으나 (a) god-module/긴함수 분할처럼 churn·회귀위험이 큰 구조 작업, (b) 설계 결정이 필요한 항목(needs-discussion / 규약 충돌), (c) CI 변경처럼 로컬 검증이 어려운 것이라 이번 PR 에서 제외했다. 각 항목은 별도 PR 로 다루기를 권한다.

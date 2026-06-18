@@ -121,14 +121,24 @@ func buildConfig() agent.Config {
 	}
 }
 
-// llmHTTPTimeout 은 LLM 게이트웨이 호출의 전체 타임아웃이다. 게이트웨이 무응답 시 llm.Chat 의
-// io.ReadAll 이 무한 대기하는 행(hang)을 방지한다. 120s 는 보수적이라 정상 응답을 끊지 않는다.
-const llmHTTPTimeout = 120 * time.Second
+// llmHTTPTimeoutDefault 은 LLM 게이트웨이 호출의 전체 타임아웃 기본값이다. 게이트웨이 무응답 시
+// llm.Chat 의 io.ReadAll 이 무한 대기하는 행(hang)을 막는 상한선이다 — 타이트한 SLA 가 아니다.
+// 대부분의 완성은 이 안에 끝나지만, 매우 큰 MUNINN_MAX_OUTPUT_TOKENS + 느린 게이트웨이 조합에선
+// 정상 응답이 끊길 수 있으므로 MUNINN_LLM_HTTP_TIMEOUT_SEC 로 운영자가 늘릴 수 있다.
+const llmHTTPTimeoutDefault = 600 * time.Second
 
 // newLLMHTTPClient 는 LLM 호출용 http.Client 를 만든다(타임아웃 포함). LLM 게이트웨이 호출 지점이
 // 이 팩토리를 공유한다(현재 buildLLM). selftest 의 SPI probe http.Client 는 별개다(per-attempt
 // context timeout 으로 방어 — spi 설계, 건드리지 않음).
-func newLLMHTTPClient() *http.Client { return &http.Client{Timeout: llmHTTPTimeout} }
+func newLLMHTTPClient() *http.Client {
+	timeout := llmHTTPTimeoutDefault
+	if v := env("MUNINN_LLM_HTTP_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			timeout = time.Duration(n) * time.Second
+		}
+	}
+	return &http.Client{Timeout: timeout}
+}
 
 func buildLLM() *llm.Client {
 	maxTok := 1024

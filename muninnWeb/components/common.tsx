@@ -1,7 +1,6 @@
 "use client";
 import React from "react";
 import { Icon } from "@/components/icons";
-import { IconButton } from "@/components/ui";
 import { BRAND_LOGO_PATH, BRAND_LOGO_VIEWBOX } from "@/components/logo-data";
 import { DEMO_NOW } from "@/lib/demo-clock";
 // Huginn & Muninn — custom components and shared utils
@@ -10,7 +9,6 @@ const { useState: useS_HM } = React;
 
 // ---------- Formatters ----------
 const fmtMoney = (n) => `$${n.toFixed(2)}`;
-const fmtMoneyK = (n) => n >= 1000 ? `$${(n/1000).toFixed(1)}k` : `$${n.toFixed(2)}`;
 const fmtTokens = (n) => n >= 1000 ? `${(n/1000).toFixed(1)}k` : `${n}`;
 const fmtDuration = (s) => {
   const m = Math.floor(s / 60), sec = Math.floor(s % 60);
@@ -370,30 +368,10 @@ function HmCard({ title, meta, children, action, flush }: any) {
   );
 }
 
-// ---------- Announcement banner ----------
-function HmAnnounce({ tone = "info", icon, title, desc, actionLabel, onAction, onDismiss }: any) {
-  const [open, setOpen] = useS_HM(true);
-  if (!open) return null;
-  const defaultIcon = tone === "warning" ? "alert" : tone === "success" ? "checkCircle" : "sparkle";
-  return (
-    <div className={`hm-announce tone-${tone}`} role="status">
-      <span className="ico"><Icon name={icon || defaultIcon} size={16}/></span>
-      <div className="body">
-        {title && <div className="title">{title}</div>}
-        {desc && <div className="desc">{desc}</div>}
-      </div>
-      <div className="actions">
-        {actionLabel && <a href="#" onClick={e => { e.preventDefault(); onAction?.(); }}>{actionLabel}</a>}
-        <IconButton icon="close" size="sm" onClick={() => { setOpen(false); onDismiss?.(); }}/>
-      </div>
-    </div>
-  );
-}
-
-export { fmtMoney, fmtMoneyK, fmtTokens, fmtDuration, fmtTimeAgo, fmtClock,
+export { fmtMoney, fmtTokens, fmtDuration, fmtTimeAgo, fmtClock,
   StatusDot, StatusLabel, runStatusLabel, RUN_STATUS_LABEL,
   PHASE_TO_STATUS, PHASE_LABEL, appInitials, escapeHtml,
   RuneGlyph, RavenMark, HuginnLogo, MuninnLogo, BrandLogo,
   Meter, JsonViewer, StackedBars, HealthDots,
-  HmPageHead, HmKpi, HmCard, highlightJson, HmAnnounce,
+  HmPageHead, HmKpi, HmCard, highlightJson,
 };
