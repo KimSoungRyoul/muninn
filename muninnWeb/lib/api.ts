@@ -104,3 +104,14 @@ const SEVERITY_ORDER: Record<string, number> = { info: 0, warning: 1, error: 2, 
 export function severityGte(a: string, threshold: string): boolean {
   return (SEVERITY_ORDER[a] ?? 0) >= (SEVERITY_ORDER[threshold] ?? 0);
 }
+
+// ---- Route Handler 공통: JSON body 파싱 ----
+// 성공 시 파싱된 객체, 파싱 실패(invalid JSON) 시 400 Response 를 반환한다.
+// 라우트에서: `const body = await parseJsonBody(req); if (body instanceof Response) return body;`
+export async function parseJsonBody(req: Request): Promise<any | Response> {
+  try {
+    return await req.json();
+  } catch {
+    return badRequest("invalid JSON body");
+  }
+}

@@ -22,7 +22,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -109,13 +108,8 @@ func (r *HuginnAgentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// 5) Ready.
 	agent.Status.Phase = muninniov1beta1.AppReady
-	apimeta.SetStatusCondition(&agent.Status.Conditions, metav1.Condition{
-		Type:               "Ready",
-		Status:             metav1.ConditionTrue,
-		Reason:             "WebhookRegistered",
-		Message:            "webhook URL 발급 및 PVC/SA 보장 완료",
-		ObservedGeneration: agent.Generation,
-	})
+	setCondition(&agent.Status.Conditions, agent.Generation, "Ready", metav1.ConditionTrue,
+		"WebhookRegistered", "webhook URL 발급 및 PVC/SA 보장 완료")
 
 	if err := r.Status().Patch(ctx, &agent, client.MergeFrom(base)); err != nil {
 		return ctrl.Result{}, err

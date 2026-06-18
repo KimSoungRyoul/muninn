@@ -1,16 +1,14 @@
 "use client";
 import React from "react";
 import { Icon } from "@/components/icons";
-import { Sparkline, IconButton } from "@/components/ui";
 import { BRAND_LOGO_PATH, BRAND_LOGO_VIEWBOX } from "@/components/logo-data";
 import { DEMO_NOW } from "@/lib/demo-clock";
 // Huginn & Muninn — custom components and shared utils
 
-const { useState: useS_HM, useEffect: useE_HM, useRef: useR_HM, useMemo: useM_HM } = React;
+const { useState: useS_HM } = React;
 
 // ---------- Formatters ----------
 const fmtMoney = (n) => `$${n.toFixed(2)}`;
-const fmtMoneyK = (n) => n >= 1000 ? `$${(n/1000).toFixed(1)}k` : `$${n.toFixed(2)}`;
 const fmtTokens = (n) => n >= 1000 ? `${(n/1000).toFixed(1)}k` : `${n}`;
 const fmtDuration = (s) => {
   const m = Math.floor(s / 60), sec = Math.floor(s % 60);
@@ -36,6 +34,48 @@ function StatusLabel({ status, children }: any) {
   return <span className="status-label"><StatusDot status={status}/>{children || status}</span>;
 }
 
+// ---------- Run status → 한국어 라벨 (단일 소스) ----------
+// HuginnRun status(소문자) → 콘솔 표시 라벨. 콘솔 곳곳의 인라인 삼항/지역 맵을 여기로 통합.
+const RUN_STATUS_LABEL: Record<string, string> = {
+  queued: "대기 중",
+  running: "실행 중",
+  awaiting: "승인 대기",
+  succeeded: "성공",
+  failed: "실패",
+  cancelled: "취소",
+};
+function runStatusLabel(status: string): string {
+  return RUN_STATUS_LABEL[status] ?? status;
+}
+
+// ---------- HuginnIssue phase(PascalCase) → status-dot 클래스 + 한국어 라벨 (단일 소스) ----------
+// 서버 전용 lib/incidents.ts 의 PHASE_TO_STATUS 와 같은 매핑이지만, "use client" 컴포넌트가
+// 직접 import 할 수 있도록 여기에 둔다(서버 모듈은 클라이언트에서 import 불가).
+const PHASE_TO_STATUS: Record<string, string> = {
+  Pending: "queued",
+  Queued: "queued",
+  Running: "running",
+  AwaitingApproval: "awaiting",
+  Succeeded: "succeeded",
+  Failed: "failed",
+  Cancelled: "cancelled",
+};
+const PHASE_LABEL: Record<string, string> = {
+  Pending: "대기",
+  Queued: "대기",
+  Running: "진행 중",
+  AwaitingApproval: "승인 대기",
+  Succeeded: "완료",
+  Failed: "실패",
+  Cancelled: "취소",
+};
+
+// ---------- 앱 슬러그 → 이니셜 (단일 소스) ----------
+// "foo-bar-baz" → "FB" (하이픈 구분 토큰의 첫 글자 2개 대문자). 빈 입력은 빈 문자열.
+function appInitials(name: string): string {
+  return name.split("-").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
+}
+
 // ---------- RuneGlyph ----------
 const RUNES = {
   dashboard: "ᛟ",  // Othala — homeland
@@ -53,23 +93,10 @@ function RuneGlyph({ name }: any) {
 // ===========================================================
 //  Raven Logos — Huginn (사고) & Muninn (기억)
 // ===========================================================
-//   Heavier raven character:
-//     · long massive beak with hook
-//     · jagged throat hackle
-//     · wedge tail
-//     · solid silhouette, one color
-//   Huginn (right-facing) + spark above   ·  Muninn (left-facing) + dashed orbit
-
-// ===========================================================
-//  Raven Logos — Huginn (사고) & Muninn (기억)
-// ===========================================================
-//  Stocky perched raven inspired by classic corvid heraldry:
-//    · large rounded body, back arched up over shoulder
-//    · smaller head atop, heavy hooked beak forward
-//    · tail wedge extending back/down past body
-//    · jagged throat hackle, two thin legs on ground mound
-//    · color: --on-surface (near-black, theme-aware)
-//    · differentiator: spark above head (Huginn) or dashed orbit (Muninn)
+//  RavenSilhouette: single closed silhouette path, profile facing LEFT,
+//  one color (--on-surface, theme-aware), optional ground line + two legs.
+//  Huginn = silhouette as-is + spark above head.
+//  Muninn = same silhouette mirrored to face right + dashed orbit (memory).
 
 function RavenSilhouette({ color, withGround = true }: any) {
   return (
@@ -151,29 +178,6 @@ function MuninnLogo({ size = 64, color, withGlow = true, withGround = true }: an
   );
 }
 
-// Lockup — pair facing inward
-function RavenLockup({ size = 64, withWordmark = true }: any) {
-  const ravenSize = size * 0.78;
-  return (
-    <div style={{display:"inline-flex", alignItems:"center", gap: size * 0.14}}>
-      <MuninnLogo size={ravenSize} withGlow={false}/>
-      {withWordmark && (
-        <span style={{
-          fontFamily:"var(--font-sans)",
-          fontWeight: 800,
-          fontSize: size * 0.4,
-          color: "var(--on-surface)",
-          letterSpacing: "-0.04em",
-          lineHeight: 1,
-        }}>
-          &amp;
-        </span>
-      )}
-      <HuginnLogo size={ravenSize} withGlow={false}/>
-    </div>
-  );
-}
-
 // Backwards-compat
 function RavenMark({ which = "huginn", size = 16, color }: any) {
   const Comp = which === "muninn" ? MuninnLogo : HuginnLogo;
@@ -246,11 +250,6 @@ function JsonViewer({ data, collapsed = false }: any) {
   return (
     <div className="hm-tool-body" dangerouslySetInnerHTML={{__html: highlightJson(data)}}/>
   );
-}
-
-// ---------- Sparkline (improved) ----------
-function HmSpark({ data, w = 80, h = 22, color = "var(--huginn-500)", fill = true }: any) {
-  return <Sparkline data={data} w={w} h={h} color={color} fill={fill}/>;
 }
 
 // ---------- StackedBars (run flow) ----------
@@ -369,28 +368,10 @@ function HmCard({ title, meta, children, action, flush }: any) {
   );
 }
 
-// ---------- Announcement banner ----------
-function HmAnnounce({ tone = "info", icon, title, desc, actionLabel, onAction, onDismiss }: any) {
-  const [open, setOpen] = useS_HM(true);
-  if (!open) return null;
-  const defaultIcon = tone === "warning" ? "alert" : tone === "success" ? "checkCircle" : "sparkle";
-  return (
-    <div className={`hm-announce tone-${tone}`} role="status">
-      <span className="ico"><Icon name={icon || defaultIcon} size={16}/></span>
-      <div className="body">
-        {title && <div className="title">{title}</div>}
-        {desc && <div className="desc">{desc}</div>}
-      </div>
-      <div className="actions">
-        {actionLabel && <a href="#" onClick={e => { e.preventDefault(); onAction?.(); }}>{actionLabel}</a>}
-        <IconButton icon="close" size="sm" onClick={() => { setOpen(false); onDismiss?.(); }}/>
-      </div>
-    </div>
-  );
-}
-
-export { fmtMoney, fmtMoneyK, fmtTokens, fmtDuration, fmtTimeAgo, fmtClock,
-  StatusDot, StatusLabel, RuneGlyph, RavenMark, HuginnLogo, MuninnLogo, RavenLockup, BrandLogo,
-  Meter, JsonViewer, HmSpark, StackedBars, HealthDots,
-  HmPageHead, HmKpi, HmCard, highlightJson, HmAnnounce,
+export { fmtMoney, fmtTokens, fmtDuration, fmtTimeAgo, fmtClock,
+  StatusDot, StatusLabel, runStatusLabel, RUN_STATUS_LABEL,
+  PHASE_TO_STATUS, PHASE_LABEL, appInitials, escapeHtml,
+  RuneGlyph, RavenMark, HuginnLogo, MuninnLogo, BrandLogo,
+  Meter, JsonViewer, StackedBars, HealthDots,
+  HmPageHead, HmKpi, HmCard, highlightJson,
 };

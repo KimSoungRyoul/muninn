@@ -11,7 +11,7 @@
 import * as k8s from "./k8s";
 import { recordIncident } from "./db";
 import { APPS, EVENTS, LIVE_RUNS, RECENT_RUNS } from "./data";
-import type { RunStatus } from "./types";
+import type { Run, RunStatus } from "./types";
 
 // ---- CR phase(PascalCase) → 콘솔 status(소문자) 매핑(설계 §3.4) ----
 const PHASE_TO_STATUS: Record<string, RunStatus> = {
@@ -115,16 +115,20 @@ function isLabelSafe(v: string): boolean {
   return v.length <= 63 && LABEL_VALUE_RE.test(v);
 }
 
+// approval.expiresAt 경과 판정의 단일 술어 — 표시(approvalState)와 차단(loadApprovableRun)이 공유해
+// 만료 규칙(<= 비교·파싱 가정)이 한쪽만 바뀌어 어긋나는 것을 막는다.
+function isApprovalExpired(approval: any): boolean {
+  const expiresAt = approval?.expiresAt;
+  return !!expiresAt && Date.parse(expiresAt) <= Date.now();
+}
+
 // approval.state 의 표시값을 lazy 계산한다. 만료 자동집행 데몬이 없어 CR 의 approval.state 는
 // 만료 후에도 "Pending" 으로 남으므로, expiresAt 경과 시 노출값만 "Expired" 로 계산해 반환한다.
 // (CR 은 패치하지 않는다 — 표시 계산만.) 이러면 runner 폴링이 진짜 만료를 관측해
 // terminalKind="expired" 분기가 살아난다. loadApprovableRun 의 expiresAt 가드와 일관.
 function approvalState(st: any): string | null {
   const state: string | null = st?.approval?.state ?? null;
-  if (state === "Pending") {
-    const expiresAt = st?.approval?.expiresAt;
-    if (expiresAt && Date.parse(expiresAt) <= Date.now()) return "Expired";
-  }
+  if (state === "Pending" && isApprovalExpired(st?.approval)) return "Expired";
   return state;
 }
 
@@ -148,6 +152,53 @@ function runView(cr: any): RunVM {
     approvalDecidedBy: st.approval?.decidedBy ?? null,
     startedAt: st.startedAt ?? null,
     source: "k8s",
+  };
+}
+
+// mock Run(lib/data) → RunVM 단일 변환점 — runView(cr)(실데이터)와 짝. 세 mock 폴백 경로가 공유해
+// approval 정규화·source:"mock" 표식 드리프트를 막는다. issue 만 호출부마다 다르다(없으면 null).
+function mockRunView(r: Run, issue: string | null = null): RunVM {
+  return {
+    id: r.id,
+    app: r.app,
+    status: r.status,
+    phase: r.status,
+    step: r.step,
+    max: r.max,
+    cost: r.cost,
+    output: r.output,
+    issue,
+    namespace: ns(),
+    approval: r.status === "awaiting" ? "Pending" : null,
+    startedAt: r.started,
+    source: "mock",
+  };
+}
+
+// RunVM → 콘솔 Run row 정규화(started/duration 보강 — VM 은 startedAt 만 가진다).
+// /api/runs 와 /api/apps/[id] 가 공유한다. source 태그는 호출부에서 spread.
+export interface ConsoleRunRow {
+  id: string;
+  app: string;
+  status: RunStatus;
+  step: number | null;
+  max: number;
+  cost: number;
+  duration: number;
+  started: string;
+  output: string | null;
+}
+export function runVmToConsoleRow(v: RunVM): ConsoleRunRow {
+  return {
+    id: v.id,
+    app: v.app,
+    status: v.status,
+    step: v.step,
+    max: v.max,
+    cost: v.cost,
+    duration: v.startedAt ? Math.max(0, Math.floor((Date.now() - new Date(v.startedAt).getTime()) / 1000)) : 0,
+    started: v.startedAt ?? new Date().toISOString(),
+    output: v.output,
   };
 }
 
@@ -212,12 +263,7 @@ export async function queryIncidents(opts: { status?: "active" | "all"; app?: st
     for (const r of [...LIVE_RUNS, ...RECENT_RUNS]) if (!runById.has(r.id)) runById.set(r.id, r);
     return EVENTS.filter((e) => !opts.app || e.app === opts.app)
       .map<IncidentVM>((e) => {
-        const runs = e.runIds.map((id) => runById.get(id)).filter(Boolean).map((r: any) => ({
-          id: r.id, app: r.app, status: r.status as RunStatus, phase: r.status,
-          step: r.step, max: r.max, cost: r.cost, output: r.output,
-          issue: e.id, namespace: ns(), approval: r.status === "awaiting" ? "Pending" : null,
-          startedAt: r.started, source: "mock" as DataSource,
-        }));
+        const runs = e.runIds.map((id) => runById.get(id)).filter(Boolean).map((r: Run) => mockRunView(r, e.id));
         const phase = runs.some((r) => r.status === "running" || r.status === "queued") ? "Running"
           : runs.some((r) => r.status === "awaiting") ? "AwaitingApproval"
           : runs.some((r) => r.status === "succeeded") ? "Succeeded" : "Failed";
@@ -271,11 +317,7 @@ export async function listRunsVM(opts: { status?: RunStatus; app?: string } = {}
   const mock = (): RunVM[] => {
     const byId = new Map<string, any>();
     for (const r of [...LIVE_RUNS, ...RECENT_RUNS]) if (!byId.has(r.id)) byId.set(r.id, r);
-    return [...byId.values()].map((r: any) => ({
-      id: r.id, app: r.app, status: r.status, phase: r.status, step: r.step, max: r.max,
-      cost: r.cost, output: r.output, issue: null, namespace: ns(),
-      approval: r.status === "awaiting" ? "Pending" : null, startedAt: r.started, source: "mock" as DataSource,
-    }));
+    return [...byId.values()].map((r: Run) => mockRunView(r));
   };
 
   // app 필터는 muninn.io/agent 라벨로 서버측 축소(풀 덤프 회피). status(phase)는 라벨이 아니라 JS 필터.
@@ -356,11 +398,7 @@ export async function getRunStatus(runId: string): Promise<RunVM | null> {
   if (!k8s.k8sEnabled()) {
     const all = [...LIVE_RUNS, ...RECENT_RUNS].find((r) => r.id === runId);
     if (!all) return null;
-    return {
-      id: all.id, app: all.app, status: all.status, phase: all.status, step: all.step, max: all.max,
-      cost: all.cost, output: all.output, issue: null, namespace: ns(),
-      approval: all.status === "awaiting" ? "Pending" : null, startedAt: all.started, source: "mock",
-    };
+    return mockRunView(all);
   }
   try {
     return runView(await k8s.getHuginnRun(ns(), runId));
@@ -536,8 +574,7 @@ async function loadApprovableRun(runId: string): Promise<{ cr: any } | DecisionR
     return { ok: false, runId, reason: "invalid-state", phase, approvalState };
   }
   // 만료(expiresAt) 경과 차단 — operator/web 어느 쪽이든 만료 강제.
-  const expiresAt = st.approval?.expiresAt;
-  if (expiresAt && Date.parse(expiresAt) <= Date.now()) {
+  if (isApprovalExpired(st.approval)) {
     return { ok: false, runId, reason: "expired", phase, approvalState };
   }
   return { cr };

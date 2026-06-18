@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/KimSoungRyoul/muninn/huginnSelfRuntime/internal/strutil"
 )
 
 // Client 는 Muninn API/메모리 엔드포인트로의 보고/회상/저장/승인 폴링을 담당한다.
@@ -100,7 +102,7 @@ func (c *Client) httpJSON(method, url string, body any, retries int, deadline ti
 			// 이 검사가 없으면 5xx + 유효 JSON 이 '성공'으로 처리되어 terminal 보고 재시도가 누락되고
 			// Report 가 거짓 성공(true)을 반환해 incident 가 running 에 고착된다(SPI §2.6 exactly-once 도달 위반).
 			if status/100 != 2 {
-				lastErr = fmt.Errorf("HTTP %d: %s", status, truncateStr(string(raw), 300))
+				lastErr = fmt.Errorf("HTTP %d: %s", status, strutil.Truncate(string(raw), 300))
 			} else {
 				if len(raw) == 0 {
 					raw = []byte("{}")
@@ -224,13 +226,6 @@ func (c *Client) ApprovalState(deadline time.Time) string {
 	}
 	res, _ := c.httpJSON("GET", url, nil, retries, deadline)
 	return parseApprovalState(res)
-}
-
-func truncateStr(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
-	}
-	return s
 }
 
 func parseApprovalState(obj map[string]any) string {

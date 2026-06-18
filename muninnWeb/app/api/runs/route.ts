@@ -7,7 +7,7 @@ import { NextRequest } from "next/server";
 import { ok } from "@/lib/api";
 import { LIVE_RUNS, RECENT_RUNS } from "@/lib/data";
 import { k8sEnabled } from "@/lib/k8s";
-import { listRunsVM } from "@/lib/incidents";
+import { listRunsVM, runVmToConsoleRow } from "@/lib/incidents";
 import type { RunStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -23,18 +23,7 @@ export async function GET(req: NextRequest) {
     try {
       const vms = await listRunsVM({ status: (status as RunStatus) || undefined, app: app || undefined });
       // RunVM → 콘솔 Run 형태 정규화(started/duration 보강 — VM 은 startedAt 만 가진다).
-      const rows = vms.map((v) => ({
-        id: v.id,
-        app: v.app,
-        status: v.status,
-        step: v.step,
-        max: v.max,
-        cost: v.cost,
-        duration: v.startedAt ? Math.max(0, Math.floor((Date.now() - new Date(v.startedAt).getTime()) / 1000)) : 0,
-        started: v.startedAt ?? new Date().toISOString(),
-        output: v.output,
-        source: "k8s" as const,
-      }));
+      const rows = vms.map((v) => ({ ...runVmToConsoleRow(v), source: "k8s" as const }));
       return ok(rows);
     } catch (e) {
       console.warn("[muninn] /api/runs: k8s 조회 실패 — mock fallback", e);

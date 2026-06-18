@@ -2,6 +2,7 @@
 import React from "react";
 import { Icon } from "@/components/icons";
 import { Button } from "@/components/ui";
+import { escapeHtml } from "@/components/common";
 
 // ===================================================================
 // Lightweight Markdown renderer + editor modal for Huginn document
@@ -11,10 +12,6 @@ import { Button } from "@/components/ui";
 // ===================================================================
 
 const { useState: useS_MD, useEffect: useE_MD, useRef: useR_MD } = React;
-
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 // 속성값으로 안전하게 넣기 — 따옴표까지 escape 해 속성 경계 탈출(=> 임의 속성 주입)을 차단.
 function escapeAttr(s) {

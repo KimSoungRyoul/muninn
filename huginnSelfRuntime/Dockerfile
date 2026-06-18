@@ -8,7 +8,6 @@
 # 기존 agent-runtime 이미지와 동일 계열)을 따른다 — 사내 배포 시 mona-public p_success base 로 치환.
 FROM golang:1.25-bookworm AS build
 WORKDIR /src
-COPY go.mod ./
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/huginn-self .
 

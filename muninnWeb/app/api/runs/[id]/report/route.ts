@@ -17,7 +17,7 @@
 // K8s 측 Issue/Run 은 단일 네임스페이스로 섞인다. CR 네임스페이스 분리는 후속 작업이다(별도 이슈).
 
 import { NextRequest } from "next/server";
-import { ok, badRequest } from "@/lib/api";
+import { ok, parseJsonBody } from "@/lib/api";
 import { requireAuth } from "@/lib/auth";
 import { patchRunStatus, patchIssueStatus, getHuginnRun, k8sEnabled, DEFAULT_NAMESPACE } from "@/lib/k8s";
 import { getRunStatus, normalizeRecalledMemoryIds, buildApprovalRequest, isTerminalPhase } from "@/lib/incidents";
@@ -32,12 +32,8 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   const denied = await requireAuth(req, { allowConsole: false });
   if (denied) return denied;
   const runName = params.id;
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("invalid JSON body");
-  }
+  const body = await parseJsonBody(req);
+  if (body instanceof Response) return body;
 
   // issueName 은 항상 string 으로만 다룬다(outcome/awaiting/incident 종결의 단일 기준).
   const issueName = typeof body.issueName === "string" && body.issueName ? body.issueName : null;

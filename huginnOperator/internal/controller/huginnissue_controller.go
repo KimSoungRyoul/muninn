@@ -24,7 +24,6 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -315,7 +314,7 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 	resolved := resolveAgentForRun(agent, issue.Status.EffectiveRuntime, r.ClaudeCodeImage, r.HuginnSelfImage)
 	if resolved.Spec.Agent.Image == "" {
 		return fmt.Errorf("%w: agent %q 의 image 가 비어 있고 runtime=%q 의 operator 기본 이미지도 미설정(--claude-code-image/--huginn-self-image)",
-			errMissingImage, agent.Name, effectiveRuntimeOf(resolved))
+			errMissingImage, agent.Name, resolved.Spec.Agent.Runtime)
 	}
 
 	run := &muninniov1beta1.HuginnRun{
@@ -347,14 +346,7 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 // 409 conflict→requeue 로 신선한 캐시에서 재집계 — API 가 직접 쓴 issue.status.phase(예: report route 의
 // AwaitingApproval)를 stale run 캐시 기반 집계가 역전시키는 race 를 막는다.
 func (r *HuginnIssueReconciler) patchStatus(ctx context.Context, base, issue *muninniov1beta1.HuginnIssue) (ctrl.Result, error) {
-	if err := r.Status().Patch(ctx, issue, client.MergeFromWithOptions(base,
-		client.MergeFromWithOptimisticLock{})); err != nil {
-		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{}, nil
+	return patchStatusObj(ctx, r.Client, base, issue)
 }
 
 // backoffReady 는 직전 실패 Run 의 finishedAt 기준으로 재시도 대기를 판정한다(§2.1).
@@ -427,13 +419,7 @@ func runNames(runs []muninniov1beta1.HuginnRun) []string {
 }
 
 func setIssueCondition(s *muninniov1beta1.HuginnIssue, condType string, status metav1.ConditionStatus, reason, msg string) {
-	apimeta.SetStatusCondition(&s.Status.Conditions, metav1.Condition{
-		Type:               condType,
-		Status:             status,
-		Reason:             reason,
-		Message:            msg,
-		ObservedGeneration: s.Generation,
-	})
+	setCondition(&s.Status.Conditions, s.Generation, condType, status, reason, msg)
 }
 
 func orDefault(v, def string) string {

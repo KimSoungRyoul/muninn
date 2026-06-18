@@ -7,7 +7,7 @@
 
 import * as React from "react";
 import { Icon } from "@/components/icons";
-import { HmPageHead, HmCard, StatusLabel, fmtMoney, fmtTimeAgo } from "@/components/common";
+import { HmPageHead, HmCard, StatusLabel, fmtMoney, fmtTimeAgo, runStatusLabel, appInitials, PHASE_TO_STATUS, PHASE_LABEL } from "@/components/common";
 import { Badge, Chip, Empty, Button } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useApi } from "@/lib/use-api";
@@ -27,22 +27,66 @@ interface IncidentVM {
 const SEV_TONE: Record<string, any> = { critical: "error", error: "error", warning: "warning", info: "info" };
 const SOURCE_LABEL: Record<string, string> = { manual: "대화형", grafana: "Grafana", airflow: "Airflow", argocd: "ArgoCD" };
 
-// HuginnIssue phase(PascalCase) → status-dot 클래스 + 한국어 라벨.
-const PHASE_MAP: Record<string, { status: string; label: string }> = {
-  Pending: { status: "queued", label: "대기" },
-  Running: { status: "running", label: "진행 중" },
-  AwaitingApproval: { status: "awaiting", label: "승인 대기" },
-  Succeeded: { status: "succeeded", label: "완료" },
-  Failed: { status: "failed", label: "실패" },
-  Cancelled: { status: "cancelled", label: "취소" },
-};
-const RUN_LABEL: Record<string, string> = {
-  queued: "대기", running: "실행 중", awaiting: "승인 대기",
-  succeeded: "성공", failed: "실패", cancelled: "취소",
-};
+// HuginnIssue phase(PascalCase) → status-dot 클래스 + 한국어 라벨(공용 PHASE_TO_STATUS/PHASE_LABEL 조합).
+// 미지의 phase 는 status="queued" + 원문 phase 라벨로 폴백.
+function phaseDisplay(phase: string): { status: string; label: string } {
+  return { status: PHASE_TO_STATUS[phase] ?? "queued", label: PHASE_LABEL[phase] ?? phase };
+}
 
-function appInitials(name: string) {
-  return name.split("-").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
+// ---- 공유 렌더 블록(목록 카드 ↔ 상세 카드 중복 제거) ----
+// 대처(HuginnRun) 목록 표 — 없으면 "생성 대기 중…" 폴백.
+function IncidentRunsTable({ runs, onOpenRun }: { runs: RunVM[]; onOpenRun?: (id: string) => void }) {
+  if (runs.length === 0) {
+    return (
+      <div className="dim" style={{ marginTop: 12, fontSize: 12.5, padding: "8px 0" }}>
+        대처(HuginnRun) 생성 대기 중…
+      </div>
+    );
+  }
+  return (
+    <table className="hm-table" style={{ marginTop: 12 }}>
+      <thead>
+        <tr>
+          <th>Run</th><th>상태</th><th>단계</th><th>비용</th><th>결과</th>
+        </tr>
+      </thead>
+      <tbody>
+        {runs.map((r) => (
+          <tr key={r.id} onClick={() => onOpenRun?.(r.id)} style={{ cursor: onOpenRun ? "pointer" : "default" }}>
+            <td><span className="hm-mono" style={{ fontSize: 12.5 }}>{r.id}</span></td>
+            <td><StatusLabel status={r.status}>{runStatusLabel(r.status)}{r.approval ? ` · ${r.approval}` : ""}</StatusLabel></td>
+            <td className="hm-mono">{r.step != null ? `${r.step}/${r.max}` : `–/${r.max}`}</td>
+            <td className="hm-mono">{fmtMoney(r.cost)}</td>
+            <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {r.output || <span className="dim">–</span>}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+// 사건 헤더(아바타 + app/issue + severity/source/phase 배지). 목록·상세 공용.
+function IncidentCardHeader({ inc, ph }: { inc: IncidentVM; ph: { status: string; label: string } }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 32, height: 32, borderRadius: 8, background: "var(--primary-95)", color: "var(--primary-40)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
+          {appInitials(inc.app)}
+        </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span className="app-link" style={{ fontWeight: 700 }}>{inc.app}</span>
+          <span className="hm-mono dim" style={{ fontSize: 11.5 }}>{inc.issue}</span>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Badge tone={SEV_TONE[inc.severity] ?? "default"}>{inc.severity}</Badge>
+        <Badge tone="default">{SOURCE_LABEL[inc.source] ?? inc.source}</Badge>
+        <StatusLabel status={ph.status}>{ph.label}</StatusLabel>
+      </div>
+    </div>
+  );
 }
 
 export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void }) {
@@ -111,26 +155,11 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {visible.map((inc) => {
-          const ph = PHASE_MAP[inc.phase] ?? { status: "queued", label: inc.phase };
+          const ph = phaseDisplay(inc.phase);
           return (
             <HmCard key={inc.issue}>
               {/* 헤더: 앱 + severity + source + phase */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ width: 32, height: 32, borderRadius: 8, background: "var(--primary-95)", color: "var(--primary-40)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
-                    {appInitials(inc.app)}
-                  </span>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <span className="app-link" style={{ fontWeight: 700 }}>{inc.app}</span>
-                    <span className="hm-mono dim" style={{ fontSize: 11.5 }}>{inc.issue}</span>
-                  </div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <Badge tone={SEV_TONE[inc.severity] ?? "default"}>{inc.severity}</Badge>
-                  <Badge tone="default">{SOURCE_LABEL[inc.source] ?? inc.source}</Badge>
-                  <StatusLabel status={ph.status}>{ph.label}</StatusLabel>
-                </div>
-              </div>
+              <IncidentCardHeader inc={inc} ph={ph} />
 
               {/* 목표 + 메타 */}
               <div style={{ marginTop: 10, fontSize: 13.5, color: "var(--on-surface)" }}>{inc.title || inc.goal}</div>
@@ -141,32 +170,7 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
               </div>
 
               {/* 대처(HuginnRun) 목록 */}
-              {inc.runs.length > 0 ? (
-                <table className="hm-table" style={{ marginTop: 12 }}>
-                  <thead>
-                    <tr>
-                      <th>Run</th><th>상태</th><th>단계</th><th>비용</th><th>결과</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {inc.runs.map((r) => (
-                      <tr key={r.id} onClick={() => onOpenRun?.(r.id)} style={{ cursor: onOpenRun ? "pointer" : "default" }}>
-                        <td><span className="hm-mono" style={{ fontSize: 12.5 }}>{r.id}</span></td>
-                        <td><StatusLabel status={r.status}>{RUN_LABEL[r.status] ?? r.status}{r.approval ? ` · ${r.approval}` : ""}</StatusLabel></td>
-                        <td className="hm-mono">{r.step != null ? `${r.step}/${r.max}` : `–/${r.max}`}</td>
-                        <td className="hm-mono">{fmtMoney(r.cost)}</td>
-                        <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {r.output || <span className="dim">–</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="dim" style={{ marginTop: 12, fontSize: 12.5, padding: "8px 0" }}>
-                  대처(HuginnRun) 생성 대기 중…
-                </div>
-              )}
+              <IncidentRunsTable runs={inc.runs} onOpenRun={onOpenRun} />
             </HmCard>
           );
         })}
@@ -208,7 +212,7 @@ export function HmIncidentDetail({
     return () => clearInterval(t);
   }, [inc, load]);
 
-  const ph = inc ? (PHASE_MAP[inc.phase] ?? { status: "queued", label: inc.phase }) : null;
+  const ph = inc ? phaseDisplay(inc.phase) : null;
 
   return (
     <div className="hm-page">
@@ -226,22 +230,7 @@ export function HmIncidentDetail({
 
       {inc && !loading && ph && (
         <HmCard>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ width: 32, height: 32, borderRadius: 8, background: "var(--primary-95)", color: "var(--primary-40)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
-                {appInitials(inc.app)}
-              </span>
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <span className="app-link" style={{ fontWeight: 700 }}>{inc.app}</span>
-                <span className="hm-mono dim" style={{ fontSize: 11.5 }}>{inc.issue}</span>
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <Badge tone={SEV_TONE[inc.severity] ?? "default"}>{inc.severity}</Badge>
-              <Badge tone="default">{SOURCE_LABEL[inc.source] ?? inc.source}</Badge>
-              <StatusLabel status={ph.status}>{ph.label}</StatusLabel>
-            </div>
-          </div>
+          <IncidentCardHeader inc={inc} ph={ph} />
 
           <div style={{ marginTop: 10, fontSize: 13.5, color: "var(--on-surface)" }}>{inc.title || inc.goal}</div>
           {inc.goal && inc.goal !== inc.title && (
@@ -254,30 +243,7 @@ export function HmIncidentDetail({
             {inc.outcome && <span>결과 {inc.outcome}</span>}
           </div>
 
-          {inc.runs.length > 0 ? (
-            <table className="hm-table" style={{ marginTop: 12 }}>
-              <thead>
-                <tr><th>Run</th><th>상태</th><th>단계</th><th>비용</th><th>결과</th></tr>
-              </thead>
-              <tbody>
-                {inc.runs.map((r) => (
-                  <tr key={r.id} onClick={() => onOpenRun?.(r.id)} style={{ cursor: onOpenRun ? "pointer" : "default" }}>
-                    <td><span className="hm-mono" style={{ fontSize: 12.5 }}>{r.id}</span></td>
-                    <td><StatusLabel status={r.status}>{RUN_LABEL[r.status] ?? r.status}{r.approval ? ` · ${r.approval}` : ""}</StatusLabel></td>
-                    <td className="hm-mono">{r.step != null ? `${r.step}/${r.max}` : `–/${r.max}`}</td>
-                    <td className="hm-mono">{fmtMoney(r.cost)}</td>
-                    <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {r.output || <span className="dim">–</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="dim" style={{ marginTop: 12, fontSize: 12.5, padding: "8px 0" }}>
-              대처(HuginnRun) 생성 대기 중…
-            </div>
-          )}
+          <IncidentRunsTable runs={inc.runs} onOpenRun={onOpenRun} />
         </HmCard>
       )}
     </div>

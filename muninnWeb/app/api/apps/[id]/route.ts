@@ -1,9 +1,9 @@
 import { NextRequest } from "next/server";
-import { ok, notFound, badRequest } from "@/lib/api";
+import { ok, notFound, badRequest, parseJsonBody } from "@/lib/api";
 import { requireAuth } from "@/lib/auth";
 import { APPS, EVENTS, RECENT_RUNS } from "@/lib/data";
 import { k8sEnabled } from "@/lib/k8s";
-import { getApplicationCr, listRunsVM } from "@/lib/incidents";
+import { getApplicationCr, listRunsVM, runVmToConsoleRow } from "@/lib/incidents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,11 +33,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
         lastRun: null,
         cost7d: 0,
         eventCount: 0,
-        runs: runsVm.map((v) => ({
-          id: v.id, app: v.app, status: v.status, step: v.step, max: v.max, cost: v.cost,
-          duration: v.startedAt ? Math.max(0, Math.floor((Date.now() - new Date(v.startedAt).getTime()) / 1000)) : 0,
-          started: v.startedAt ?? new Date().toISOString(), output: v.output,
-        })),
+        runs: runsVm.map(runVmToConsoleRow),
         source: "k8s",
       });
     } catch (e) {
@@ -66,12 +62,8 @@ export async function PATCH(req: NextRequest, props: { params: Promise<{ id: str
   const app: any = APPS.find((a) => a.id === id);
   if (!app) return notFound("application not found");
 
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("invalid JSON body");
-  }
+  const body = await parseJsonBody(req);
+  if (body instanceof Response) return body;
 
   const agent = body?.agent;
   if (agent !== undefined) {

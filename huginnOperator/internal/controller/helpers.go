@@ -17,14 +17,45 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 )
+
+// setCondition 은 Operator 소유의 status.conditions 에 condition 을 멱등 반영한다(§2.2).
+// setRunCondition / setIssueCondition 및 HuginnAgent reconcile 의 공통 본문 — ObservedGeneration 포함.
+func setCondition(conds *[]metav1.Condition, gen int64, condType string, status metav1.ConditionStatus, reason, msg string) {
+	apimeta.SetStatusCondition(conds, metav1.Condition{
+		Type:               condType,
+		Status:             status,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: gen,
+	})
+}
+
+// patchStatusObj 는 Operator 소유 필드만 optimistic-lock merge-patch 로 반영한다(§2.2). 409 conflict 는
+// 정상(다른 writer 가 그사이 status 갱신) → 조용히 requeue. HuginnRun/HuginnIssue 의 patchStatus 공통 본문.
+func patchStatusObj(ctx context.Context, c client.Client, base, obj client.Object) (ctrl.Result, error) {
+	if err := c.Status().Patch(ctx, obj, client.MergeFromWithOptions(base,
+		client.MergeFromWithOptimisticLock{})); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
 
 // 공통 라벨/어노테이션/이름 규약(설계서 §6.1, §5.1, 예제 YAML).
 const (

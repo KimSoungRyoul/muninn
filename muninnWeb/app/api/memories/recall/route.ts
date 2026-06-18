@@ -3,7 +3,7 @@
 // agent-runtime 은 MUNINN_MEMORY_ENDPOINT 로 위임 직전 회상에 쓴다(설계 §3.1/§7.1).
 
 import { NextRequest } from "next/server";
-import { ok, badRequest, serverError } from "@/lib/api";
+import { ok, serverError, parseJsonBody } from "@/lib/api";
 import { requireAuth } from "@/lib/auth";
 import { dbEnabled, recall } from "@/lib/db";
 import { workspaceFromRequest } from "@/lib/workspace";
@@ -17,12 +17,8 @@ export async function POST(req: NextRequest) {
   const denied = await requireAuth(req);
   if (denied) return denied;
   if (!dbEnabled()) return ok({ count: 0, items: [], note: "db-disabled" });
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return badRequest("invalid JSON body");
-  }
+  const body = await parseJsonBody(req);
+  if (body instanceof Response) return body;
   try {
     // 멀티테넌시(CONTRACT §2/§C3): 인증된 요청만 클라이언트 workspace 헤더 신뢰, 미인증 콘솔은 서버 기본값.
     const workspace = await workspaceFromRequest(req, body?.workspace);

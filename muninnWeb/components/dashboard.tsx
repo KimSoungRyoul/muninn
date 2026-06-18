@@ -2,7 +2,7 @@
 import React from "react";
 import { Icon } from "@/components/icons";
 import { Button, Tabs, Empty } from "@/components/ui";
-import { HmPageHead, HmKpi, HmCard, StackedBars, StatusLabel, fmtMoney, fmtDuration, fmtTimeAgo } from "@/components/common";
+import { HmPageHead, HmKpi, HmCard, StackedBars, StatusLabel, fmtMoney, fmtDuration, fmtTimeAgo, runStatusLabel } from "@/components/common";
 import { DEMO_NOW } from "@/lib/demo-clock";
 import { useApi } from "@/lib/use-api";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -124,8 +124,8 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
             )}
             {liveRuns.map(r => (
               <tr key={r.id} onClick={() => onOpenRun(r.id)} className={r.id === "run_82c0f1a" ? "hm-row-arrival" : ""}>
-                <td><StatusLabel status={r.status === "running" ? "running" : r.status === "awaiting" ? "awaiting" : r.status === "queued" ? "queued" : r.status}>
-                  {r.status === "running" ? "실행 중" : r.status === "awaiting" ? "승인 대기" : r.status === "queued" ? "대기 중" : r.status}
+                <td><StatusLabel status={r.status}>
+                  {runStatusLabel(r.status)}
                 </StatusLabel></td>
                 <td><span className="app-link">{r.app}</span></td>
                 <td className="mono">{r.step != null ? `${r.step}/${r.max}` : "—"}</td>
