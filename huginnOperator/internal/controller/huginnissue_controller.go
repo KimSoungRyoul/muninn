@@ -54,6 +54,10 @@ type HuginnIssueReconciler struct {
 	Scheme         *runtime.Scheme
 	MemoryEndpoint string
 	APIEndpoint    string
+	// ClaudeCodeImage/HuginnSelfImage: agent.image 가 비었을 때 쓸 runtime 별 기본 이미지(§10-5,
+	// --claude-code-image/--huginn-self-image). 둘 다 비고 agent.image 도 비면 Run 생성을 거부한다.
+	ClaudeCodeImage string
+	HuginnSelfImage string
 }
 
 // +kubebuilder:rbac:groups=muninn.io,resources=huginnissues,verbs=get;list;watch;create;update;patch;delete
@@ -126,10 +130,23 @@ func (r *HuginnIssueReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// 최초 Run 생성(resume 없음 — 새 세션).
 	if len(runs) == 0 {
+		// effectiveRuntime 동결(§5·§10-9, record-first): Run 을 만들기 *전* 에 백엔드를 status 에 1회 기록한다.
+		// createRun 이 create 와 status patch 사이에 죽어도, 다음 reconcile 이 동결값을 보고 같은 백엔드로
+		// attempt 를 잇는다(라이브 agent.runtime 재스냅샷 race·cross-backend resume 손상 방지).
+		if issue.Status.EffectiveRuntime == "" {
+			issue.Status.EffectiveRuntime = effectiveRuntimeOf(&agent)
+			if err := r.Status().Patch(ctx, &issue, client.MergeFrom(base)); err != nil {
+				if apierrors.IsConflict(err) {
+					return ctrl.Result{Requeue: true}, nil
+				}
+				return ctrl.Result{}, err
+			}
+			base = issue.DeepCopy() // 이후 patchStatus 의 optimistic lock 이 stale RV 로 409 나지 않게 갱신.
+		}
 		if err := r.createRun(ctx, &issue, &agent, 1, ""); err != nil {
 			return ctrl.Result{}, err
 		}
-		log.Info("최초 Run 생성", "attempt", 1)
+		log.Info("최초 Run 생성", "attempt", 1, "effectiveRuntime", issue.Status.EffectiveRuntime)
 		issue.Status.Phase = muninniov1beta1.IssuePending
 		issue.Status.ObservedRuns = 1
 		setIssueCondition(&issue, "Reconciled", metav1.ConditionTrue, "RunCreated", "attempt 1 Run 생성됨")
@@ -262,6 +279,15 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 	memEndpoint := orDefault(r.MemoryEndpoint, defaultMemoryEndpoint)
 	apiEndpoint := orDefault(r.APIEndpoint, defaultAPIEndpoint)
 
+	// 백엔드 동결(§5·§10-9) + 이미지 기본값(§10-5): effectiveRuntime(최초 attempt 에서 기록된 동결값)을
+	// 우선 쓰고, agent.image 가 비면 operator 기본 이미지로 채운 사본으로 JobTemplate 을 빌드한다.
+	// 이로써 진행 중 agent.runtime 변경이 같은 Issue 의 후속 attempt 백엔드를 바꾸지 못한다(resume 일치 가드).
+	resolved := resolveAgentForRun(agent, issue.Status.EffectiveRuntime, r.ClaudeCodeImage, r.HuginnSelfImage)
+	if resolved.Spec.Agent.Image == "" {
+		return fmt.Errorf("MissingImage: agent %q 의 image 가 비어 있고 runtime=%q 의 operator 기본 이미지도 미설정(--claude-code-image/--huginn-self-image)",
+			agent.Name, effectiveRuntimeOf(resolved))
+	}
+
 	run := &muninniov1beta1.HuginnRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("%s-a%d", issue.Name, attempt),
@@ -275,7 +301,7 @@ func (r *HuginnIssueReconciler) createRun(ctx context.Context, issue *muninniov1
 			// 60~90m 사이 승인이 60m activeDeadline 에 SIGKILL 당하는 모순을 막는다(CONTRACT §C-HITL).
 			TimeoutSeconds:          runTimeoutSeconds(agent),
 			TTLSecondsAfterFinished: 86400,
-			JobTemplate:             withResumeSession(buildJobTemplate(agent, issue, memEndpoint, apiEndpoint), resumeSessionID),
+			JobTemplate:             withResumeSession(buildJobTemplate(resolved, issue, memEndpoint, apiEndpoint), resumeSessionID),
 		},
 	}
 	if err := controllerutil.SetControllerReference(issue, run, r.Scheme); err != nil {

@@ -65,6 +65,12 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+	// runtime 별 기본 agent 이미지(§10-5): agent.image 가 비면 이 값으로 채운다. flag 미지정 시 env 폴백.
+	var claudeCodeImage, huginnSelfImage string
+	flag.StringVar(&claudeCodeImage, "claude-code-image", os.Getenv("MUNINN_CLAUDE_CODE_IMAGE"),
+		"claude-code 백엔드 기본 agent-runtime 이미지(agent.image 미지정 시).")
+	flag.StringVar(&huginnSelfImage, "huginn-self-image", os.Getenv("MUNINN_HUGINN_SELF_IMAGE"),
+		"huginn-self 백엔드 기본 이미지(agent.image 미지정 시).")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -200,6 +206,9 @@ func main() {
 		// kind/배포에서 operator Deployment env 로 muninn-web 서비스 주소를 주입한다.
 		MemoryEndpoint: os.Getenv("MUNINN_MEMORY_ENDPOINT"),
 		APIEndpoint:    os.Getenv("MUNINN_API_ENDPOINT"),
+		// runtime 별 기본 이미지(§10-5) — agent.image 미지정 시 fallback.
+		ClaudeCodeImage: claudeCodeImage,
+		HuginnSelfImage: huginnSelfImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HuginnIssue")
 		os.Exit(1)

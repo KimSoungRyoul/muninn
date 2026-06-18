@@ -1,0 +1,47 @@
+{
+  "_doc": "SPI 골든 계약(conformance 층1, operator-design §2.2a). runner.build_report_patch/build_recall_payload(Agent→API producer)의 출력과 muninnWeb report route(consumer)의 수용 스키마를 동시에 묶어 cross-language drift 를 막는다. 한쪽이 바뀌면 양쪽 테스트가 실패해야 한다. cost 는 소수 4자리 decimal 문자열, sessionId 는 비어있을 때 생략, terminalKind 는 {rejected,expired,aborted} 화이트리스트, recall score 는 문자열·None 시 생략.",
+  "report": [
+    {
+      "name": "terminal success with session (dry-run PR)",
+      "args": {"step": 3, "cost": 0.09533, "tokens": 18493, "output": "HUGINN_OK", "outcome": "DRY-RUN PR: HUGINN_OK", "failed": false, "session_id": "63059331-d36a-4fa3-b6e7-4364bdb82fe6", "terminal_kind": ""},
+      "expect": {"step": 3, "cost": "0.0953", "tokens": 18493, "output": "HUGINN_OK", "outcome": "DRY-RUN PR: HUGINN_OK", "final": true, "failed": false, "sessionId": "63059331-d36a-4fa3-b6e7-4364bdb82fe6"}
+    },
+    {
+      "name": "rejected (failed=false, terminalKind=rejected)",
+      "args": {"step": 0, "cost": 0, "tokens": 0, "output": "", "outcome": "rejected: alice / not safe", "failed": false, "session_id": "", "terminal_kind": "rejected"},
+      "expect": {"step": 0, "cost": "0.0000", "tokens": 0, "output": "", "outcome": "rejected: alice / not safe", "final": true, "failed": false, "terminalKind": "rejected"}
+    },
+    {
+      "name": "expired (terminalKind=expired)",
+      "args": {"step": 1, "cost": 0, "tokens": 0, "output": "", "outcome": "expired", "failed": false, "session_id": "", "terminal_kind": "expired"},
+      "expect": {"step": 1, "cost": "0.0000", "tokens": 0, "output": "", "outcome": "expired", "final": true, "failed": false, "terminalKind": "expired"}
+    },
+    {
+      "name": "aborted (failed=true, terminalKind=aborted, with session)",
+      "args": {"step": 2, "cost": 1.5, "tokens": 100, "output": "partial work", "outcome": "aborted: cancelled", "failed": true, "session_id": "sess-x", "terminal_kind": "aborted"},
+      "expect": {"step": 2, "cost": "1.5000", "tokens": 100, "output": "partial work", "outcome": "aborted: cancelled", "final": true, "failed": true, "sessionId": "sess-x", "terminalKind": "aborted"}
+    },
+    {
+      "name": "evil terminalKind dropped (whitelist enforced)",
+      "args": {"step": 0, "cost": 0, "tokens": 0, "output": "", "outcome": "", "failed": true, "session_id": "", "terminal_kind": "evil"},
+      "expect": {"step": 0, "cost": "0.0000", "tokens": 0, "output": "", "outcome": "", "final": true, "failed": true}
+    },
+    {
+      "name": "exception failure (no terminalKind, no session)",
+      "args": {"step": 5, "cost": 0.25, "tokens": 4096, "output": "boom", "outcome": "aborted: exception: X", "failed": true, "session_id": "", "terminal_kind": ""},
+      "expect": {"step": 5, "cost": "0.2500", "tokens": 4096, "output": "boom", "outcome": "aborted: exception: X", "final": true, "failed": true}
+    }
+  ],
+  "recall": [
+    {
+      "name": "mixed: float score / missing score / None score / non-dict / no-id",
+      "input": [{"id": "a", "score": 0.9}, {"id": "b"}, {"id": "c", "score": null}, "not-a-dict", {"score": 0.5}],
+      "expect": [{"id": "a", "score": "0.9"}, {"id": "b"}, {"id": "c"}]
+    },
+    {
+      "name": "empty recall",
+      "input": [],
+      "expect": []
+    }
+  ]
+}

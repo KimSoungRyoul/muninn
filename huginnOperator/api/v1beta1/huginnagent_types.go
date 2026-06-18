@@ -191,14 +191,34 @@ type Identity struct {
 
 // AgentSpec 은 에이전트 런타임 설정.
 type AgentSpec struct {
+	// runtime: 실행 백엔드 selector(§1). claude-code(기본·고성능, 게이트웨이 경유 가능) /
+	// huginn-self(opt-in·비-Claude 자체/오픈 모델). Anthropic /v1/messages 호환
+	// 게이트웨이는 claude-code + baseUrl 로 비-Claude 모델까지 구동 가능하다(huginn-self 불요).
+	// +kubebuilder:validation:Enum=claude-code;huginn-self
 	// +kubebuilder:default=claude-code
 	// +optional
 	Runtime string `json:"runtime,omitempty"`
 	// soulRef: SOUL.md(ConfigMap 이름). Operator 가 Run 생성 시 MUNINN_SOUL_REF 로 주입(§8.3)
 	// +optional
 	SoulRef string `json:"soulRef,omitempty"`
-	// image: agent-runtime 컨테이너 이미지
-	Image string `json:"image"`
+	// image: agent-runtime 컨테이너 이미지. 비면 operator 기본 이미지(runtime별 --claude-code-image/
+	// --huginn-self-image)를 사용한다(§10-5). 둘 다 비면 Run 생성 시 거부(MissingImage).
+	// +optional
+	Image string `json:"image,omitempty"`
+	// baseUrl: LLM 게이트웨이 base URL(§3). claude-code 가 ANTHROPIC_BASE_URL 로 받아 Anthropic 호환
+	// 게이트웨이를 경유한다. webhook 은 형식(스킴)만 검증한다.
+	// +kubebuilder:validation:Pattern=`^https?://.+`
+	// +optional
+	BaseURL string `json:"baseUrl,omitempty"`
+	// model: 게이트웨이에서 사용할 모델명(§3). ANTHROPIC_MODEL 로 주입(예: gemma-4-31B-it).
+	// +optional
+	Model string `json:"model,omitempty"`
+	// authStyle: 인증/와이어 방식. claude-code(§3): bearer→ANTHROPIC_AUTH_TOKEN(Bearer),
+	// anthropic→ANTHROPIC_API_KEY(x-api-key). huginn-self(§4): openai→OpenAI 호환 /chat/completions.
+	// 비면 백엔드 기본(claude-code=기존 인증, huginn-self=openai). claude-code+openai 조합은 webhook 이 거부.
+	// +kubebuilder:validation:Enum=anthropic;bearer;openai
+	// +optional
+	AuthStyle string `json:"authStyle,omitempty"`
 }
 
 // HuginnAgentSpec defines the desired state of HuginnAgent.

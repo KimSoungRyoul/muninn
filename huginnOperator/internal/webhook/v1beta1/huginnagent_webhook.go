@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -128,10 +129,65 @@ func validateAgent(obj *muninniov1beta1.HuginnAgent) error {
 		errs = append(errs, field.Invalid(
 			field.NewPath("metadata", "name"), obj.Name, "must match ^[a-z0-9-]+$"))
 	}
+	// §3 게이트웨이 필드 순수 형식 검증(CRD enum/pattern 과 이중 방어, DB 조회 없음).
+	errs = append(errs, validateGateway(&obj.Spec.Agent)...)
+	// §4.2 runtime↔image 정합(느슨) — 명백한 cross-runtime 이미지 모순만 거부. buildJobTemplate 이 최종 백스톱.
+	errs = append(errs, validateRuntimeImage(&obj.Spec.Agent)...)
 	if len(errs) == 0 {
 		return nil
 	}
 	return apierrors.NewInvalid(agentGK(), obj.Name, errs)
+}
+
+// validateRuntimeImage 는 runtime 과 명시된 image 의 명백한 모순만 거부한다(§4.2·§10-11, 느슨한 검증).
+// image 가 비면(operator 기본 이미지 사용) 검증 대상이 아니다. 레포 이미지 네이밍 컨벤션(claude-code=
+// agent-runtime, huginn-self=huginn-self) 기반의 best-effort 휴리스틱이며, 최종 정합은 buildJobTemplate
+// 의 runtime 분기가 보장한다(여기선 운영자의 명백한 오설정만 일찍 잡는다).
+func validateRuntimeImage(a *muninniov1beta1.AgentSpec) field.ErrorList {
+	var errs field.ErrorList
+	if a.Image == "" {
+		return errs
+	}
+	runtime := a.Runtime
+	if runtime == "" {
+		runtime = "claude-code"
+	}
+	p := field.NewPath("spec", "agent", "image")
+	switch runtime {
+	case "huginn-self":
+		if strings.Contains(a.Image, "agent-runtime") {
+			errs = append(errs, field.Invalid(p, a.Image,
+				"runtime=huginn-self 인데 claude-code 이미지(agent-runtime)로 보입니다 — runtime/image 정합 확인"))
+		}
+	case "claude-code":
+		if strings.Contains(a.Image, "huginn-self") {
+			errs = append(errs, field.Invalid(p, a.Image,
+				"runtime=claude-code 인데 huginn-self 이미지로 보입니다 — runtime/image 정합 확인"))
+		}
+	}
+	return errs
+}
+
+var baseURLRe = regexp.MustCompile(`^https?://.+`)
+
+// validateGateway 는 §3 게이트웨이 경유 필드(baseUrl/model/authStyle)의 순수 형식만 검증한다.
+// authStyle 은 anthropic|bearer 만 허용하고, baseUrl 은 http(s) 스킴이어야 한다. runtime=huginn-self
+// 에는 이 필드들이 적용되지 않으므로(§4 별도 분기) 검증을 생략한다 — 미사용 필드로 거부하지 않는다.
+func validateGateway(a *muninniov1beta1.AgentSpec) field.ErrorList {
+	var errs field.ErrorList
+	if a.Runtime != "" && a.Runtime != "claude-code" {
+		return errs
+	}
+	p := field.NewPath("spec", "agent")
+	if a.AuthStyle != "" && a.AuthStyle != "anthropic" && a.AuthStyle != "bearer" {
+		errs = append(errs, field.Invalid(p.Child("authStyle"), a.AuthStyle,
+			"must be one of: anthropic, bearer"))
+	}
+	if a.BaseURL != "" && !baseURLRe.MatchString(a.BaseURL) {
+		errs = append(errs, field.Invalid(p.Child("baseUrl"), a.BaseURL,
+			"must be an http(s) URL"))
+	}
+	return errs
 }
 
 func agentGK() schema.GroupKind {

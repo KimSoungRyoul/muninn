@@ -61,12 +61,12 @@ func TestBuildJobTemplate(t *testing.T) {
 	if jt.Image != "registry.local/agent:0.1.0" {
 		t.Errorf("image = %q", jt.Image)
 	}
-	if jt.ClaudePVCName != "pvc-claude-ai-router-svc" {
-		t.Errorf("claudePVCName = %q", jt.ClaudePVCName)
+	if jt.AgentPVCName != "pvc-agent-ai-router-svc" {
+		t.Errorf("agentPVCName = %q", jt.AgentPVCName)
 	}
-	// ClaudeSubPath=Issue 이름: 앱 PVC 안에서 Issue별 ~/.claude 격리(§5.5).
-	if jt.ClaudeSubPath != "issue-1" {
-		t.Errorf("claudeSubPath = %q, want issue-1", jt.ClaudeSubPath)
+	// AgentSubPath=Issue 이름: 앱 PVC 안에서 Issue별 에이전트 홈 격리(§5.5).
+	if jt.AgentSubPath != "issue-1" {
+		t.Errorf("agentSubPath = %q, want issue-1", jt.AgentSubPath)
 	}
 	if jt.ServiceAccountName != serviceAccountName {
 		t.Errorf("serviceAccountName = %q", jt.ServiceAccountName)
@@ -80,8 +80,8 @@ func TestBuildJobTemplate(t *testing.T) {
 	// requireApproval=true 는 agent.Spec.Source.PR.RequireApprovalOnWorkflowChange 에서 직렬화된 것(HITL 트리거 배선).
 	for _, tc := range []struct{ name, want string }{
 		{"MUNINN_GUARDRAILS", `{"maxIterations":3,"maxCostUsd":5,"maxTokens":100000,"requireApproval":true}`},
-		// MUNINN_APPROVAL_TIMEOUT: HITL 승인 timeout 단일 소스(초) — web TTL·runner 기본(5400)과 정합(CONTRACT §C-HITL).
-		{"MUNINN_APPROVAL_TIMEOUT", "5400"},
+		// MUNINN_APPROVAL_TIMEOUT: HITL 승인 timeout(초) = web TTL(90m) + grace(300s) = 5700(Q7, §10-2).
+		{"MUNINN_APPROVAL_TIMEOUT", "5700"},
 		{"MUNINN_SOUL_REF", "configmap/soul-ai-router-svc"},
 		{"MUNINN_EVENT_PAYLOAD_REF", "secret/issue-1-event"},
 		{"MUNINN_GOAL", "diagnose"},
@@ -105,6 +105,162 @@ func TestBuildJobTemplate(t *testing.T) {
 
 	if gh, ok := envByName(jt.Env, "GITHUB_PAT"); !ok || gh.ValueFrom == nil || gh.ValueFrom.SecretKeyRef.Name != "gh-pat" {
 		t.Error("GITHUB_PAT secretKeyRef(gh-pat) 누락")
+	}
+
+	// §3 게이트웨이 필드 미설정(기본 fixture) → 게이트웨이 env 가 하나도 없어야 한다.
+	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"} {
+		if _, ok := envByName(jt.Env, name); ok {
+			t.Errorf("게이트웨이 미설정인데 %s 가 주입됨", name)
+		}
+	}
+}
+
+// TestAgentRoleRules: SA 최소권한 Role(§6.2-5) 의 보안 불변식 — read-only 진단(pods/log·deployments)만,
+// secrets/configmaps 는 절대 포함하지 않는다(워크스페이스 내 자격 탈취 표면 차단).
+func TestAgentRoleRules(t *testing.T) {
+	rules := agentRoleRules()
+	hasPodsLog, hasDeploy := false, false
+	for _, r := range rules {
+		for _, res := range r.Resources {
+			if res == "secrets" || res == "configmaps" {
+				t.Errorf("agent Role 에 금지 리소스 %q 포함(자격 탈취 표면)", res)
+			}
+			if res == "pods/log" {
+				hasPodsLog = true
+			}
+			if res == "deployments" {
+				hasDeploy = true
+			}
+		}
+		// 모든 verb 는 read-only.
+		for _, v := range r.Verbs {
+			switch v {
+			case "get", "list", "watch":
+			default:
+				t.Errorf("agent Role 에 비-read verb %q 포함(read-only 위반)", v)
+			}
+		}
+	}
+	if !hasPodsLog || !hasDeploy {
+		t.Errorf("agent Role 에 pods/log·deployments read 가 있어야 함 (pods/log=%v deployments=%v)", hasPodsLog, hasDeploy)
+	}
+}
+
+// TestResolveAgentForRun: effectiveRuntime 동결(§5·§10-9) + image 기본값(§10-5) 해소를 검증한다.
+func TestResolveAgentForRun(t *testing.T) {
+	const ccImg, hsImg = "ghcr/agent-runtime:dev", "ghcr/huginn-self:dev"
+
+	// 1) runtime/image 둘 다 이미 확정 → 그대로(사본 불필요, 동일 포인터).
+	a, _ := testFixtures()
+	a.Spec.Agent.Runtime = "claude-code"
+	if got := resolveAgentForRun(a, "claude-code", ccImg, hsImg); got != a {
+		t.Error("변경 없을 땐 원본 포인터를 그대로 반환해야 함")
+	}
+
+	// 2) agent.image 비고 runtime 비면 → claude-code 기본 이미지.
+	a2, _ := testFixtures()
+	a2.Spec.Agent.Image = ""
+	if got := resolveAgentForRun(a2, "", ccImg, hsImg); got.Spec.Agent.Image != ccImg || effectiveRuntimeOf(got) != "claude-code" {
+		t.Errorf("image=%q runtime=%q, want %q/claude-code", got.Spec.Agent.Image, effectiveRuntimeOf(got), ccImg)
+	}
+
+	// 3) effRuntime=huginn-self(동결) + image 비면 → huginn-self 기본 이미지 + runtime 동결.
+	a3, _ := testFixtures()
+	a3.Spec.Agent.Image = ""
+	a3.Spec.Agent.Runtime = "claude-code" // 라이브 agent 는 claude-code 인데...
+	got := resolveAgentForRun(a3, "huginn-self", ccImg, hsImg) // ...동결값 huginn-self 가 우선
+	if got.Spec.Agent.Runtime != "huginn-self" || got.Spec.Agent.Image != hsImg {
+		t.Errorf("동결 runtime=%q image=%q, want huginn-self/%s", got.Spec.Agent.Runtime, got.Spec.Agent.Image, hsImg)
+	}
+	if a3.Spec.Agent.Runtime != "claude-code" {
+		t.Error("원본 agent 가 변형됨(사본이어야 함)")
+	}
+
+	// 4) image 명시는 기본값보다 우선.
+	a4, _ := testFixtures()
+	a4.Spec.Agent.Image = "custom:1"
+	if got := resolveAgentForRun(a4, "huginn-self", ccImg, hsImg); got.Spec.Agent.Image != "custom:1" {
+		t.Errorf("명시 image 가 무시됨: %q", got.Spec.Agent.Image)
+	}
+}
+
+// TestBuildJobTemplateHuginnSelf: §4 백엔드 분기 — runtime=huginn-self 면 command/mountPath/env 가
+// huginn-self 용으로 바뀌고, 게이트웨이 env(ANTHROPIC_*)는 주입되지 않아야 한다.
+func TestBuildJobTemplateHuginnSelf(t *testing.T) {
+	agent, issue := testFixtures()
+	agent.Spec.Agent.Runtime = "huginn-self"
+	agent.Spec.Agent.BaseURL = "https://llm-gateway.example.com"
+	agent.Spec.Agent.Model = "gemma-4-31B-it"
+	agent.Spec.Agent.AuthStyle = "openai"
+
+	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
+
+	if len(jt.Command) != 1 || jt.Command[0] != huginnSelfCmd {
+		t.Errorf("command = %v, want [%s]", jt.Command, huginnSelfCmd)
+	}
+	if jt.MountPath != huginnMountPath {
+		t.Errorf("mountPath = %q, want %q", jt.MountPath, huginnMountPath)
+	}
+	if e, ok := envByName(jt.Env, "MUNINN_BASE_URL"); !ok || e.Value != "https://llm-gateway.example.com" {
+		t.Errorf("MUNINN_BASE_URL = %q (ok=%v)", e.Value, ok)
+	}
+	if e, ok := envByName(jt.Env, "MUNINN_MODEL"); !ok || e.Value != "gemma-4-31B-it" {
+		t.Errorf("MUNINN_MODEL = %q (ok=%v)", e.Value, ok)
+	}
+	if e, ok := envByName(jt.Env, "MUNINN_AUTH_STYLE"); !ok || e.Value != "openai" {
+		t.Errorf("MUNINN_AUTH_STYLE = %q (ok=%v)", e.Value, ok)
+	}
+	assertOptionalSecretRef(t, jt.Env, "MUNINN_LLM_API_KEY", agentSecretName, anthropicAuthTokenKeyName)
+	// 게이트웨이 env(claude-code 전용)는 huginn-self 에 주입되지 않는다.
+	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"} {
+		if _, ok := envByName(jt.Env, name); ok {
+			t.Errorf("huginn-self 인데 게이트웨이 env %s 가 주입됨", name)
+		}
+	}
+	// claude-code 기본은 여전히 claude_skill.sh + ~/.claude.
+	cc, _ := testFixtures()
+	jtcc := buildJobTemplate(cc, issue, "http://mem", "http://api")
+	if jtcc.Command[0] != agentSkillCmd || jtcc.MountPath != claudeMountPath {
+		t.Errorf("claude-code 분기 회귀: command=%v mountPath=%q", jtcc.Command, jtcc.MountPath)
+	}
+}
+
+// TestGatewayEnv: §3 게이트웨이 경유 env 주입(baseUrl/model/authStyle)을 검증한다.
+func TestGatewayEnv(t *testing.T) {
+	agent, issue := testFixtures()
+	agent.Spec.Agent.BaseURL = "https://llm-gateway.example.com"
+	agent.Spec.Agent.Model = "gemma-4-31B-it"
+	agent.Spec.Agent.AuthStyle = "bearer"
+
+	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
+
+	if e, ok := envByName(jt.Env, "ANTHROPIC_BASE_URL"); !ok || e.Value != "https://llm-gateway.example.com" {
+		t.Errorf("ANTHROPIC_BASE_URL = %q (ok=%v), want https://llm-gateway.example.com", e.Value, ok)
+	}
+	if e, ok := envByName(jt.Env, "ANTHROPIC_MODEL"); !ok || e.Value != "gemma-4-31B-it" {
+		t.Errorf("ANTHROPIC_MODEL = %q (ok=%v), want gemma-4-31B-it", e.Value, ok)
+	}
+	// authStyle=bearer → ANTHROPIC_AUTH_TOKEN 은 agent-secrets/anthropic-auth-token optional secretKeyRef.
+	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_AUTH_TOKEN", agentSecretName, anthropicAuthTokenKeyName)
+
+	// authStyle 이 bearer 가 아니면 ANTHROPIC_AUTH_TOKEN 미주입(기존 api-key/oauth 사용).
+	agent.Spec.Agent.AuthStyle = "anthropic"
+	jt2 := buildJobTemplate(agent, issue, "http://mem", "http://api")
+	if _, ok := envByName(jt2.Env, "ANTHROPIC_AUTH_TOKEN"); ok {
+		t.Error("authStyle=anthropic 인데 ANTHROPIC_AUTH_TOKEN 이 주입됨")
+	}
+	if _, ok := envByName(jt2.Env, "ANTHROPIC_BASE_URL"); !ok {
+		t.Error("authStyle=anthropic 라도 baseUrl 설정 시 ANTHROPIC_BASE_URL 은 주입돼야 함")
+	}
+
+	// runtime=huginn-self 는 §3 분기 대상이 아님 → 게이트웨이 env 미주입(§4 별도 분기).
+	agent.Spec.Agent.Runtime = "huginn-self"
+	agent.Spec.Agent.AuthStyle = "bearer"
+	jt3 := buildJobTemplate(agent, issue, "http://mem", "http://api")
+	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"} {
+		if _, ok := envByName(jt3.Env, name); ok {
+			t.Errorf("runtime=huginn-self 인데 게이트웨이 env %s 가 주입됨", name)
+		}
 	}
 }
 
@@ -217,9 +373,9 @@ func assertOptionalSecretRef(t *testing.T, env []corev1.EnvVar, envName, secret,
 
 func TestExpandPodSpec(t *testing.T) {
 	jt := muninniov1beta1.JobTemplate{
-		Image:         "img:1",
-		Env:           []corev1.EnvVar{{Name: "X", Value: "y"}},
-		ClaudePVCName: "pvc-claude-app",
+		Image:        "img:1",
+		Env:          []corev1.EnvVar{{Name: "X", Value: "y"}},
+		AgentPVCName: "pvc-agent-app",
 		// Command/Resources/ServiceAccountName 비움 → 기본값 적용 검증
 	}
 	ps := expandPodSpec(jt)
@@ -247,7 +403,7 @@ func TestExpandPodSpec(t *testing.T) {
 		t.Errorf("volumeMount = %+v", c.VolumeMounts)
 	}
 	if len(ps.Volumes) != 1 || ps.Volumes[0].PersistentVolumeClaim == nil ||
-		ps.Volumes[0].PersistentVolumeClaim.ClaimName != "pvc-claude-app" {
+		ps.Volumes[0].PersistentVolumeClaim.ClaimName != "pvc-agent-app" {
 		t.Errorf("PVC volume = %+v", ps.Volumes)
 	}
 
@@ -264,11 +420,18 @@ func TestExpandPodSpec(t *testing.T) {
 	if c.SecurityContext == nil || c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) == 0 {
 		t.Error("컨테이너 capability 드롭 미설정")
 	}
+	// 격리 baseline(§6.2-5): SA 토큰 자동마운트 차단(공격 표면 축소) + 컨테이너 레벨 seccomp.
+	if ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken {
+		t.Error("automountServiceAccountToken 은 false 여야 함(SA Role 미바인딩 — 공격 표면)")
+	}
+	if c.SecurityContext.SeccompProfile == nil || c.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Error("컨테이너 seccompProfile=RuntimeDefault 미설정")
+	}
 
-	// ClaudePVCName 비면 볼륨/마운트/init 미부착.
+	// AgentPVCName 비면 볼륨/마운트/init 미부착.
 	ps2 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:2"})
 	if len(ps2.Volumes) != 0 || len(ps2.Containers[0].VolumeMounts) != 0 || len(ps2.InitContainers) != 0 {
-		t.Error("ClaudePVCName 비었는데 볼륨/init 이 부착됨")
+		t.Error("AgentPVCName 비었는데 볼륨/init 이 부착됨")
 	}
 }
 
@@ -276,7 +439,7 @@ func TestExpandPodSpec(t *testing.T) {
 // (TestExpandPodSpec 와 분리 — gocyclo 복잡도 한계 회피, 관심사도 분리.)
 func TestExpandPodSpecSubPath(t *testing.T) {
 	ps := expandPodSpec(muninniov1beta1.JobTemplate{
-		Image: "img:1", ClaudePVCName: "pvc-claude-app", ClaudeSubPath: "issue-7",
+		Image: "img:1", AgentPVCName: "pvc-agent-app", AgentSubPath: "issue-7",
 	})
 
 	// 메인 컨테이너: 앱 PVC 안 Issue별 하위 경로를 ~/.claude 로 마운트(§5.5 격리).
@@ -285,8 +448,8 @@ func TestExpandPodSpecSubPath(t *testing.T) {
 		t.Errorf("main volumeMount = %+v, want SubPath=issue-7", mounts)
 	}
 
-	// subPath 디렉토리 선생성 initContainer(리뷰 R1): PVC 루트를 claudeStoreInitPath 에 (subPath 없이)
-	// 마운트하고 ClaudeSubPath 디렉토리를 mkdir → uid 1000 쓰기 가능 보장.
+	// subPath 디렉토리 선생성 initContainer(리뷰 R1): PVC 루트를 agentStoreInitPath 에 (subPath 없이)
+	// 마운트하고 AgentSubPath 디렉토리를 mkdir → uid 1000 쓰기 가능 보장.
 	if len(ps.InitContainers) != 1 {
 		t.Fatalf("initContainers = %d, want 1 (subPath 선생성)", len(ps.InitContainers))
 	}
@@ -294,11 +457,11 @@ func TestExpandPodSpecSubPath(t *testing.T) {
 	if ic.Image != "img:1" {
 		t.Errorf("init image = %q, want img:1 (동일 이미지 재사용)", ic.Image)
 	}
-	if len(ic.VolumeMounts) != 1 || ic.VolumeMounts[0].MountPath != claudeStoreInitPath || ic.VolumeMounts[0].SubPath != "" {
+	if len(ic.VolumeMounts) != 1 || ic.VolumeMounts[0].MountPath != agentStoreInitPath || ic.VolumeMounts[0].SubPath != "" {
 		t.Errorf("init volumeMount = %+v (PVC 루트를 subPath 없이 마운트해야 함)", ic.VolumeMounts)
 	}
-	if e, ok := envByName(ic.Env, "CLAUDE_HOME_DIR"); !ok || e.Value != claudeStoreInitPath+"/issue-7" {
-		t.Errorf("init CLAUDE_HOME_DIR = %+v, want %s/issue-7", ic.Env, claudeStoreInitPath)
+	if e, ok := envByName(ic.Env, "AGENT_HOME_DIR"); !ok || e.Value != agentStoreInitPath+"/issue-7" {
+		t.Errorf("init AGENT_HOME_DIR = %+v, want %s/issue-7", ic.Env, agentStoreInitPath)
 	}
 	if ic.SecurityContext == nil || ic.SecurityContext.AllowPrivilegeEscalation == nil || *ic.SecurityContext.AllowPrivilegeEscalation {
 		t.Error("init allowPrivilegeEscalation 은 false 여야 함(비-root 하드닝)")
@@ -309,7 +472,7 @@ func TestExpandPodSpecSubPath(t *testing.T) {
 	}
 
 	// 레거시(PVC 있고 SubPath 비어있음): PVC 루트 마운트(SubPath ""), init 미부착 — 하위호환.
-	ps3 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:3", ClaudePVCName: "pvc-legacy"})
+	ps3 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:3", AgentPVCName: "pvc-legacy"})
 	if len(ps3.Containers[0].VolumeMounts) != 1 || ps3.Containers[0].VolumeMounts[0].SubPath != "" {
 		t.Errorf("레거시 SubPath 는 빈값(루트 마운트)이어야 함: %+v", ps3.Containers[0].VolumeMounts)
 	}

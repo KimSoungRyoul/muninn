@@ -6,7 +6,8 @@
 #   selftest  kind/CI QA용. API 호출 없이 툴·SDK 배선만 검증하고 종료(exit 0).
 #   그 외      인자를 그대로 exec(디버깅/임시 명령).
 #
-# 인증: ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN 중 하나(§5.1, §6.2). env(Secret)로만 주입.
+# 인증: ANTHROPIC_API_KEY · CLAUDE_CODE_OAUTH_TOKEN · ANTHROPIC_AUTH_TOKEN(게이트웨이 bearer, §3)
+#   중 하나(§5.1, §6.2). env(Secret)로만 주입.
 #   - 오프라인 selftest 는 MUNINN_SELFTEST=1 이거나 ANTHROPIC_API_KEY=SELFTEST 센티넬일 때.
 set -euo pipefail
 
@@ -59,8 +60,8 @@ selftest)
 run)
   : "${MUNINN_GOAL:?MUNINN_GOAL is required}"
   if ! is_selftest; then
-    if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-      log "ERROR: ANTHROPIC_API_KEY 또는 CLAUDE_CODE_OAUTH_TOKEN 중 하나가 필요합니다"
+    if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -z "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+      log "ERROR: ANTHROPIC_API_KEY · CLAUDE_CODE_OAUTH_TOKEN · ANTHROPIC_AUTH_TOKEN(게이트웨이) 중 하나가 필요합니다"
       exit 1
     fi
   fi

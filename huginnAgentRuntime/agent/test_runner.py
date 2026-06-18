@@ -26,15 +26,15 @@ import runner  # noqa: E402
 
 
 def build_final_patch(failed: bool, terminal_kind: str) -> dict:
-    """send_final 이 만드는 terminalKind 화이트리스트 분기를 그대로 재현한다.
+    """추출된 실제 producer(runner.build_report_patch)에 위임한다 — 이중 진실원 제거(conformance 층1).
 
-    runner.send_final 본문(runner.py)의 화이트리스트 가드와 1:1 로 일치해야 한다 —
-    이 빌더가 깨지면 send_final 계약이 바뀐 것이므로 테스트가 회귀를 잡는다.
+    이전엔 send_final 의 화이트리스트 분기를 *재현* 했으나, 재현 빌더는 실제 코드와 따로 놀아 drift 를
+    못 잡는다. 이제 send_final 이 호출하는 바로 그 함수를 태워 terminalKind 화이트리스트/failed/final
+    계약을 검증한다(골든 계약은 test_conformance.py 가 추가로 고정).
     """
-    patch: dict = {"step": 0, "final": True, "failed": failed}
-    if terminal_kind in ("rejected", "expired", "aborted"):
-        patch["terminalKind"] = terminal_kind
-    return patch
+    return runner.build_report_patch(
+        step=0, cost=0.0, tokens=0, output="", outcome="", failed=failed, terminal_kind=terminal_kind,
+    )
 
 
 class GateTerminalKindTest(unittest.TestCase):

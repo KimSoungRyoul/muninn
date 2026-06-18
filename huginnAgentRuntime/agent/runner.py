@@ -384,10 +384,64 @@ def _gate_terminal_kind(gate_outcome: str) -> str:
     return ""
 
 
-def build_options(max_turns: int, max_budget_usd: float | None = None, resume_session_id: str = ""):
+# ---- SPI 보고/회상 페이로드 빌더(설계 §8, conformance 층1) — 순수 함수 ----
+# operator-design §2.2a 의 Agent→API 보고 SPI 를 코드로 고정한다. golden_report_payloads.json 이
+# 이 함수들의 출력과 muninnWeb report route 의 수용 스키마를 동시에 묶어 cross-language drift 를 막는다
+# (codegen 부재 → conformance 가 단일 방어선). 향후 huginn-self 백엔드도 동일 출력형을 내야 한다.
+
+
+def build_report_patch(step: int, cost: float, tokens: int, output: str, outcome: str,
+                       failed: bool, session_id: str = "", terminal_kind: str = "") -> dict:
+    """terminal 보고 patch(final:true)를 조립한다(SPI 계약, conformance 골든 기준). 순수 함수.
+
+    계약 불변식(web report route 와 동일):
+      * cost 는 소수 4자리 decimal 문자열(`f"{cost:.4f}"`).
+      * output 은 8000자 캡.
+      * sessionId 는 비어있지 않을 때만 포함(없으면 키 생략).
+      * terminalKind 는 화이트리스트 {rejected,expired,aborted} 외 값은 싣지 않는다(임의 문자열 차단).
+    """
+    patch: dict = {
+        "step": step,
+        "cost": f"{cost:.4f}",
+        "tokens": tokens,
+        "output": (output or "")[:8000],
+        "outcome": outcome,
+        "final": True,
+        "failed": failed,
+    }
+    if session_id:
+        patch["sessionId"] = session_id
+    if terminal_kind in ("rejected", "expired", "aborted"):
+        patch["terminalKind"] = terminal_kind
+    return patch
+
+
+def build_recall_payload(recalled: list) -> list[dict]:
+    """recall 결과를 recalledMemoryIds 페이로드로 변환한다(SPI 계약). 순수 함수.
+
+    계약 불변식(web report route / incidents.ts 와 동일): 각 항목은 {id, score?}. id 없는 항목은 제외,
+    score 는 문자열로 직렬화하되 None 이면 키를 생략한다("None" 문자열 유입 방지).
+    """
+    out: list[dict] = []
+    for m in recalled:
+        if isinstance(m, dict) and m.get("id"):
+            item = {"id": m["id"]}
+            if m.get("score") is not None:
+                item["score"] = str(m["score"])
+            out.append(item)
+    return out
+
+
+def build_options(max_turns: int, max_budget_usd: float | None = None, resume_session_id: str = "",
+                  model: str = ""):
     """ClaudeAgentOptions 를 구성(라이브/셀프테스트 공통). SDK 계약 검증 지점.
 
     guardrails 매핑(§5.4): maxIterations→max_turns, maxCostUsd→max_budget_usd.
+
+    model(§3 게이트웨이): 비면 claude CLI 기본 모델. 설정되면 ClaudeAgentOptions.model 로 명시
+    주입해 SDK 가 `--model` 로 그 모델을 쓰게 한다 — operator 가 ANTHROPIC_MODEL 로 전달하는 값
+    (예: gemma-4-31B-it)을 CLI 기본값에 의존하지 않고 결정적으로 강제한다. ANTHROPIC_BASE_URL/
+    ANTHROPIC_AUTH_TOKEN 과 함께 쓰면 Anthropic 호환 게이트웨이의 비-Claude 모델을 구동한다.
 
     resume_session_id(§5.5): 직전 attempt 의 Claude 세션 ID(MUNINN_RESUME_SESSION_ID).
     세션 transcript 는 앱별 ~/.claude PVC 에 있고 모든 Run 의 cwd(/workspace)가 동일해
@@ -422,6 +476,8 @@ def build_options(max_turns: int, max_budget_usd: float | None = None, resume_se
         opts["max_budget_usd"] = max_budget_usd
     if resume_session_id:
         opts["resume"] = resume_session_id
+    if model:
+        opts["model"] = model
     return ClaudeAgentOptions(**opts)
 
 
@@ -613,7 +669,10 @@ async def run_live() -> int:
     if resume_id and not _has_transcript(resume_id):
         log(f"WARN: resume 대상 transcript 미발견(session={resume_id}) → 새 세션으로 시작")
         resume_id = ""
-    options = build_options(max_turns=max_turns, max_budget_usd=max_budget, resume_session_id=resume_id)
+    # §3 게이트웨이: operator 가 주입한 ANTHROPIC_MODEL 을 SDK 옵션으로 명시 전달(CLI 기본값 비의존).
+    model = _env("ANTHROPIC_MODEL")
+    options = build_options(max_turns=max_turns, max_budget_usd=max_budget,
+                            resume_session_id=resume_id, model=model)
 
     # SIGTERM(pod 축출/timeout 시 kubelet 이 보냄) → 현재 task 를 cancel 해 CancelledError 경로로
     # 진입시킨다. 그러면 try/except 가 terminal 보고를 보내고, 미보내면 metaDB incident 가 영구
@@ -647,21 +706,16 @@ async def run_live() -> int:
         prompt = f"{goal}\n\n[회상된 Muninn 메모리(참고)]\n{facts}"
         log(f"recall: {len(recalled)}건 회상 → 컨텍스트 주입")
     # 회상 결과를 status 에 기록(Agent→API 소유). phase 는 operator 가 소유하므로 건드리지 않는다.
-    # score 가 None 이면 "None" 문자열이 들어가지 않게 생략한다.
-    recalled_payload = []
-    for m in recalled:
-        if isinstance(m, dict) and m.get("id"):
-            item = {"id": m["id"]}
-            if m.get("score") is not None:
-                item["score"] = str(m["score"])
-            recalled_payload.append(item)
+    # SPI 계약 빌더로 변환(conformance 골든 기준) — score None 이면 키 생략.
+    recalled_payload = build_recall_payload(recalled)
     await report_async({
         "step": 0,
         "recalledMemoryIds": recalled_payload,
     })
 
     log(f"live 시작: max_turns={max_turns}, max_budget_usd={max_budget}, pr_mode={pr_mode}, "
-        f"resume={resume_id or '-'}, goal={goal[:120]!r}")
+        f"resume={resume_id or '-'}, model={model or '(default)'}, "
+        f"base_url={_env('ANTHROPIC_BASE_URL') or '(default)'}, goal={goal[:120]!r}")
     cost = 0.0
     tokens = 0
     turns = 0
@@ -705,22 +759,12 @@ async def run_live() -> int:
         if abort_reason:
             # 비정상 종료 표면화: outcome 비어 있으면 사유를 남겨 운영자가 'running 고착' 대신 원인을 본다.
             outcome = outcome or f"aborted: {abort_reason}"
-        patch: dict = {
-            "step": step,
-            "cost": f"{cost:.4f}",
-            "tokens": tokens,
-            "output": output[:8000],
-            "outcome": outcome,
-            "final": True,
-            "failed": failed,
-        }
-        # 세션 ID(§5.5): 같은 Issue 의 다음 attempt 가 resume 하도록 terminal 보고에도 동봉한다
-        # (스트림 캡처 시점의 즉시 보고가 일시 장애로 유실됐어도 여기서 한 번 더 보장).
-        if session_id:
-            patch["sessionId"] = session_id
-        # 화이트리스트(web report route 와 동일) 외 값은 싣지 않는다 — 임의 문자열 차단.
-        if terminal_kind in ("rejected", "expired", "aborted"):
-            patch["terminalKind"] = terminal_kind
+        # terminal 보고 patch 는 SPI 계약 빌더로 조립한다(conformance 골든 기준, §2.2a). 세션 ID(§5.5)는
+        # 같은 Issue 의 다음 attempt 가 resume 하도록 동봉하고, terminalKind 화이트리스트도 빌더가 강제한다.
+        patch = build_report_patch(
+            step=step, cost=cost, tokens=tokens, output=output, outcome=outcome,
+            failed=failed, session_id=session_id, terminal_kind=terminal_kind,
+        )
         res = await report_async_deadline(patch, report_deadline) if report_deadline is not None \
             else await report_async(patch)
         if res is None:
@@ -759,12 +803,12 @@ async def run_live() -> int:
                 log(f"거절됨(Rejected){f': {detail}' if detail else ''} → 정상 중단")
                 return f"rejected: {detail}" if detail else "rejected"
             if state == "Expired":
-                # 도달 경고(브리프 항목2, MEDIUM): 현재 web 은 CR status.approval.state 를
-                # "Expired" 로 자동 패치하지 않으므로(만료는 approve/reject 호출 시 차단 사유로만
-                # 반환, runView 도 lazy 표면화 안 함) 이 분기는 **현 구현에서 도달 불가**다.
-                # 실질 만료 경로는 runner 자체 wall-clock(_approval_timeout_seconds) 의
-                # "approval-timeout"→terminalKind="aborted" 다. 분기는 의도적으로 유지한다 —
-                # web 이 만료를 Expired 로 lazy 표면화하도록 고치면(후속) 즉시 살아난다.
+                # Q7 결정(설계 §10-2): web TTL 이 만료의 단일 권위다. web 은 expiresAt 경과를 lazy 하게
+                # approval.state="Expired" 로 표면화하고(incidents.ts approvalState), operator 가 주입하는
+                # MUNINN_APPROVAL_TIMEOUT = web TTL + grace 라서 이 폴링 타임아웃(아래 wall-clock 백스톱)보다
+                # web 의 Expired 가 *먼저* 관측된다 → terminalKind="expired" 가 결정적으로 기록된다. 아래
+                # wall-clock "approval-timeout"→"aborted" 는 web 이 끝내 Expired 를 표면화하지 못한 경우의
+                # 백스톱일 뿐이다(과거: web 미표면화로 이 분기가 도달 불가했으나 Q7 으로 해소).
                 log("승인 만료(Expired) → 정상 중단")
                 return "expired"
             # Pending/None(미파싱) → 계속 폴링. 타임아웃 경과 시 정상 중단.

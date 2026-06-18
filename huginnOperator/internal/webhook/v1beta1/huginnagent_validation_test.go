@@ -103,6 +103,92 @@ func TestValidateAgentWorkspaceTenancy(t *testing.T) {
 	}
 }
 
+// TestValidateAgentGateway: §3 게이트웨이 필드(baseUrl/model/authStyle) 순수 형식 검증.
+func TestValidateAgentGateway(t *testing.T) {
+	v := &HuginnAgentCustomValidator{}
+	ctx := context.Background()
+
+	withGateway := func(runtime, baseURL, model, authStyle string) *muninniov1beta1.HuginnAgent {
+		a := newAgent(tnAgent, tnWsX, tnWsX)
+		a.Spec.Agent.Runtime = runtime
+		a.Spec.Agent.BaseURL = baseURL
+		a.Spec.Agent.Model = model
+		a.Spec.Agent.AuthStyle = authStyle
+		return a
+	}
+
+	tests := []struct {
+		name        string
+		agent       *muninniov1beta1.HuginnAgent
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid: full gateway config (bearer)",
+			agent:   withGateway("claude-code", "https://llm-gateway.example.com", "gemma-4-31B-it", "bearer"),
+			wantErr: false,
+		},
+		{
+			name:    "valid: no gateway fields",
+			agent:   withGateway("claude-code", "", "", ""),
+			wantErr: false,
+		},
+		{
+			name:        "reject: bad authStyle",
+			agent:       withGateway("claude-code", "https://gw", "m", "openai"),
+			wantErr:     true,
+			errContains: "anthropic, bearer",
+		},
+		{
+			name:        "reject: non-http baseUrl",
+			agent:       withGateway("claude-code", "ftp://gw", "m", "bearer"),
+			wantErr:     true,
+			errContains: "http(s) URL",
+		},
+		{
+			// runtime=huginn-self 는 §3 게이트웨이 필드 검증 대상이 아님 — bad authStyle 이라도 통과.
+			name:    "skip: huginn-self ignores gateway fields",
+			agent:   withGateway("huginn-self", "ftp://gw", "m", "openai"),
+			wantErr: false,
+		},
+		{
+			// §4.2 runtime↔image 정합: huginn-self 인데 claude-code 이미지(agent-runtime) → 거부.
+			name: "reject: huginn-self + agent-runtime image",
+			agent: func() *muninniov1beta1.HuginnAgent {
+				a := withGateway("huginn-self", "https://gw", "m", "openai")
+				a.Spec.Agent.Image = "ghcr.io/x/agent-runtime:dev"
+				return a
+			}(),
+			wantErr:     true,
+			errContains: "claude-code 이미지",
+		},
+		{
+			// image 미지정(operator 기본) → runtime↔image 검증 스킵.
+			name:    "ok: huginn-self + no image (operator default)",
+			agent:   withGateway("huginn-self", "https://gw", "m", "openai"),
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := v.ValidateCreate(ctx, tc.agent)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateUpdateWorkspaceImmutableAndTenancy(t *testing.T) {
 	v := &HuginnAgentCustomValidator{}
 	ctx := context.Background()
