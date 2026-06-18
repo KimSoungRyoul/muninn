@@ -47,6 +47,12 @@ const (
 	huginnSelfCmd     = "/usr/local/bin/huginn-self"
 	huginnMountPath   = "/home/node/.huginn"
 	runtimeHuginnSelf = "huginn-self"
+	runtimeClaudeCode = "claude-code" // 기본 백엔드(§1). agent.runtime 미설정 시 effectiveRuntimeOf 가 이 값.
+
+	// authStyle 값(§3·§4): claude-code 게이트웨이(bearer/anthropic) / huginn-self 와이어(openai).
+	authStyleBearer    = "bearer"
+	authStyleAnthropic = "anthropic"
+	authStyleOpenAI    = "openai"
 
 	// agentHomeInitContainerName / agentStoreInitPath: subPath(에이전트 홈) 디렉토리를 미리 만드는
 	// initContainer 배선(§5.5, 리뷰 R1). init 은 PVC 루트(fsGroup 으로 그룹쓰기 가능)를 agentStoreInitPath
@@ -120,7 +126,7 @@ func effectiveRuntimeOf(agent *muninniov1beta1.HuginnAgent) string {
 	if agent.Spec.Agent.Runtime != "" {
 		return agent.Spec.Agent.Runtime
 	}
-	return "claude-code"
+	return runtimeClaudeCode
 }
 
 // defaultImageForRuntime 은 agent.image 가 비었을 때 쓸 operator 기본 이미지를 runtime 별로 고른다(§10-5).
@@ -223,7 +229,7 @@ func gatewayEnv(agent *muninniov1beta1.HuginnAgent) []corev1.EnvVar {
 	// authStyle=bearer: 게이트웨이가 Authorization: Bearer 를 받는 경우(claude CLI 는 ANTHROPIC_AUTH_TOKEN
 	// 을 Bearer 로 보냄). 기존 ANTHROPIC_API_KEY/CLAUDE_CODE_OAUTH_TOKEN 과 동일하게 optional secretKeyRef
 	// — agent-secrets 에 anthropic-auth-token 키가 없으면 env 가 주입되지 않아 Pod 부팅을 막지 않는다.
-	if a.AuthStyle == "bearer" {
+	if a.AuthStyle == authStyleBearer {
 		env = append(env, corev1.EnvVar{Name: "ANTHROPIC_AUTH_TOKEN", ValueFrom: &corev1.EnvVarSource{
 			SecretKeyRef: &corev1.SecretKeySelector{
 				LocalObjectReference: corev1.LocalObjectReference{Name: agentSecretName},
@@ -246,7 +252,7 @@ func huginnSelfEnv(agent *muninniov1beta1.HuginnAgent) []corev1.EnvVar {
 	}
 	authStyle := a.AuthStyle
 	if authStyle == "" {
-		authStyle = "openai" // huginn-self 기본 와이어 포맷(/chat/completions).
+		authStyle = authStyleOpenAI // huginn-self 기본 와이어 포맷(/chat/completions).
 	}
 	env := []corev1.EnvVar{
 		{Name: "MUNINN_BASE_URL", Value: a.BaseURL},
@@ -312,7 +318,7 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 	// ANTHROPIC_BASE_URL 의 제3자(또는 huginn-self 의 MUNINN_BASE_URL) 엔드포인트로 새어나갈 수 있다(신뢰경계 위반).
 	// "최소 하나 존재"는 런타임(claude_skill.sh)이 강제한다(huginn-self 는 자체 가드).
 	isClaudeCode := agent.Spec.Agent.Runtime != runtimeHuginnSelf
-	if isClaudeCode && agent.Spec.Agent.AuthStyle != "bearer" {
+	if isClaudeCode && agent.Spec.Agent.AuthStyle != authStyleBearer {
 		env = append(env,
 			corev1.EnvVar{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{

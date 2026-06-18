@@ -31,6 +31,7 @@ import (
 // 테스트 픽스처 상수(goconst 회피; 여러 케이스에서 반복되는 이름/네임스페이스).
 const (
 	tnAgent = "app-a"
+	gwURL   = "https://gw"
 	tnWsX   = "team-x"
 	tnWsY   = "team-y"
 	tnWsZ   = "team-z"
@@ -125,37 +126,50 @@ func TestValidateAgentGateway(t *testing.T) {
 	}{
 		{
 			name:    "valid: full gateway config (bearer)",
-			agent:   withGateway("claude-code", "https://llm-gateway.example.com", "gemma-4-31B-it", "bearer"),
+			agent:   withGateway(runtimeClaudeCode, "https://llm-gateway.example.com", "gemma-4-31B-it", authStyleBearer),
 			wantErr: false,
 		},
 		{
 			name:    "valid: no gateway fields",
-			agent:   withGateway("claude-code", "", "", ""),
+			agent:   withGateway(runtimeClaudeCode, "", "", ""),
 			wantErr: false,
 		},
 		{
-			name:        "reject: bad authStyle",
-			agent:       withGateway("claude-code", "https://gw", "m", "openai"),
+			name:        "reject: claude-code + openai authStyle",
+			agent:       withGateway(runtimeClaudeCode, gwURL, "m", authStyleOpenAI),
 			wantErr:     true,
-			errContains: "anthropic, bearer",
+			errContains: "claude-code",
 		},
 		{
 			name:        "reject: non-http baseUrl",
-			agent:       withGateway("claude-code", "ftp://gw", "m", "bearer"),
+			agent:       withGateway(runtimeClaudeCode, "ftp://gw", "m", authStyleBearer),
 			wantErr:     true,
 			errContains: "http(s) URL",
 		},
 		{
-			// runtime=huginn-self 는 §3 게이트웨이 필드 검증 대상이 아님 — bad authStyle 이라도 통과.
-			name:    "skip: huginn-self ignores gateway fields",
-			agent:   withGateway("huginn-self", "ftp://gw", "m", "openai"),
+			name:    "valid: huginn-self + openai",
+			agent:   withGateway(runtimeHuginnSelf, gwURL, "m", authStyleOpenAI),
 			wantErr: false,
+		},
+		{
+			// 리뷰 round-3: huginn-self 는 openai 만 — anthropic/bearer 는 런타임이 안 honor 하므로 거부(dead config 방지).
+			name:        "reject: huginn-self + bearer authStyle",
+			agent:       withGateway(runtimeHuginnSelf, gwURL, "m", authStyleBearer),
+			wantErr:     true,
+			errContains: "huginn-self",
+		},
+		{
+			// huginn-self 도 baseUrl 형식은 검증한다.
+			name:        "reject: huginn-self + non-http baseUrl",
+			agent:       withGateway(runtimeHuginnSelf, "ftp://gw", "m", authStyleOpenAI),
+			wantErr:     true,
+			errContains: "http(s) URL",
 		},
 		{
 			// §4.2 runtime↔image 정합: huginn-self 인데 claude-code 이미지(agent-runtime) → 거부.
 			name: "reject: huginn-self + agent-runtime image",
 			agent: func() *muninniov1beta1.HuginnAgent {
-				a := withGateway("huginn-self", "https://gw", "m", "openai")
+				a := withGateway(runtimeHuginnSelf, gwURL, "m", authStyleOpenAI)
 				a.Spec.Agent.Image = "ghcr.io/x/agent-runtime:dev"
 				return a
 			}(),
@@ -165,7 +179,7 @@ func TestValidateAgentGateway(t *testing.T) {
 		{
 			// image 미지정(operator 기본) → runtime↔image 검증 스킵.
 			name:    "ok: huginn-self + no image (operator default)",
-			agent:   withGateway("huginn-self", "https://gw", "m", "openai"),
+			agent:   withGateway(runtimeHuginnSelf, gwURL, "m", authStyleOpenAI),
 			wantErr: false,
 		},
 	}

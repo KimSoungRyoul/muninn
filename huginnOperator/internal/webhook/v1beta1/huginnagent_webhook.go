@@ -35,7 +35,15 @@ import (
 // 순수 검증만 수행한다(외부 DB 의존 없음). 멤버십(owner|member)은 CR 생성자인 Muninn API 가
 // 인증 후 검증한다(operator-design §4) — webhook 가용성을 DB 에 묶지 않기 위함.
 
-const labelWorkspace = "muninn.io/workspace"
+const (
+	labelWorkspace = "muninn.io/workspace"
+
+	// runtime/authStyle 값(controller 패키지 상수의 미러 — 패키지 경계상 별도 선언). goconst 회피 겸 단일 출처.
+	runtimeClaudeCode  = "claude-code"
+	runtimeHuginnSelf  = "huginn-self"
+	authStyleAnthropic = "anthropic"
+	authStyleBearer    = "bearer"
+)
 
 var agentNameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
@@ -150,17 +158,17 @@ func validateRuntimeImage(a *muninniov1beta1.AgentSpec) field.ErrorList {
 	}
 	runtime := a.Runtime
 	if runtime == "" {
-		runtime = "claude-code"
+		runtime = runtimeClaudeCode
 	}
 	p := field.NewPath("spec", "agent", "image")
 	switch runtime {
-	case "huginn-self":
+	case runtimeHuginnSelf:
 		if strings.Contains(a.Image, "agent-runtime") {
 			errs = append(errs, field.Invalid(p, a.Image,
 				"runtime=huginn-self 인데 claude-code 이미지(agent-runtime)로 보입니다 — runtime/image 정합 확인"))
 		}
-	case "claude-code":
-		if strings.Contains(a.Image, "huginn-self") {
+	case runtimeClaudeCode:
+		if strings.Contains(a.Image, runtimeHuginnSelf) {
 			errs = append(errs, field.Invalid(p, a.Image,
 				"runtime=claude-code 인데 huginn-self 이미지로 보입니다 — runtime/image 정합 확인"))
 		}
@@ -170,25 +178,37 @@ func validateRuntimeImage(a *muninniov1beta1.AgentSpec) field.ErrorList {
 
 var baseURLRe = regexp.MustCompile(`^https?://.+`)
 
-// validateGateway 는 §3 게이트웨이 경유 필드(baseUrl/model/authStyle)의 순수 형식만 검증한다.
-// authStyle 은 anthropic|bearer 만 허용하고, baseUrl 은 http(s) 스킴이어야 한다. runtime=huginn-self
-// 에는 이 필드들이 적용되지 않으므로(§4 별도 분기) 검증을 생략한다 — 미사용 필드로 거부하지 않는다.
+// validateGateway 는 baseUrl/authStyle 의 순수 형식을 runtime 별로 검증한다(§3·§4).
+//   - claude-code: authStyle∈{anthropic,bearer}. openai 는 claude CLI 가 honor 못 하므로 거부.
+//   - huginn-self: authStyle∈{openai}(또는 미설정). 현재 huginn-self 런타임은 OpenAI 와이어(Bearer)만
+//     구현하므로 anthropic/bearer 를 받으면 *조용히 무시*되는 dead config 가 된다 → 명시 거부(리뷰 round-3).
+//
+// baseUrl 은 양 백엔드 공통으로 http(s) 스킴이어야 한다.
 func validateGateway(a *muninniov1beta1.AgentSpec) field.ErrorList {
 	var errs field.ErrorList
-	if a.Runtime != "" && a.Runtime != "claude-code" {
+	p := field.NewPath("spec", "agent")
+	if a.BaseURL != "" && !baseURLRe.MatchString(a.BaseURL) {
+		errs = append(errs, field.Invalid(p.Child("baseUrl"), a.BaseURL, "must be an http(s) URL"))
+	}
+	if a.AuthStyle == "" {
+		return errs // 미설정 → 백엔드 기본(claude-code=기존 인증, huginn-self=openai).
+	}
+	if a.Runtime == runtimeHuginnSelf {
+		if a.AuthStyle != authStyleOpenAI {
+			errs = append(errs, field.Invalid(p.Child("authStyle"), a.AuthStyle,
+				"runtime=huginn-self 는 authStyle=openai 만 지원합니다(현재 OpenAI 호환 와이어만 구현)"))
+		}
 		return errs
 	}
-	p := field.NewPath("spec", "agent")
-	if a.AuthStyle != "" && a.AuthStyle != "anthropic" && a.AuthStyle != "bearer" {
+	// claude-code(기본): anthropic|bearer 만.
+	if a.AuthStyle != authStyleAnthropic && a.AuthStyle != authStyleBearer {
 		errs = append(errs, field.Invalid(p.Child("authStyle"), a.AuthStyle,
-			"must be one of: anthropic, bearer"))
-	}
-	if a.BaseURL != "" && !baseURLRe.MatchString(a.BaseURL) {
-		errs = append(errs, field.Invalid(p.Child("baseUrl"), a.BaseURL,
-			"must be an http(s) URL"))
+			"runtime=claude-code 는 authStyle 이 anthropic 또는 bearer 여야 합니다(openai 는 claude CLI 미지원)"))
 	}
 	return errs
 }
+
+const authStyleOpenAI = "openai"
 
 func agentGK() schema.GroupKind {
 	return schema.GroupKind{Group: muninniov1beta1.GroupVersion.Group, Kind: "HuginnAgent"}

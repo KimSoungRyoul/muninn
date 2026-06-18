@@ -26,6 +26,12 @@ import (
 	muninniov1beta1 "github.com/KimSoungRyoul/muninn/huginnOperator/api/v1beta1"
 )
 
+// 테스트 픽스처 상수(goconst 회피 — 여러 케이스에서 반복되는 placeholder URL/모델명).
+const (
+	testGatewayURL = "https://llm-gateway.example.com"
+	testModel      = "gemma-4-31B-it"
+)
+
 func envByName(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
 	for _, e := range env {
 		if e.Name == name {
@@ -98,10 +104,10 @@ func TestBuildJobTemplate(t *testing.T) {
 
 	// 인증은 env(Secret) secretKeyRef 로만 주입(§5.1, §6.2).
 	// API 키/OAuth 토큰 둘 중 하나면 충분 → 둘 다 optional secretKeyRef.
-	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_API_KEY", agentSecretName, anthropicKeyName)
-	assertOptionalSecretRef(t, jt.Env, "CLAUDE_CODE_OAUTH_TOKEN", agentSecretName, oauthTokenKeyName)
+	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_API_KEY", anthropicKeyName)
+	assertOptionalSecretRef(t, jt.Env, "CLAUDE_CODE_OAUTH_TOKEN", oauthTokenKeyName)
 	// MUNINN_API_TOKEN: 런타임이 Muninn API 를 인증(§5.6). 동일 패턴(agent-secrets, optional).
-	assertOptionalSecretRef(t, jt.Env, "MUNINN_API_TOKEN", agentSecretName, muninnAPITokenKeyName)
+	assertOptionalSecretRef(t, jt.Env, "MUNINN_API_TOKEN", muninnAPITokenKeyName)
 
 	if gh, ok := envByName(jt.Env, "GITHUB_PAT"); !ok || gh.ValueFrom == nil || gh.ValueFrom.SecretKeyRef.Name != "gh-pat" {
 		t.Error("GITHUB_PAT secretKeyRef(gh-pat) 누락")
@@ -152,41 +158,41 @@ func TestResolveAgentForRun(t *testing.T) {
 
 	// 1) runtime/image 둘 다 이미 확정 → 그대로(사본 불필요, 동일 포인터).
 	a, _ := testFixtures()
-	a.Spec.Agent.Runtime = "claude-code"
-	if got := resolveAgentForRun(a, "claude-code", ccImg, hsImg); got != a {
+	a.Spec.Agent.Runtime = runtimeClaudeCode
+	if got := resolveAgentForRun(a, runtimeClaudeCode, ccImg, hsImg); got != a {
 		t.Error("변경 없을 땐 원본 포인터를 그대로 반환해야 함")
 	}
 
 	// 2) agent.image 비고 runtime 비면 → claude-code 기본 이미지.
 	a2, _ := testFixtures()
 	a2.Spec.Agent.Image = ""
-	if got := resolveAgentForRun(a2, "", ccImg, hsImg); got.Spec.Agent.Image != ccImg || effectiveRuntimeOf(got) != "claude-code" {
+	if got := resolveAgentForRun(a2, "", ccImg, hsImg); got.Spec.Agent.Image != ccImg || effectiveRuntimeOf(got) != runtimeClaudeCode {
 		t.Errorf("image=%q runtime=%q, want %q/claude-code", got.Spec.Agent.Image, effectiveRuntimeOf(got), ccImg)
 	}
 
 	// 3) effRuntime=huginn-self(동결) + image 비면 → huginn-self 기본 이미지 + runtime 동결.
 	a3, _ := testFixtures()
 	a3.Spec.Agent.Image = ""
-	a3.Spec.Agent.Runtime = "claude-code"                      // 라이브 agent 는 claude-code 인데...
-	got := resolveAgentForRun(a3, "huginn-self", ccImg, hsImg) // ...동결값 huginn-self 가 우선
-	if got.Spec.Agent.Runtime != "huginn-self" || got.Spec.Agent.Image != hsImg {
+	a3.Spec.Agent.Runtime = runtimeClaudeCode                      // 라이브 agent 는 claude-code 인데...
+	got := resolveAgentForRun(a3, runtimeHuginnSelf, ccImg, hsImg) // ...동결값 huginn-self 가 우선
+	if got.Spec.Agent.Runtime != runtimeHuginnSelf || got.Spec.Agent.Image != hsImg {
 		t.Errorf("동결 runtime=%q image=%q, want huginn-self/%s", got.Spec.Agent.Runtime, got.Spec.Agent.Image, hsImg)
 	}
-	if a3.Spec.Agent.Runtime != "claude-code" {
+	if a3.Spec.Agent.Runtime != runtimeClaudeCode {
 		t.Error("원본 agent 가 변형됨(사본이어야 함)")
 	}
 
 	// 4) image 명시는 기본값보다 우선.
 	a4, _ := testFixtures()
 	a4.Spec.Agent.Image = "custom:1"
-	if got := resolveAgentForRun(a4, "huginn-self", ccImg, hsImg); got.Spec.Agent.Image != "custom:1" {
+	if got := resolveAgentForRun(a4, runtimeHuginnSelf, ccImg, hsImg); got.Spec.Agent.Image != "custom:1" {
 		t.Errorf("명시 image 가 무시됨: %q", got.Spec.Agent.Image)
 	}
 
 	// 5) agent.image 비고 operator 기본 이미지도 빈 문자열 → image="" (createRun 이 MissingImage 로 거부).
 	a5, _ := testFixtures()
 	a5.Spec.Agent.Image = ""
-	if got := resolveAgentForRun(a5, "huginn-self", "", ""); got.Spec.Agent.Image != "" {
+	if got := resolveAgentForRun(a5, runtimeHuginnSelf, "", ""); got.Spec.Agent.Image != "" {
 		t.Errorf("기본 이미지 미설정인데 image=%q (MissingImage 여야 함)", got.Spec.Agent.Image)
 	}
 }
@@ -195,10 +201,10 @@ func TestResolveAgentForRun(t *testing.T) {
 // huginn-self 용으로 바뀌고, 게이트웨이 env(ANTHROPIC_*)는 주입되지 않아야 한다.
 func TestBuildJobTemplateHuginnSelf(t *testing.T) {
 	agent, issue := testFixtures()
-	agent.Spec.Agent.Runtime = "huginn-self"
-	agent.Spec.Agent.BaseURL = "https://llm-gateway.example.com"
-	agent.Spec.Agent.Model = "gemma-4-31B-it"
-	agent.Spec.Agent.AuthStyle = "openai"
+	agent.Spec.Agent.Runtime = runtimeHuginnSelf
+	agent.Spec.Agent.BaseURL = testGatewayURL
+	agent.Spec.Agent.Model = testModel
+	agent.Spec.Agent.AuthStyle = authStyleOpenAI
 
 	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
 
@@ -208,16 +214,16 @@ func TestBuildJobTemplateHuginnSelf(t *testing.T) {
 	if jt.MountPath != huginnMountPath {
 		t.Errorf("mountPath = %q, want %q", jt.MountPath, huginnMountPath)
 	}
-	if e, ok := envByName(jt.Env, "MUNINN_BASE_URL"); !ok || e.Value != "https://llm-gateway.example.com" {
+	if e, ok := envByName(jt.Env, "MUNINN_BASE_URL"); !ok || e.Value != testGatewayURL {
 		t.Errorf("MUNINN_BASE_URL = %q (ok=%v)", e.Value, ok)
 	}
-	if e, ok := envByName(jt.Env, "MUNINN_MODEL"); !ok || e.Value != "gemma-4-31B-it" {
+	if e, ok := envByName(jt.Env, "MUNINN_MODEL"); !ok || e.Value != testModel {
 		t.Errorf("MUNINN_MODEL = %q (ok=%v)", e.Value, ok)
 	}
-	if e, ok := envByName(jt.Env, "MUNINN_AUTH_STYLE"); !ok || e.Value != "openai" {
+	if e, ok := envByName(jt.Env, "MUNINN_AUTH_STYLE"); !ok || e.Value != authStyleOpenAI {
 		t.Errorf("MUNINN_AUTH_STYLE = %q (ok=%v)", e.Value, ok)
 	}
-	assertOptionalSecretRef(t, jt.Env, "MUNINN_LLM_API_KEY", agentSecretName, anthropicAuthTokenKeyName)
+	assertOptionalSecretRef(t, jt.Env, "MUNINN_LLM_API_KEY", anthropicAuthTokenKeyName)
 	// 게이트웨이 env(claude-code 전용) + Anthropic 직접 인증 키는 huginn-self 에 주입되지 않는다.
 	// (리뷰 #3: huginn-self 는 MUNINN_LLM_API_KEY 만 쓰므로 진짜 Anthropic 키가 제3자 게이트웨이로 새면 안 됨.)
 	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
@@ -236,20 +242,20 @@ func TestBuildJobTemplateHuginnSelf(t *testing.T) {
 // TestGatewayEnv: §3 게이트웨이 경유 env 주입(baseUrl/model/authStyle)을 검증한다.
 func TestGatewayEnv(t *testing.T) {
 	agent, issue := testFixtures()
-	agent.Spec.Agent.BaseURL = "https://llm-gateway.example.com"
-	agent.Spec.Agent.Model = "gemma-4-31B-it"
-	agent.Spec.Agent.AuthStyle = "bearer"
+	agent.Spec.Agent.BaseURL = testGatewayURL
+	agent.Spec.Agent.Model = testModel
+	agent.Spec.Agent.AuthStyle = authStyleBearer
 
 	jt := buildJobTemplate(agent, issue, "http://mem", "http://api")
 
-	if e, ok := envByName(jt.Env, "ANTHROPIC_BASE_URL"); !ok || e.Value != "https://llm-gateway.example.com" {
-		t.Errorf("ANTHROPIC_BASE_URL = %q (ok=%v), want https://llm-gateway.example.com", e.Value, ok)
+	if e, ok := envByName(jt.Env, "ANTHROPIC_BASE_URL"); !ok || e.Value != testGatewayURL {
+		t.Errorf("ANTHROPIC_BASE_URL = %q (ok=%v), want testGatewayURL", e.Value, ok)
 	}
-	if e, ok := envByName(jt.Env, "ANTHROPIC_MODEL"); !ok || e.Value != "gemma-4-31B-it" {
-		t.Errorf("ANTHROPIC_MODEL = %q (ok=%v), want gemma-4-31B-it", e.Value, ok)
+	if e, ok := envByName(jt.Env, "ANTHROPIC_MODEL"); !ok || e.Value != testModel {
+		t.Errorf("ANTHROPIC_MODEL = %q (ok=%v), want testModel", e.Value, ok)
 	}
 	// authStyle=bearer → ANTHROPIC_AUTH_TOKEN 은 agent-secrets/anthropic-auth-token optional secretKeyRef.
-	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_AUTH_TOKEN", agentSecretName, anthropicAuthTokenKeyName)
+	assertOptionalSecretRef(t, jt.Env, "ANTHROPIC_AUTH_TOKEN", anthropicAuthTokenKeyName)
 	// 보안(리뷰 #3): bearer 게이트웨이 경유 시 진짜 Anthropic 키가 제3자 게이트웨이로 누출되지 않도록
 	// ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN 은 *주입되지 않아야* 한다(ANTHROPIC_AUTH_TOKEN 만).
 	for _, name := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
@@ -259,7 +265,7 @@ func TestGatewayEnv(t *testing.T) {
 	}
 
 	// authStyle 이 bearer 가 아니면 ANTHROPIC_AUTH_TOKEN 미주입(기존 api-key/oauth 사용).
-	agent.Spec.Agent.AuthStyle = "anthropic"
+	agent.Spec.Agent.AuthStyle = authStyleAnthropic
 	jt2 := buildJobTemplate(agent, issue, "http://mem", "http://api")
 	if _, ok := envByName(jt2.Env, "ANTHROPIC_AUTH_TOKEN"); ok {
 		t.Error("authStyle=anthropic 인데 ANTHROPIC_AUTH_TOKEN 이 주입됨")
@@ -268,11 +274,11 @@ func TestGatewayEnv(t *testing.T) {
 		t.Error("authStyle=anthropic 라도 baseUrl 설정 시 ANTHROPIC_BASE_URL 은 주입돼야 함")
 	}
 	// authStyle=anthropic(비-bearer)면 ANTHROPIC_API_KEY 는 주입돼야 한다(직접 Anthropic 경로).
-	assertOptionalSecretRef(t, jt2.Env, "ANTHROPIC_API_KEY", agentSecretName, anthropicKeyName)
+	assertOptionalSecretRef(t, jt2.Env, "ANTHROPIC_API_KEY", anthropicKeyName)
 
 	// runtime=huginn-self 는 §3 분기 대상이 아님 → 게이트웨이 env 미주입(§4 별도 분기).
-	agent.Spec.Agent.Runtime = "huginn-self"
-	agent.Spec.Agent.AuthStyle = "bearer"
+	agent.Spec.Agent.Runtime = runtimeHuginnSelf
+	agent.Spec.Agent.AuthStyle = authStyleBearer
 	jt3 := buildJobTemplate(agent, issue, "http://mem", "http://api")
 	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"} {
 		if _, ok := envByName(jt3.Env, name); ok {
@@ -373,18 +379,45 @@ func TestRunTimeoutSeconds(t *testing.T) {
 }
 
 // assertOptionalSecretRef 는 env 가 (secret,key) 를 가리키는 optional secretKeyRef 인지 검증한다(§5.1).
-func assertOptionalSecretRef(t *testing.T, env []corev1.EnvVar, envName, secret, key string) {
+// assertOptionalSecretRef 는 env 가 agent-secrets 의 key 를 가리키는 optional secretKeyRef 인지 검증한다.
+// (secret 은 항상 agentSecretName 이므로 파라미터화하지 않는다 — unparam.)
+func assertOptionalSecretRef(t *testing.T, env []corev1.EnvVar, envName, key string) {
 	t.Helper()
 	e, ok := envByName(env, envName)
 	if !ok || e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
 		t.Fatalf("%s secretKeyRef 누락", envName)
 	}
 	ref := e.ValueFrom.SecretKeyRef
-	if ref.Name != secret || ref.Key != key {
+	if ref.Name != agentSecretName || ref.Key != key {
 		t.Errorf("%s ref = %+v", envName, ref)
 	}
 	if ref.Optional == nil || !*ref.Optional {
 		t.Errorf("%s secretKeyRef 는 optional 이어야 함", envName)
+	}
+}
+
+// assertPodHardening 은 expandPodSpec 의 비-root/격리 baseline 불변식을 검증한다(§5.1·§6.1·§6.2-5).
+// TestExpandPodSpec 본문에서 분리해 gocyclo 복잡도를 낮춘다.
+func assertPodHardening(t *testing.T, ps corev1.PodSpec, c corev1.Container) {
+	t.Helper()
+	if ps.SecurityContext == nil || ps.SecurityContext.RunAsNonRoot == nil || !*ps.SecurityContext.RunAsNonRoot {
+		t.Error("pod runAsNonRoot 미설정")
+	}
+	if ps.SecurityContext == nil || ps.SecurityContext.FSGroup == nil || *ps.SecurityContext.FSGroup != agentRunAsUser {
+		t.Errorf("pod fsGroup = %v, want %d", ps.SecurityContext.FSGroup, agentRunAsUser)
+	}
+	if c.SecurityContext == nil || c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
+		t.Error("컨테이너 allowPrivilegeEscalation 은 false 여야 함")
+	}
+	if c.SecurityContext == nil || c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) == 0 {
+		t.Error("컨테이너 capability 드롭 미설정")
+	}
+	if ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken {
+		t.Error("automountServiceAccountToken 은 false 여야 함(공격 표면)")
+	}
+	if c.SecurityContext == nil || c.SecurityContext.SeccompProfile == nil ||
+		c.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Error("컨테이너 seccompProfile=RuntimeDefault 미설정")
 	}
 }
 
@@ -424,26 +457,7 @@ func TestExpandPodSpec(t *testing.T) {
 		t.Errorf("PVC volume = %+v", ps.Volumes)
 	}
 
-	// 비-root 하드닝(§5.1, §6.1): pod fsGroup/runAsNonRoot + 컨테이너 capability 드롭.
-	if ps.SecurityContext == nil || ps.SecurityContext.RunAsNonRoot == nil || !*ps.SecurityContext.RunAsNonRoot {
-		t.Error("pod runAsNonRoot 미설정")
-	}
-	if ps.SecurityContext == nil || ps.SecurityContext.FSGroup == nil || *ps.SecurityContext.FSGroup != agentRunAsUser {
-		t.Errorf("pod fsGroup = %v, want %d", ps.SecurityContext.FSGroup, agentRunAsUser)
-	}
-	if c.SecurityContext == nil || c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation {
-		t.Error("컨테이너 allowPrivilegeEscalation 은 false 여야 함")
-	}
-	if c.SecurityContext == nil || c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) == 0 {
-		t.Error("컨테이너 capability 드롭 미설정")
-	}
-	// 격리 baseline(§6.2-5): SA 토큰 자동마운트 차단(공격 표면 축소) + 컨테이너 레벨 seccomp.
-	if ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken {
-		t.Error("automountServiceAccountToken 은 false 여야 함(SA Role 미바인딩 — 공격 표면)")
-	}
-	if c.SecurityContext.SeccompProfile == nil || c.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
-		t.Error("컨테이너 seccompProfile=RuntimeDefault 미설정")
-	}
+	assertPodHardening(t, ps, c) // 비-root + capability drop + automount=false + seccomp(§5.1·§6.1·§6.2-5)
 
 	// AgentPVCName 비면 볼륨/마운트/init 미부착.
 	ps2 := expandPodSpec(muninniov1beta1.JobTemplate{Image: "img:2"})
