@@ -205,8 +205,8 @@ func (c *Client) RequestApproval(reasons []map[string]any) {
 		return
 	}
 	patch := map[string]any{
-		"requestApproval":  map[string]any{"reasons": reasons},
-		"approvalReasons":  reasons,
+		"requestApproval": map[string]any{"reasons": reasons},
+		"approvalReasons": reasons,
 	}
 	url := fmt.Sprintf("%s/api/runs/%s/report", strings.TrimRight(c.APIEndpoint, "/"), c.RunName)
 	_, _ = c.httpJSON("POST", url, patch, 1, time.Time{})

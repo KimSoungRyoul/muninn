@@ -141,7 +141,10 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-func run(args []string) int {
+// run 은 named return(code)을 쓴다 — recover 가 패닉을 잡았을 때 code 를 1 로 설정해 os.Exit(1) 하기 위함.
+// unnamed 이면 패닉 복구 후 zero value(0)가 반환돼 컨테이너가 exit 0 → Job 이 Succeeded 로 오기록된다
+// (claude-code runner.py 는 예외 시 1 반환). cross-backend Job 종료 시맨틱(§2.6)을 일치시킨다.
+func run(args []string) (code int) {
 	if isSelftest(args) {
 		return selftest()
 	}
@@ -168,6 +171,7 @@ func run(args []string) int {
 		if rec := recover(); rec != nil {
 			logf("ERROR: panic: %v — terminal 보고", rec)
 			r.FinalizeOnAbort(fmt.Sprintf("panic: %v", rec), sigtermBudget)
+			code = 1 // 패닉 복구 시 exit 1 — Job 이 Failed 로 닫히게(Succeeded 오기록 방지).
 		}
 	}()
 

@@ -80,12 +80,14 @@ func isFalsyID(id any) bool {
 	return false
 }
 
-// scoreToString 은 Python str(score) 와 동일하게 score 를 문자열화한다. JSON 수치는 float64 로 들어오며
-// 정수값(예: 3.0)은 "3" 으로(불필요한 .0 제거), 그 외는 최소 자리수로 표현한다.
+// scoreToString 은 Python str(float) 와 동형으로 score 를 문자열화한다. JSON 수치는 float64 로 들어오며,
+// 정수값 float(예: 1.0)은 ".0" 을 유지해(Python str(1.0)=="1.0") cross-language 계약을 맞추고,
+// 그 외는 최단 표현(%g, Python str(0.9)=="0.9")을 쓴다. (계약 한계: 점수는 float 전제 — JSON 정수 리터럴
+// score 는 Go 가 항상 float64 로 파싱하므로 Python int 와 갈릴 수 있어 골든은 float 점수만 사용한다.)
 func scoreToString(s any) string {
 	if f, ok := s.(float64); ok {
 		if f == float64(int64(f)) {
-			return fmt.Sprintf("%d", int64(f))
+			return fmt.Sprintf("%d.0", int64(f))
 		}
 		return fmt.Sprintf("%g", f)
 	}

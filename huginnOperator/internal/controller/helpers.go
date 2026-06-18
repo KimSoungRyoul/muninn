@@ -44,8 +44,8 @@ const (
 
 	// huginn-self 백엔드(§4): 슬림 Go 바이너리 엔트리 + 별도 HOME(§2.4 — claude-code 와 PVC subPath 안에서
 	// 한 종류만 섞이게). runtime=huginn-self 일 때 buildJobTemplate 이 이 command/mountPath 로 분기한다.
-	huginnSelfCmd   = "/usr/local/bin/huginn-self"
-	huginnMountPath = "/home/node/.huginn"
+	huginnSelfCmd     = "/usr/local/bin/huginn-self"
+	huginnMountPath   = "/home/node/.huginn"
 	runtimeHuginnSelf = "huginn-self"
 
 	// agentHomeInitContainerName / agentStoreInitPath: subPath(에이전트 홈) 디렉토리를 미리 만드는
@@ -305,11 +305,14 @@ func buildJobTemplate(agent *muninniov1beta1.HuginnAgent, issue *muninniov1beta1
 		}},
 	}
 	// Anthropic 직접 인증(§5.1, §6.2): API 키/OAuth 토큰 중 하나면 충분 → 둘 다 optional secretKeyRef.
-	// **단 authStyle=bearer(게이트웨이 경유)면 주입하지 않는다** — claude CLI/SDK 는 ANTHROPIC_API_KEY 와
-	// ANTHROPIC_AUTH_TOKEN 이 동시 존재하면 x-api-key·Authorization 헤더를 둘 다 실어 보내, 진짜 Anthropic
-	// 키가 ANTHROPIC_BASE_URL 의 제3자 게이트웨이로 누출된다(신뢰경계 위반). bearer 경로는 gatewayEnv 의
-	// ANTHROPIC_AUTH_TOKEN 만 쓴다(상호배타). "최소 하나 존재"는 런타임(claude_skill.sh)이 강제한다.
-	if agent.Spec.Agent.AuthStyle != "bearer" {
+	// **claude-code 의 직접-Anthropic 경로(게이트웨이 미경유)에만 주입한다.** 다음 경우엔 주입하지 않는다:
+	//   (a) authStyle=bearer(claude-code 게이트웨이) — gatewayEnv 의 ANTHROPIC_AUTH_TOKEN 만 쓴다,
+	//   (b) runtime=huginn-self — 모델 API 키는 MUNINN_LLM_API_KEY(huginnSelfEnv)로만, ANTHROPIC_* 불요.
+	// 이유: ANTHROPIC_API_KEY 와 ANTHROPIC_AUTH_TOKEN/제3자 게이트웨이가 공존하면 진짜 Anthropic 키가
+	// ANTHROPIC_BASE_URL 의 제3자(또는 huginn-self 의 MUNINN_BASE_URL) 엔드포인트로 새어나갈 수 있다(신뢰경계 위반).
+	// "최소 하나 존재"는 런타임(claude_skill.sh)이 강제한다(huginn-self 는 자체 가드).
+	isClaudeCode := agent.Spec.Agent.Runtime != runtimeHuginnSelf
+	if isClaudeCode && agent.Spec.Agent.AuthStyle != "bearer" {
 		env = append(env,
 			corev1.EnvVar{Name: "ANTHROPIC_API_KEY", ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{

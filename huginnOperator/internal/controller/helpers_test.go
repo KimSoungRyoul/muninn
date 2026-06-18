@@ -167,7 +167,7 @@ func TestResolveAgentForRun(t *testing.T) {
 	// 3) effRuntime=huginn-self(동결) + image 비면 → huginn-self 기본 이미지 + runtime 동결.
 	a3, _ := testFixtures()
 	a3.Spec.Agent.Image = ""
-	a3.Spec.Agent.Runtime = "claude-code" // 라이브 agent 는 claude-code 인데...
+	a3.Spec.Agent.Runtime = "claude-code"                      // 라이브 agent 는 claude-code 인데...
 	got := resolveAgentForRun(a3, "huginn-self", ccImg, hsImg) // ...동결값 huginn-self 가 우선
 	if got.Spec.Agent.Runtime != "huginn-self" || got.Spec.Agent.Image != hsImg {
 		t.Errorf("동결 runtime=%q image=%q, want huginn-self/%s", got.Spec.Agent.Runtime, got.Spec.Agent.Image, hsImg)
@@ -218,10 +218,11 @@ func TestBuildJobTemplateHuginnSelf(t *testing.T) {
 		t.Errorf("MUNINN_AUTH_STYLE = %q (ok=%v)", e.Value, ok)
 	}
 	assertOptionalSecretRef(t, jt.Env, "MUNINN_LLM_API_KEY", agentSecretName, anthropicAuthTokenKeyName)
-	// 게이트웨이 env(claude-code 전용)는 huginn-self 에 주입되지 않는다.
-	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN"} {
+	// 게이트웨이 env(claude-code 전용) + Anthropic 직접 인증 키는 huginn-self 에 주입되지 않는다.
+	// (리뷰 #3: huginn-self 는 MUNINN_LLM_API_KEY 만 쓰므로 진짜 Anthropic 키가 제3자 게이트웨이로 새면 안 됨.)
+	for _, name := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
 		if _, ok := envByName(jt.Env, name); ok {
-			t.Errorf("huginn-self 인데 게이트웨이 env %s 가 주입됨", name)
+			t.Errorf("huginn-self 인데 %s 가 주입됨(키 누출/불요 env)", name)
 		}
 	}
 	// claude-code 기본은 여전히 claude_skill.sh + ~/.claude.
