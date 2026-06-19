@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@types/mdx": "^2.0.13",
-    "@types/node": "^25.9.3",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.0.0",
     "pagefind": "^1.5.2",
     "typescript": "^6.0.3"
