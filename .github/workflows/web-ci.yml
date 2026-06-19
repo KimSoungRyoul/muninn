@@ -39,7 +39,7 @@ jobs:
       #   자동탐지가 실패한다 → version 을 명시한다(muninnWeb/package.json 의 pnpm@9.12.0 과 일치).
       #   setup-node 의 cache:pnpm 보다 먼저 와야 함.
       - name: Set up pnpm
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
           version: 9.12.0
 
