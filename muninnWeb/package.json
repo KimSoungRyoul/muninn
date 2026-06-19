@@ -12,16 +12,16 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.83",
-    "@copilotkit/react-core": "^1.60.0",
-    "@copilotkit/react-ui": "^1.60.0",
-    "@copilotkit/runtime": "^1.60.0",
+    "@ai-sdk/anthropic": "^3.0.85",
+    "@copilotkit/react-core": "^1.61.0",
+    "@copilotkit/react-ui": "^1.61.0",
+    "@copilotkit/runtime": "^1.61.0",
     "@kubernetes/client-node": "^1.4.0",
-    "ai": "^6.0.202",
+    "ai": "^6.0.208",
     "drizzle-orm": "^0.45.2",
     "jose": "^6.2.3",
     "next": "16.2.9",
-    "pg": "^8.21.0",
+    "pg": "^8.22.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "zod": "^4.4.3"
