@@ -41,7 +41,7 @@ jobs:
       # go-version-file 로 go.mod(go 1.26)를 그대로 따른다 — custom-gcl(make lint)이 "go1.25 < 1.26" 으로
       # 실패하지 않도록 toolchain 을 go.mod 와 정확히 일치시킨다.
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: huginnOperator/go.mod
           cache-dependency-path: huginnOperator/go.sum
