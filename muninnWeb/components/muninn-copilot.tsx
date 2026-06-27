@@ -19,10 +19,12 @@ import {
   useHumanInTheLoop,
 } from "@copilotkit/react-core/v2";
 import { z } from "zod";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useWorkspace } from "@/lib/workspace-context";
 import { navPath, appPath, sectionFromPath } from "@/lib/nav";
 import { useMuninnToolRenderers, DelegationApprovalCard } from "@/components/copilot-tool-cards";
+import { useMediaQuery } from "@/lib/use-media-query";
 
 const json = (v: unknown) => JSON.stringify(v, null, 0);
 
@@ -41,6 +43,15 @@ export function MuninnCopilot() {
   const router = useRouter();
   const pathname = usePathname() || "/";
   const { workspaceId, workspace, workspaces, setWorkspaceId } = useWorkspace();
+  // 모바일에서는 사이드바가 화면을 가리지 않도록 폭을 뷰포트에 맞춘다(≤768 = full-width 오버레이).
+  const isMobile = useMediaQuery("(max-width: 768px)");
+  // iPad(≤1024)까지는 docked 사이드바가 본문을 잠식하지 않도록 collapsed 로 시작한다.
+  const isNarrow = useMediaQuery("(max-width: 1024px)");
+  // useMediaQuery 는 SSR/첫 페인트에 false 다. 마운트 전에는 항상 closed 로 시작해
+  // 모바일에서 사이드바가 열린 채 깜빡였다 닫히는 FOUC 를 막는다(데스크탑은 마운트 후 open).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const narrow = !mounted || isNarrow;
 
   // 현재 화면 맥락(네비게이션) — 식별자 참조/동적 추천에 쓴다. 실 데이터는 server tool 로 조회한다.
   const section = sectionFromPath(pathname);
@@ -179,7 +190,13 @@ export function MuninnCopilot() {
 
   return (
     <CopilotSidebar
-      width={420}
+      // 모바일에서는 docked 사이드바가 본문을 가리지 않도록 collapsed 로 시작하고,
+      // 열릴 땐 full-width 오버레이로 띄운다. 데스크탑은 기존 docked-open(420px) 유지.
+      // defaultOpen 은 초기값만 반영하므로 브레이크포인트 교차 시 key 로 remount 한다.
+      // narrow 는 마운트 전 true(=closed) → 첫 페인트는 항상 닫힌 상태(모바일 FOUC 제거).
+      key={narrow ? "cs-narrow" : "cs-wide"}
+      defaultOpen={!narrow}
+      width={isMobile ? "100%" : 420}
       labels={{
         modalHeaderTitle: "Muninn Assistant",
         // 짧은 환영문 — 긴 문장은 heading 으로 렌더돼 넘침. 사용 예시는 추천 pill 로 안내.

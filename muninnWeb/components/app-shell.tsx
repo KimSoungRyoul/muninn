@@ -16,6 +16,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const section = sectionFromPath(pathname);
 
+  // 모바일(≤768px) 오프캔버스 사이드바 드로어 상태. 데스크탑에서는 CSS 가 무시한다.
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  // 라우트가 바뀌면 드로어를 닫는다(모바일에서 nav 탭 후 본문이 가려지지 않도록).
+  React.useEffect(() => setDrawerOpen(false), [pathname]);
+  // 드로어가 열리면 modal 처럼: ESC 로 닫고, 배경 본문 스크롤을 잠근다.
+  React.useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawerOpen(false); };
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [drawerOpen]);
+
   // 승인 대기(awaiting) run 을 현재 워크스페이스 기준으로 집계 — 대시보드 KPI 와 동일한 소스.
   // 가장 오래된 awaiting run 을 벨 클릭 시 열도록 연결한다. mock 직접 참조 대신 API 로 조회한다.
   const { data: apps } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
@@ -32,6 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       className="app"
       data-density="comfortable"
       data-sidebar="expanded"
+      data-drawer={drawerOpen ? "open" : "closed"}
       data-app="hm"
       data-theme="light"
     >
@@ -44,8 +62,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           router.push("/");
         }}
       />
+      {/* 모바일 드로어 백드롭 — 열림 상태에서만 활성(CSS), 클릭 시 닫힘 */}
+      <div
+        className="hm-drawer-backdrop"
+        aria-hidden={!drawerOpen}
+        onClick={() => setDrawerOpen(false)}
+      />
       <HmHeader
         pendingApprovals={awaitingRuns.length}
+        drawerOpen={drawerOpen}
+        onMenu={() => setDrawerOpen((v) => !v)}
         onNotif={() =>
           router.push(oldestAwaiting ? `/runs/${oldestAwaiting.id}` : "/apps")
         }

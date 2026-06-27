@@ -106,7 +106,7 @@ function Chip({ active, onClick, children, leftIcon }: any) {
 function Avatar({ name, size = "md", src, color }: any) {
   const initials = name ? name.split(" ").map(s => s[0]).slice(0, 2).join("").toUpperCase() : "?";
   const cls = `avatar ${size !== "md" ? `avatar-${size}` : ""}`;
-  if (src) return <span className={cls}><img src={src} style={{width:"100%",height:"100%",objectFit:"cover"}} alt={name || ""} /></span>;
+  if (src) return <span className={cls}><img className="avatar-img" src={src} alt={name || ""} /></span>;
   return <span className={cls} style={color ? {background: color, color: "#fff"} : null}>{initials}</span>;
 }
 
@@ -117,7 +117,7 @@ function Tabs({ tabs, value, onChange, pill = false }: any) {
       {tabs.map(t => (
         <button key={t.value} className={`tab ${value === t.value ? "is-active" : ""}`} onClick={() => onChange?.(t.value)}>
           {t.label}
-          {t.count != null && <span style={{marginLeft:6,fontSize:11,opacity:0.7}}>{t.count}</span>}
+          {t.count != null && <span className="tab-count">{t.count}</span>}
         </button>
       ))}
     </div>
@@ -131,7 +131,7 @@ function Empty({ icon = "folder", title, sub, action }: any) {
       <span className="ico"><Icon name={icon} size={24} /></span>
       <div className="ttl">{title}</div>
       {sub && <div className="sub">{sub}</div>}
-      {action && <div style={{marginTop:8}}>{action}</div>}
+      {action && <div className="empty-action">{action}</div>}
     </div>
   );
 }

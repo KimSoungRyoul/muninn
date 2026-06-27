@@ -67,7 +67,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
       </div>
 
       {/* Flow + Top failing */}
-      <div style={{display:"grid", gridTemplateColumns:"1.6fr 1fr", gap:12, marginBottom:12}}>
+      <div className="hm-dash-split">
         <HmCard
           title="실행 추이"
           meta="24시간 · 30분 단위"
@@ -106,6 +106,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
         action={<a href="#" onClick={e => {e.preventDefault(); onNav("apps");}} style={{fontSize:13, color:"var(--primary-40)", textDecoration:"none", fontFamily:"var(--font-sans)", fontWeight:600}}>전체 보기 →</a>}
         flush
       >
+        <div className="hm-table-scroll" tabIndex={0}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -137,6 +138,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
             ))}
           </tbody>
         </table>
+        </div>
       </HmCard>
 
       {/* Cost burn */}

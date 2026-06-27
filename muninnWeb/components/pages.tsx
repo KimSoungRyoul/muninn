@@ -26,6 +26,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
       </HmPageHead>
 
       <HmCard flush>
+        <div className="hm-table-scroll" tabIndex={0}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -79,6 +80,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
             ))}
           </tbody>
         </table>
+        </div>
       </HmCard>
     </>
   );
@@ -228,7 +230,7 @@ function AgentSettingsTab({ app }) {
           <TextInput label="런타임 이미지 (spec.agent.image)" className="input mono"
             value={cfg.image} onChange={e => setCfgK("image", e.target.value)}
             hint="GitHub Packages: ghcr.io/kimsoungryoul/muninn/agent-runtime:<tag>" />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div className="hm-grid-2">
             <Select label="런타임" value={cfg.runtime} onChange={e => setCfgK("runtime", e.target.value)}
               options={[{ value: "claude-code", label: "claude-code" }]} />
             <TextInput label="SOUL.md ConfigMap (soulRef)" value={cfg.soulRef || ""}
@@ -364,6 +366,7 @@ function OverviewTab({ a, appEvents, appRuns, onOpenRun, setTab }: any) {
       <HmCard title="최근 이벤트" meta={`${appEvents.length}건 · Events 탭에서 자세히`}
         action={<a href="#" onClick={e => {e.preventDefault(); setTab("events");}} style={{fontSize:13, color:"var(--primary-40)", textDecoration:"none", fontFamily:"var(--font-sans)", fontWeight:600}}>모두 보기 →</a>}
         flush>
+        <div className="hm-table-scroll" tabIndex={0}>
         <table className="hm-table">
           <tbody>
             {appEvents.slice(0, 5).map(e => (
@@ -384,6 +387,7 @@ function OverviewTab({ a, appEvents, appRuns, onOpenRun, setTab }: any) {
             ))}
           </tbody>
         </table>
+        </div>
       </HmCard>
     </>
   );
@@ -414,14 +418,14 @@ function EventsTab({ a, events, allRuns = [], onOpenRun }: any) {
           <Button size="sm" variant="ghost" leftIcon="filter">필터</Button>
           <Button size="sm" variant="ghost" leftIcon="download">내보내기</Button>
         </div>
-        <div>
+        <div className="hm-table-scroll" tabIndex={0}>
           {events.map(e => {
             const isOpen = expanded.has(e.id);
             const runs = e.runIds.map(rid => allRuns.find(r => r.id === rid)).filter(Boolean);
             return (
               <div key={e.id} style={{borderBottom:"1px solid var(--border-subtle)"}}>
                 {/* Event row */}
-                <div style={{display:"grid", gridTemplateColumns:"36px 130px 1fr 110px 110px 24px", gap:12, alignItems:"center", padding:"16px 20px", cursor:"pointer", background: isOpen ? "var(--surface-container-low)" : "transparent"}}
+                <div className="hm-evrow" style={{display:"grid", gridTemplateColumns:"36px 130px 1fr 110px 110px 24px", gap:12, alignItems:"center", padding:"16px 20px", cursor:"pointer", background: isOpen ? "var(--surface-container-low)" : "transparent"}}
                      onClick={() => toggle(e.id)}>
                   <span style={{transition:"transform 150ms", transform: isOpen ? "rotate(90deg)" : "none", display:"inline-flex", color:"var(--on-surface-muted)"}}>
                     <Icon name="chevronRight" size={16}/>
@@ -452,7 +456,7 @@ function EventsTab({ a, events, allRuns = [], onOpenRun }: any) {
                     </div>
                     <div style={{display:"flex", flexDirection:"column", gap:4}}>
                       {runs.map((r, i) => (
-                        <div key={r.id} style={{display:"grid", gridTemplateColumns:"20px 140px 100px 100px 100px 1fr 20px", gap:12, alignItems:"center", padding:"10px 12px", background:"var(--surface)", border:"1px solid var(--border-subtle)", borderRadius:8, cursor:"pointer"}}
+                        <div key={r.id} className="hm-evsubrow" style={{display:"grid", gridTemplateColumns:"20px 140px 100px 100px 100px 1fr 20px", gap:12, alignItems:"center", padding:"10px 12px", background:"var(--surface)", border:"1px solid var(--border-subtle)", borderRadius:8, cursor:"pointer"}}
                              onClick={(ev) => { ev.stopPropagation(); onOpenRun(r.id); }}>
                           <span style={{fontFamily:"var(--font-mono)", fontSize:11, color:"var(--on-surface-muted)", fontWeight:600}}>#{i + 1}</span>
                           <StatusLabel status={r.status}>{runStatusLabel(r.status)}</StatusLabel>
@@ -738,7 +742,7 @@ function HmMemories() {
       </HmPageHead>
 
       {/* Stats strip */}
-      <div className="hm-kpi-grid" style={{gridTemplateColumns:"repeat(4, 1fr)"}}>
+      <div className="hm-kpi-grid">
         <HmKpi label="전체 Memories"       value={`${all.length}`}/>
         <HmKpi label="Global"        value={`${all.filter(m => m.scope === "global").length}`} hint="모든 Application 공유"/>
         <HmKpi label="App 전용"      value={`${all.filter(m => m.scope === "app").length}`}/>
@@ -748,7 +752,7 @@ function HmMemories() {
       {/* Search + filter */}
       <HmCard>
         <div style={{display:"flex", gap:12, alignItems:"flex-end", flexWrap:"wrap"}}>
-          <div style={{flex:"1 1 280px"}}>
+          <div className="hm-filter-grow" style={{flex:"1 1 280px"}}>
             <label style={{display:"block", marginBottom:6, fontSize:12, color:"var(--on-surface-muted)", fontWeight:600}}>검색</label>
             <div className="input-with-icon">
               <Icon name="search" size={15}/>
@@ -1133,19 +1137,21 @@ function RegistrySection() {
 
 function PlatformTable({ rows, cols }: any) {
   return (
-    <table className="hm-table">
-      <thead>
-        <tr>{cols.map(c => <th key={c.key} style={c.width ? {width: c.width} : null}>{c.label}</th>)}<th style={{width:24}}></th></tr>
-      </thead>
-      <tbody>
-        {rows.map(r => (
-          <tr key={r.name}>
-            {cols.map(c => <td key={c.key} className={c.mono ? "mono" : ""}>{c.render ? c.render(r) : r[c.key]}</td>)}
-            <td><Icon name="chevronRight" size={16} style={{color:"var(--on-surface-muted)"}}/></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="hm-table-scroll" tabIndex={0}>
+      <table className="hm-table">
+        <thead>
+          <tr>{cols.map(c => <th key={c.key} style={c.width ? {width: c.width} : null}>{c.label}</th>)}<th style={{width:24}}></th></tr>
+        </thead>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.name}>
+              {cols.map(c => <td key={c.key} className={c.mono ? "mono" : ""}>{c.render ? c.render(r) : r[c.key]}</td>)}
+              <td><Icon name="chevronRight" size={16} style={{color:"var(--on-surface-muted)"}}/></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
