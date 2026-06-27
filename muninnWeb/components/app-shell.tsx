@@ -16,7 +16,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const section = sectionFromPath(pathname);
-  // 라이트/다크 테마 — .app 에 data-theme 를 칠해 hm 전용 다크 규칙까지 적용한다.
+  // 라이트/다크 테마. carrier 는 <html>(use-theme 가 관리)로 단일화 — 여기선 토글 버튼 아이콘과
+  // 토글 콜백만 쓴다. data-theme 를 .app 에 또 두면 React 지연으로 첫 페인트 FOUC 가 생기므로 두지 않는다.
   const { resolved: theme, toggle: toggleTheme } = useTheme();
 
   // 모바일(≤768px) 오프캔버스 사이드바 드로어 상태. 데스크탑에서는 CSS 가 무시한다.
@@ -53,7 +54,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       data-sidebar="expanded"
       data-drawer={drawerOpen ? "open" : "closed"}
       data-app="hm"
-      data-theme={theme}
     >
       <HmSidebar
         section={section}

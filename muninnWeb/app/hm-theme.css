@@ -56,7 +56,10 @@
 }
 
 /* ---------- Dark theme (alt) ---------- */
-[data-theme="dark"][data-app="hm"] {
+/* 후손 결합자: data-theme 는 <html>(layout 의 pre-hydration 스크립트가 페인트 전 칠함)에,
+   data-app 은 .app 에 있으므로 컴파운드(같은 엘리먼트)가 아니라 후손이어야 첫 페인트부터
+   hm 다크 팔레트가 적용된다(다크 FOUC 방지). 특이도 0,2,0 으로 라이트 [data-app="hm"] 를 이김. */
+[data-theme="dark"] [data-app="hm"] {
   --bg:               #12161B;
   --bg-subtle:        #181D24;
   --bg-low:           #1E232B;
