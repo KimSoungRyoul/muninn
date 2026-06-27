@@ -274,6 +274,55 @@
 }
 
 /* =====================================================================
+   CopilotKit v2 (Muninn Assistant) — 브랜드 테마 오버라이드.
+   라이브러리 기본 shadcn 토큰은 전부 무채색(oklch 채도 0)이라 밋밋하다.
+   패널 root(.copilotKitSidebar)에서 콘솔 디자인 토큰으로 재매핑하면 하위 cpk:* 유틸이
+   상속받는다. 콘솔 토큰(var(--surface)/--on-surface/--primary-50)은 [data-theme=dark] 에서
+   자동 전환되고, accent 는 color-mix 틴트라 라이트/다크를 단일 정의로 커버한다.
+   변수는 aside 에 직접 정의 → :root/.dark 의 라이브러리 정의보다 근접해 상속에서 우선한다.
+   ===================================================================== */
+.copilotKitSidebar,
+[data-copilot-sidebar] {
+  --background: var(--surface);
+  --foreground: var(--on-surface);
+  --card: var(--surface);
+  --card-foreground: var(--on-surface);
+  --popover: var(--surface-container-low, var(--surface));
+  --popover-foreground: var(--on-surface);
+  --primary: var(--primary-50);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-container);
+  --secondary-foreground: var(--on-surface);
+  --muted: var(--surface-container);
+  --muted-foreground: var(--on-surface-muted);
+  --accent: color-mix(in oklch, var(--primary-50) 12%, transparent);
+  --accent-foreground: var(--primary-50);
+  --border: var(--border-subtle);
+  --input: var(--border);
+  --ring: var(--primary-50);
+}
+/* 입력창 placeholder 가 #00000077 로 하드코딩돼 다크에서 안 보이던 문제 → 토큰색으로. */
+.copilotKitSidebar textarea::placeholder,
+.copilotKitSidebar input::placeholder {
+  color: var(--on-surface-muted);
+}
+/* 헤더에 브랜드 틴트 + 브랜드 하단 보더 — 무채색 흰 헤더 대비 정체성 부여. */
+.copilotKitSidebar .copilotKitHeader {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--primary-50) 12%, var(--surface)), var(--surface)) !important;
+  border-bottom-color: color-mix(in oklch, var(--primary-50) 32%, var(--border-subtle));
+}
+/* 추천 질문 pill — 무채색 회색 보더 → 브랜드 보더, hover 시 브랜드 틴트 배경. */
+.copilotKitSidebar button.group {
+  border-color: color-mix(in oklch, var(--primary-50) 34%, transparent);
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.copilotKitSidebar button.group:hover {
+  background: color-mix(in oklch, var(--primary-50) 10%, transparent);
+  border-color: var(--primary-50);
+  color: var(--primary-40);
+}
+
+/* =====================================================================
    ⌘K 명령 팔레트 — 클라이언트 사이드 페이지 빠른 이동.
    테마 토큰 기반이라 라이트/다크 자동. z-index 는 드로어(2000)·CopilotKit(1200) 위.
    ===================================================================== */
