@@ -7,6 +7,7 @@ import { MuninnCopilot } from "@/components/muninn-copilot";
 import { useWorkspace } from "@/lib/workspace-context";
 import { navPath, sectionFromPath } from "@/lib/nav";
 import { useApi } from "@/lib/use-api";
+import { useTheme } from "@/lib/use-theme";
 
 // 프로토타입 HmApp 의 셸(sidebar + header + main + statusbar)을 Next.js layout 으로 이관.
 // 라우팅 콜백(onNav/onSwitchWorkspace/onNotif)은 여기서 next/navigation 으로 주입한다.
@@ -15,6 +16,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { workspaceId, setWorkspaceId } = useWorkspace();
   const section = sectionFromPath(pathname);
+  // 라이트/다크 테마 — .app 에 data-theme 를 칠해 hm 전용 다크 규칙까지 적용한다.
+  const { resolved: theme, toggle: toggleTheme } = useTheme();
 
   // 모바일(≤768px) 오프캔버스 사이드바 드로어 상태. 데스크탑에서는 CSS 가 무시한다.
   // 드로어 안 nav/워크스페이스 전환 시 직접 닫는다(라우트 effect 대신 — 정확하고 setState-in-effect 회피).
@@ -50,7 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       data-sidebar="expanded"
       data-drawer={drawerOpen ? "open" : "closed"}
       data-app="hm"
-      data-theme="light"
+      data-theme={theme}
     >
       <HmSidebar
         section={section}
@@ -75,6 +78,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         pendingApprovals={awaitingRuns.length}
         drawerOpen={drawerOpen}
         onMenu={() => setDrawerOpen((v) => !v)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
         onNotif={() =>
           router.push(oldestAwaiting ? `/runs/${oldestAwaiting.id}` : "/apps")
         }

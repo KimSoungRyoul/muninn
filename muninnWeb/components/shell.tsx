@@ -118,7 +118,7 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
   );
 }
 
-function HmHeader({ onCommand, onNotif, onMenu, drawerOpen = false, pendingApprovals = 0, todayCost = 4.12 }: any) {
+function HmHeader({ onCommand, onNotif, onMenu, drawerOpen = false, theme = "light", onToggleTheme, pendingApprovals = 0, todayCost = 4.12 }: any) {
   return (
     <header className="topbar">
       {/* 모바일 전용 햄버거 — 사이드바 드로어 토글 (데스크탑에서는 CSS 로 숨김) */}
@@ -141,6 +141,14 @@ function HmHeader({ onCommand, onNotif, onMenu, drawerOpen = false, pendingAppro
         <span className="lbl">오늘 비용</span>
         <span className="val">${todayCost.toFixed(2)}</span>
       </span>
+      <button
+        className="btn btn-icon"
+        onClick={onToggleTheme}
+        aria-label={theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+        title={theme === "dark" ? "라이트 모드" : "다크 모드"}
+      >
+        <Icon name={theme === "dark" ? "sun" : "moon"} size={18}/>
+      </button>
       <button className="btn btn-icon" style={{position:"relative"}} onClick={onNotif} aria-label={`승인 대기 ${pendingApprovals}건`}>
         <Icon name="bell" size={18}/>
         {pendingApprovals > 0 && (
