@@ -8,7 +8,7 @@
 import * as React from "react";
 import { Icon } from "@/components/icons";
 import { HmPageHead, HmCard, StatusLabel, fmtMoney, fmtTimeAgo, runStatusLabel, appInitials, PHASE_TO_STATUS, PHASE_LABEL } from "@/components/common";
-import { Badge, Chip, Empty, Button } from "@/components/ui";
+import { Badge, Chip, Empty, Button, Skeleton } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useApi } from "@/lib/use-api";
 
@@ -150,7 +150,22 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
         </span>
       </div>
 
-      {loading && <div className="dim" style={{ padding: 24 }}>불러오는 중…</div>}
+      {loading && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {Array.from({ length: 3 }, (_, i) => (
+            <HmCard key={i}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Skeleton w={32} h={32} r={8} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <Skeleton w="40%" h={14} />
+                  <Skeleton w="65%" h={12} />
+                </div>
+              </div>
+              <Skeleton w="80%" h={13} style={{ marginTop: 12 }} />
+            </HmCard>
+          ))}
+        </div>
+      )}
       {error && !loading && (
         <HmCard><div className="dim" style={{ padding: 8 }}>조회 오류: {error}</div></HmCard>
       )}

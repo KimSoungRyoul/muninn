@@ -136,6 +136,28 @@ function Empty({ icon = "folder", title, sub, action }: any) {
   );
 }
 
+// ---------- Skeleton ----------
+// 데이터 fetch 중 빈 화면/0 깜빡임 대신 표시하는 shimmer 플레이스홀더.
+// .skeleton 은 테마 토큰 기반이라 라이트/다크 모두 자동 대응(app/styles.css).
+function Skeleton({ w = "100%", h = 14, r = 6, style }: any) {
+  return <span className="skeleton" style={{ display: "block", width: w, height: h, borderRadius: r, ...style }} aria-hidden />;
+}
+
+// hm-table 본문용 스켈레톤 행들 — cols 만큼 셀, rows 만큼 행.
+function SkeletonRows({ rows = 5, cols = 4 }: any) {
+  return (
+    <tbody aria-hidden>
+      {Array.from({ length: rows }, (_, ri) => (
+        <tr key={ri}>
+          {Array.from({ length: cols }, (_, ci) => (
+            <td key={ci}><Skeleton w={ci === 1 ? "70%" : ci === 0 ? "60%" : "45%"} h={14} /></td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  );
+}
+
 export {
   Button, IconButton, TextInput, Textarea, Select,
   Toggle,
@@ -143,4 +165,5 @@ export {
   Avatar,
   Tabs,
   Empty,
+  Skeleton, SkeletonRows,
 };
