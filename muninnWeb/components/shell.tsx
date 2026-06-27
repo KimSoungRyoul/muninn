@@ -174,7 +174,7 @@ function HmStatusBar({ wsConnected = true, queueDepth = 0 }: any) {
   return (
     <div className="statusbar">
       <span className="seg">
-        <StatusDot status={wsConnected ? "succeeded" : "failed"}/>
+        <StatusDot status={wsConnected ? "succeeded" : "failed"} label={wsConnected ? "연결됨" : "연결 끊김"}/>
         <span>{wsConnected ? "connected" : "disconnected"}</span>
       </span>
       <span className="seg">queue <b>{queueDepth}</b></span>

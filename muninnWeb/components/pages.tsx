@@ -127,7 +127,7 @@ function HmAppDetail({ appId, onBack, onOpenRun, initialTab }: any) {
             <Badge tone="default">{a.kind}</Badge>
           </div>
           <div style={{fontSize:13, color:"var(--on-surface-muted)", marginTop:6, fontFamily:"var(--font-sans)"}}>
-            결과 형식: <b style={{color:"var(--on-surface)", fontWeight:600}}>{a.output === "pull_request" ? "Pull Request" : "GitHub Issue"}</b> · <a href={`https://github.com/${a.repo}`} target="_blank" rel="noreferrer noopener" style={{color:"var(--primary-40)", textDecoration:"none", fontWeight:500}}>{a.repo} ↗</a>
+            결과 형식: <b style={{color:"var(--on-surface)", fontWeight:600}}>{a.output === "pull_request" ? "Pull Request" : "GitHub Issue"}</b>{a.repo && <> · <a href={`https://github.com/${a.repo}`} target="_blank" rel="noreferrer noopener" style={{color:"var(--primary-40)", textDecoration:"none", fontWeight:500}}>{a.repo} ↗</a></>}
           </div>
         </div>
         <div style={{display:"flex", gap:6}}>
