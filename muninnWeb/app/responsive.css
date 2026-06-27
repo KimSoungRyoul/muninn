@@ -283,34 +283,37 @@
    다크는 CopilotKit 의 .dark 변수 정의(특이도 0,1,0)를 이기도록 .dark 후손 셀렉터(0,2,0)로
    동일 변수를 재명시한다(이게 없으면 다크에서 라이브러리 무채색이 그대로 남는다). */
 /* 라이브러리가 shadcn 변수(--primary 등)를 aside 에 높은 특이도로 직접 정의하므로,
-   콘솔 토큰 매핑은 !important 로 강제 오버라이드한다(이게 없으면 라이브러리 무채색이 남는다).
-   다크는 --cpk-brand 한 값만 밝은 그린(#00B14F)으로 바꾸면 var() 매핑이 자동 전환된다
-   (surface/on-surface 등은 tokens.css 가 [data-theme=dark] 에서 이미 다크값으로 전환). */
+   콘솔 토큰 매핑은 !important 로 강제 오버라이드한다. 그린은 WCAG AA 대비를 위해 역할별 분리:
+   --cpk-fill(solid 배경+흰 텍스트, 어두운 그린 → 흰 대비 5.5:1) / --cpk-line(보더·ring·틴트,
+   비텍스트 3:1) / --cpk-ink(surface 위 그린 텍스트). 다크는 ink 만 밝은 그린으로 교체. */
 .copilotKitSidebar,
 [data-copilot-sidebar] {
-  --cpk-brand: #009A44;
+  --cpk-fill: #007A36;
+  --cpk-line: #009A44;
+  --cpk-ink: #007A36;
   --background: var(--surface) !important;
   --foreground: var(--on-surface) !important;
   --card: var(--surface) !important;
   --card-foreground: var(--on-surface) !important;
   --popover: var(--surface-container-low, var(--surface)) !important;
   --popover-foreground: var(--on-surface) !important;
-  --primary: var(--cpk-brand) !important;
+  --primary: var(--cpk-fill) !important;
   --primary-foreground: #ffffff !important;
   --secondary: var(--surface-container) !important;
   --secondary-foreground: var(--on-surface) !important;
   --muted: var(--surface-container) !important;
   --muted-foreground: var(--on-surface-muted) !important;
-  --accent: color-mix(in oklch, var(--cpk-brand) 14%, transparent) !important;
-  --accent-foreground: var(--cpk-brand) !important;
+  --accent: color-mix(in oklch, var(--cpk-line) 14%, transparent) !important;
+  --accent-foreground: var(--cpk-ink) !important;
   --border: var(--border-subtle) !important;
   --input: var(--border) !important;
-  --ring: var(--cpk-brand) !important;
+  --ring: var(--cpk-line) !important;
 }
-/* 다크 — 어두운 배경 대비를 위해 밝은 브랜드 그린(콘솔 --primary-45 계열)으로만 교체. */
+/* 다크 — surface 위 그린 텍스트(ink)만 밝은 그린으로(어두운 배경 대비 ≥4.5:1).
+   fill 은 흰 텍스트 대비를 위해 라이트와 동일한 어두운 그린을 유지한다. */
 .dark .copilotKitSidebar,
 .dark [data-copilot-sidebar] {
-  --cpk-brand: #00B14F;
+  --cpk-ink: #00B14F;
 }
 /* 입력창 placeholder 가 #00000077 로 하드코딩돼 다크에서 안 보이던 문제 → 토큰색으로. */
 .copilotKitSidebar textarea::placeholder,
@@ -319,18 +322,18 @@
 }
 /* 헤더에 브랜드 그린 틴트 + 하단 보더 — 무채색 흰 헤더 대비 정체성 부여. */
 .copilotKitSidebar .copilotKitHeader {
-  background: linear-gradient(180deg, color-mix(in oklch, var(--cpk-brand) 12%, var(--surface)), var(--surface)) !important;
-  border-bottom-color: color-mix(in oklch, var(--cpk-brand) 34%, var(--border-subtle));
+  background: linear-gradient(180deg, color-mix(in oklch, var(--cpk-line) 12%, var(--surface)), var(--surface)) !important;
+  border-bottom-color: color-mix(in oklch, var(--cpk-line) 34%, var(--border-subtle));
 }
 /* 추천 질문 pill — 무채색 회색 보더 → 브랜드 그린 보더, hover 시 그린 틴트 배경. */
 .copilotKitSidebar button.group {
-  border-color: color-mix(in oklch, var(--cpk-brand) 36%, transparent);
+  border-color: color-mix(in oklch, var(--cpk-line) 36%, transparent);
   transition: background-color 120ms ease, border-color 120ms ease;
 }
 .copilotKitSidebar button.group:hover {
-  background: color-mix(in oklch, var(--cpk-brand) 10%, transparent);
-  border-color: var(--cpk-brand);
-  color: var(--cpk-brand);
+  background: color-mix(in oklch, var(--cpk-line) 10%, transparent);
+  border-color: var(--cpk-line);
+  color: var(--cpk-ink);
 }
 
 /* =====================================================================
