@@ -68,7 +68,8 @@ function HmRunsList({ onOpenRun }: any) {
           <Button size="sm" variant="ghost" leftIcon="filter" disabled title="미구현">필터</Button>
           <Button size="sm" variant="ghost" leftIcon="download" disabled title="미구현">내보내기</Button>
         </div>
-        <div className="hm-table-scroll" tabIndex={0}>
+        {firstLoad && <span className="sr-only" role="status">실행 내역 불러오는 중…</span>}
+        <div className="hm-table-scroll" tabIndex={0} aria-busy={firstLoad}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -82,7 +83,7 @@ function HmRunsList({ onOpenRun }: any) {
               <th style={{width:24}}></th>
             </tr>
           </thead>
-          {firstLoad ? <SkeletonRows rows={6} cols={7}/> : (
+          {firstLoad ? <SkeletonRows rows={6} cols={8}/> : (
           <tbody>
             {filtered.map(r => (
               <tr key={r.id} onClick={() => onOpenRun(r.id)}>

@@ -27,7 +27,8 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
       </HmPageHead>
 
       <HmCard flush>
-        <div className="hm-table-scroll" tabIndex={0}>
+        {firstLoad && <span className="sr-only" role="status">Applications 불러오는 중…</span>}
+        <div className="hm-table-scroll" tabIndex={0} aria-busy={firstLoad}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -40,7 +41,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
               <th style={{width:24}}></th>
             </tr>
           </thead>
-          {firstLoad ? <SkeletonRows rows={5} cols={6}/> : (
+          {firstLoad ? <SkeletonRows rows={5} cols={7}/> : (
           <tbody>
             {apps.length === 0 && (
               <tr><td colSpan={7}><Empty icon="layers" title="이 Workspace 에 등록된 Application 이 없어요" sub="첫 Application 을 등록해보세요." action={<Button variant="primary" leftIcon="plus" onClick={onNewApp}>Application 등록</Button>}/></td></tr>

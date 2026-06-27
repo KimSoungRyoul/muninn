@@ -10,6 +10,29 @@
    공용 유틸 (전 뷰포트)
    --------------------------------------------------------------------- */
 
+/* 스크린리더 전용(시각적 숨김) — 로딩 상태 등 announce 용. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 모션 민감 사용자 — 무한/전환 애니메이션을 정지(skeleton shimmer, spinner, 팔레트 등). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* 테이블 가로 스크롤 래퍼 — JSX 에서 <table class="hm-table"> 를 감싼다.
    .app 가 overflow:hidden 이라 래퍼 없이는 넓은 표가 잘려 사용 불가. */
 .hm-table-scroll {

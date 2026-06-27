@@ -87,12 +87,13 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
             <span><span className="status-dot is-awaiting" style={{marginRight:4}}></span>승인 대기</span>
           </span>}
         >
-          <StackedBars buckets={flow} h={160}/>
+          {firstLoad ? <Skeleton w="100%" h={160}/> : <StackedBars buckets={flow} h={160}/>}
         </HmCard>
 
         <HmCard title="실패 빈도 상위" meta="최근 24시간">
           <div style={{display:"flex", flexDirection:"column", gap:10}}>
-            {topFailing.map((a, i) => (
+            {firstLoad && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} w="100%" h={18}/>)}
+            {!firstLoad && topFailing.map((a, i) => (
               <div key={a.id} style={{display:"flex", alignItems:"center", gap:12, cursor:"pointer"}}
                    onClick={() => onOpenApp(a.id)}>
                 <span style={{fontFamily:"var(--font-mono)", fontSize:13, color:"var(--on-surface-muted)", width:18, fontWeight:600}}>{i + 1}</span>
@@ -116,7 +117,8 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
         action={<a href="#" onClick={e => {e.preventDefault(); onNav("apps");}} style={{fontSize:13, color:"var(--primary-40)", textDecoration:"none", fontFamily:"var(--font-sans)", fontWeight:600}}>전체 보기 →</a>}
         flush
       >
-        <div className="hm-table-scroll" tabIndex={0}>
+        {firstLoad && <span className="sr-only" role="status">실시간 실행 불러오는 중…</span>}
+        <div className="hm-table-scroll" tabIndex={0} aria-busy={firstLoad}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -155,7 +157,15 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
 
       {/* Cost burn */}
       <div style={{marginTop:12}}>
-        <HmCard title="이번 달 비용" meta={`${fmtMoney(monthCost)} / ${fmtMoney(monthCap)}`}>
+        <HmCard title="이번 달 비용" meta={firstLoad ? "" : `${fmtMoney(monthCost)} / ${fmtMoney(monthCap)}`}>
+          {firstLoad ? (
+            <div style={{display:"flex", flexDirection:"column", gap:12}}>
+              <Skeleton w="100%" h={8}/>
+              <div style={{display:"flex", gap:18, flexWrap:"wrap"}}>
+                {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} w={90} h={12}/>)}
+              </div>
+            </div>
+          ) : (
           <div style={{display:"flex", flexDirection:"column", gap:12}}>
             <div style={{height:8, background:"var(--surface-container)", borderRadius:2, overflow:"hidden", display:"flex"}}>
               {monthByApp.map((a, i) => (
@@ -172,6 +182,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
               ))}
             </div>
           </div>
+          )}
         </HmCard>
       </div>
     </>

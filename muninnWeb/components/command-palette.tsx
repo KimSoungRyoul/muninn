@@ -6,6 +6,9 @@ import { Icon } from "@/components/icons";
 // ⌘K 명령 팔레트 — 기존엔 topbar 검색이 클릭해도 아무 동작 없는 죽은 어포던스였다.
 // 백엔드 검색 없이 클라이언트 사이드 페이지 빠른 이동만 제공한다(키보드 ↑/↓/Enter/Esc).
 // app-shell 에서 열릴 때만 조건부로 마운트한다 → 매번 깨끗한 초기 상태(effect 내 setState 회피).
+//
+// 접근성: combobox 패턴 — 포커스는 input 에 유지하고 ↑/↓ 로 aria-activedescendant 를 옮긴다.
+// 옵션 버튼은 tabIndex=-1 로 Tab 순환에서 빼고, Tab 은 dialog 안에 가둔다(포커스 트랩).
 
 const DESTS = [
   { label: "Dashboard", sub: "운영 현황", icon: "dashboard", path: "/" },
@@ -38,6 +41,7 @@ export function CommandPalette({ onClose, onNavigate }: any) {
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
+      e.stopPropagation(); // 모바일 드로어의 document-level ESC 와 동시 닫힘 방지
       onClose();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -48,8 +52,14 @@ export function CommandPalette({ onClose, onNavigate }: any) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (items[active]) go(items[active]);
+    } else if (e.key === "Tab") {
+      // 단일 입력 팔레트 — 포커스를 dialog(입력) 안에 가둔다.
+      e.preventDefault();
+      inputRef.current?.focus();
     }
   };
+
+  const activeId = items[active] ? `hm-cmdk-opt-${active}` : undefined;
 
   return (
     <div className="hm-cmdk-backdrop" onClick={onClose}>
@@ -69,14 +79,22 @@ export function CommandPalette({ onClose, onNavigate }: any) {
             onChange={(e) => { setQ(e.target.value); setActive(0); }}
             placeholder="페이지 이동… (apps, incidents, memories)"
             aria-label="명령 검색"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="hm-cmdk-list"
+            aria-activedescendant={activeId}
+            autoComplete="off"
           />
           <kbd>esc</kbd>
         </div>
-        <div className="hm-cmdk-list" role="listbox" aria-label="이동 가능한 페이지">
+        <div className="hm-cmdk-list" id="hm-cmdk-list" role="listbox" aria-label="이동 가능한 페이지">
           {items.length === 0 && <div className="hm-cmdk-empty">결과 없음</div>}
           {items.map((d, i) => (
             <button
               key={d.path}
+              id={`hm-cmdk-opt-${i}`}
+              type="button"
+              tabIndex={-1}
               role="option"
               aria-selected={i === active}
               className={`hm-cmdk-item ${i === active ? "is-active" : ""}`}
