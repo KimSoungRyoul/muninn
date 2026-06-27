@@ -167,7 +167,7 @@ function HmRunDetail({ runId, onBack, awaitingMode, runVm, loading, onDecided }:
             </StatusLabel>
           </div>
           <div style={{fontSize:13, color:"var(--on-surface-muted)", marginTop:6, fontFamily:"var(--font-sans)"}}>
-            <a href="#" style={{color:"var(--primary-50)", textDecoration:"none"}}>{R.app}</a>
+            <span style={{color:"var(--on-surface)", fontWeight:700}}>{R.app}</span>
             <span style={{margin:"0 6px"}}>·</span>
             <span>{R.appKind}</span>
             <span style={{margin:"0 6px"}}>·</span>
@@ -334,7 +334,7 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId, runVm, onDecided }: a
             </StatusLabel>
           </div>
           <div style={{fontSize:13, color:"var(--on-surface-muted)", marginTop:6, fontFamily:"var(--font-sans)"}}>
-            <a href="#" style={{color:"var(--primary-50)", textDecoration:"none"}}>{run.app}</a>
+            <span style={{color:"var(--on-surface)", fontWeight:700}}>{run.app}</span>
             <span style={{margin:"0 6px"}}>·</span>
             <span>시작 {fmtClock(run.started)} · {fmtTimeAgo(run.started)}</span>
           </div>

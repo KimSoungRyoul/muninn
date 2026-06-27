@@ -174,14 +174,14 @@ function HmStatusBar({ wsConnected = true, queueDepth = 0 }: any) {
   return (
     <div className="statusbar">
       <span className="seg">
-        <StatusDot status={wsConnected ? "succeeded" : "failed"}/>
+        <StatusDot status={wsConnected ? "succeeded" : "failed"} label={wsConnected ? "연결됨" : "연결 끊김"}/>
         <span>{wsConnected ? "connected" : "disconnected"}</span>
       </span>
       <span className="seg">queue <b>{queueDepth}</b></span>
       <HealthDots services={services}/>
       <span style={{flex:1}}></span>
       <span className="seg">v0.1.0</span>
-      <a className="seg" href="#">↗ docs</a>
+      <a className="seg" href="https://kimsoungryoul.github.io/muninn/" target="_blank" rel="noreferrer noopener">↗ docs</a>
     </div>
   );
 }

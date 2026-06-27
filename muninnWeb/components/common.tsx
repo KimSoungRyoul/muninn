@@ -27,8 +27,9 @@ const fmtTimeAgo = (iso) => {
 const fmtClock = (iso) => new Date(iso).toLocaleTimeString("en-US", { hour12: false });
 
 // ---------- StatusDot ----------
-function StatusDot({ status }: any) {
-  return <span className={`status-dot is-${status}`} aria-label={status}></span>;
+function StatusDot({ status, label }: any) {
+  // label 미지정 시 run status 한국어 라벨. connection/health 등 run 이 아닌 dot 은 호출부가 label 을 직접 준다.
+  return <span className={`status-dot is-${status}`} aria-label={label ?? runStatusLabel(status)}></span>;
 }
 function StatusLabel({ status, children }: any) {
   return <span className="status-label"><StatusDot status={status}/>{children || status}</span>;

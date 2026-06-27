@@ -13,7 +13,7 @@ import { useWorkspace } from "@/lib/workspace-context";
 function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
   const { workspace } = useWorkspace();
   const ws = workspace;
-  const { data, loading } = useApi<any>(`/api/dashboard?workspace=${encodeURIComponent(workspaceId)}`);
+  const { data, loading, error, reload } = useApi<any>(`/api/dashboard?workspace=${encodeURIComponent(workspaceId)}`);
   // 최초 로드(데이터 없음 + 로딩 중)에는 0/빈값 깜빡임 대신 스켈레톤을 보여준다.
   const firstLoad = loading && !data;
 
@@ -60,8 +60,15 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
         <Tabs pill value="24h" onChange={() => {}} tabs={[
           {label:"1시간", value:"1h"},{label:"6시간", value:"6h"},{label:"24시간", value:"24h"},{label:"7일", value:"7d"},
         ]}/>
-        <Button variant="ghost" size="sm" leftIcon="refresh"/>
+        <Button variant="ghost" size="sm" leftIcon="refresh" onClick={reload} aria-label="새로고침" title="새로고침"/>
       </HmPageHead>
+
+      {/* 조회 실패는 silent 0/빈값 대신 명시적으로 표면화한다(무한 로딩처럼 보이지 않게). */}
+      {error && !loading && (
+        <div style={{marginBottom:12}}>
+          <HmCard><div className="dim" style={{padding:8}} role="alert">대시보드 조회 오류: {error}</div></HmCard>
+        </div>
+      )}
 
       {/* KPI grid */}
       <div className="hm-kpi-grid">
@@ -73,7 +80,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
                 <Skeleton w="60%" h={12} style={{marginTop:10}}/>
               </div>
             ))
-          : kpis.map((k, i) => <HmKpi key={i} {...k}/>)}
+          : kpis.map((k) => <HmKpi key={k.label} {...k}/>)}
       </div>
 
       {/* Flow + Top failing */}
@@ -97,11 +104,11 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
               <div key={a.id} style={{display:"flex", alignItems:"center", gap:12, cursor:"pointer"}}
                    onClick={() => onOpenApp(a.id)}>
                 <span style={{fontFamily:"var(--font-mono)", fontSize:13, color:"var(--on-surface-muted)", width:18, fontWeight:600}}>{i + 1}</span>
-                <span style={{fontFamily:"var(--font-sans)", fontWeight:700, fontSize:14, color:"var(--on-surface)", flex:1, letterSpacing:"-0.005em"}}>{a.name}</span>
-                <span className="hm-mono" style={{fontSize:13, color:"var(--error-50)", fontWeight:700}}>{a.failed24h}건 실패</span>
-                <span className="hm-mono" style={{fontSize:13, color:"var(--on-surface-muted)"}}>/ {a.runs24h}</span>
+                <span title={a.name} style={{fontFamily:"var(--font-sans)", fontWeight:700, fontSize:14, color:"var(--on-surface)", flex:1, minWidth:0, letterSpacing:"-0.005em", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{a.name}</span>
+                <span className="hm-mono" style={{fontSize:13, color:"var(--error-50)", fontWeight:700, whiteSpace:"nowrap", flexShrink:0}}>{a.failed24h}건 실패</span>
+                <span className="hm-mono" style={{fontSize:13, color:"var(--on-surface-muted)", flexShrink:0}}>/ {a.runs24h}</span>
                 {/* mini fail-rate bar */}
-                <span style={{width:60, height:4, background:"var(--surface-container)", borderRadius:2, overflow:"hidden"}}>
+                <span style={{width:44, height:4, flexShrink:0, background:"var(--surface-container)", borderRadius:2, overflow:"hidden"}}>
                   <span style={{display:"block", height:"100%", width:`${(a.failed24h/a.runs24h*100).toFixed(0)}%`, background:"var(--error-50)"}}></span>
                 </span>
               </div>
