@@ -2,7 +2,7 @@
 import React from "react";
 // Huginn & Muninn — Apps list, App detail (with Events→Runs), Platform Tools, Memories, Settings
 import { Icon } from "@/components/icons";
-import { Button, IconButton, TextInput, Textarea, Select, Toggle, Badge, Tabs, Empty } from "@/components/ui";
+import { Button, IconButton, TextInput, Textarea, Select, Toggle, Badge, Tabs, Empty, SkeletonRows } from "@/components/ui";
 import { fmtMoney, fmtDuration, fmtTimeAgo, fmtClock, StatusDot, StatusLabel, HmPageHead, HmKpi, HmCard, runStatusLabel, appInitials } from "@/components/common";
 import { MarkdownView, MarkdownEditor } from "@/components/markdown";
 import { useApi } from "@/lib/use-api";
@@ -17,7 +17,8 @@ const { useState: useS_HP, useEffect: useE_HP } = React;
 function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
   const { workspace } = useWorkspace();
   const ws = workspace;
-  const { data: apps = [] } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
+  const { data: apps = [], loading } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
+  const firstLoad = loading && apps.length === 0;
   return (
     <>
       <HmPageHead title="Applications" sub={`${ws.name} 워크스페이스 · 등록된 ${apps.length}개 · 1개 DAG = 1개 Application`}>
@@ -26,7 +27,8 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
       </HmPageHead>
 
       <HmCard flush>
-        <div className="hm-table-scroll" tabIndex={0}>
+        {firstLoad && <span className="sr-only" role="status">Applications 불러오는 중…</span>}
+        <div className="hm-table-scroll" tabIndex={0} aria-busy={firstLoad}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -39,6 +41,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
               <th style={{width:24}}></th>
             </tr>
           </thead>
+          {firstLoad ? <SkeletonRows rows={5} cols={7}/> : (
           <tbody>
             {apps.length === 0 && (
               <tr><td colSpan={7}><Empty icon="layers" title="이 Workspace 에 등록된 Application 이 없어요" sub="첫 Application 을 등록해보세요." action={<Button variant="primary" leftIcon="plus" onClick={onNewApp}>Application 등록</Button>}/></td></tr>
@@ -79,6 +82,7 @@ function HmAppsList({ onOpenApp, onNewApp, workspaceId }: any) {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
         </div>
       </HmCard>

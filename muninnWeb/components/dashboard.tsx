@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { Icon } from "@/components/icons";
-import { Button, Tabs, Empty } from "@/components/ui";
+import { Button, Tabs, Empty, Skeleton, SkeletonRows } from "@/components/ui";
 import { HmPageHead, HmKpi, HmCard, StackedBars, StatusLabel, fmtMoney, fmtDuration, fmtTimeAgo, runStatusLabel } from "@/components/common";
 import { DEMO_NOW } from "@/lib/demo-clock";
 import { useApi } from "@/lib/use-api";
@@ -14,6 +14,8 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
   const { workspace } = useWorkspace();
   const ws = workspace;
   const { data, loading } = useApi<any>(`/api/dashboard?workspace=${encodeURIComponent(workspaceId)}`);
+  // 최초 로드(데이터 없음 + 로딩 중)에는 0/빈값 깜빡임 대신 스켈레톤을 보여준다.
+  const firstLoad = loading && !data;
 
   const liveRuns: any[] = data?.liveRuns ?? [];
   const wsRuns24h: number = data?.runs24h ?? 0;
@@ -63,7 +65,15 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
 
       {/* KPI grid */}
       <div className="hm-kpi-grid">
-        {kpis.map((k, i) => <HmKpi key={i} {...k}/>)}
+        {firstLoad
+          ? Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="hm-kpi">
+                <Skeleton w="50%" h={12}/>
+                <Skeleton w="40%" h={28} style={{marginTop:10}}/>
+                <Skeleton w="60%" h={12} style={{marginTop:10}}/>
+              </div>
+            ))
+          : kpis.map((k, i) => <HmKpi key={i} {...k}/>)}
       </div>
 
       {/* Flow + Top failing */}
@@ -77,12 +87,13 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
             <span><span className="status-dot is-awaiting" style={{marginRight:4}}></span>승인 대기</span>
           </span>}
         >
-          <StackedBars buckets={flow} h={160}/>
+          {firstLoad ? <Skeleton w="100%" h={160}/> : <StackedBars buckets={flow} h={160}/>}
         </HmCard>
 
         <HmCard title="실패 빈도 상위" meta="최근 24시간">
           <div style={{display:"flex", flexDirection:"column", gap:10}}>
-            {topFailing.map((a, i) => (
+            {firstLoad && Array.from({ length: 4 }, (_, i) => <Skeleton key={i} w="100%" h={18}/>)}
+            {!firstLoad && topFailing.map((a, i) => (
               <div key={a.id} style={{display:"flex", alignItems:"center", gap:12, cursor:"pointer"}}
                    onClick={() => onOpenApp(a.id)}>
                 <span style={{fontFamily:"var(--font-mono)", fontSize:13, color:"var(--on-surface-muted)", width:18, fontWeight:600}}>{i + 1}</span>
@@ -106,7 +117,8 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
         action={<a href="#" onClick={e => {e.preventDefault(); onNav("apps");}} style={{fontSize:13, color:"var(--primary-40)", textDecoration:"none", fontFamily:"var(--font-sans)", fontWeight:600}}>전체 보기 →</a>}
         flush
       >
-        <div className="hm-table-scroll" tabIndex={0}>
+        {firstLoad && <span className="sr-only" role="status">실시간 실행 불러오는 중…</span>}
+        <div className="hm-table-scroll" tabIndex={0} aria-busy={firstLoad}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -119,6 +131,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
               <th></th>
             </tr>
           </thead>
+          {firstLoad ? <SkeletonRows rows={4} cols={7}/> : (
           <tbody>
             {liveRuns.length === 0 && (
               <tr><td colSpan={7} style={{padding:"24px"}}><Empty icon="activity" title="실행 중인 작업이 없어요" sub={`${ws.name} 워크스페이스에 활성 실행이 없습니다.`}/></td></tr>
@@ -137,13 +150,22 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
         </div>
       </HmCard>
 
       {/* Cost burn */}
       <div style={{marginTop:12}}>
-        <HmCard title="이번 달 비용" meta={`${fmtMoney(monthCost)} / ${fmtMoney(monthCap)}`}>
+        <HmCard title="이번 달 비용" meta={firstLoad ? "" : `${fmtMoney(monthCost)} / ${fmtMoney(monthCap)}`}>
+          {firstLoad ? (
+            <div style={{display:"flex", flexDirection:"column", gap:12}}>
+              <Skeleton w="100%" h={8}/>
+              <div style={{display:"flex", gap:18, flexWrap:"wrap"}}>
+                {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} w={90} h={12}/>)}
+              </div>
+            </div>
+          ) : (
           <div style={{display:"flex", flexDirection:"column", gap:12}}>
             <div style={{height:8, background:"var(--surface-container)", borderRadius:2, overflow:"hidden", display:"flex"}}>
               {monthByApp.map((a, i) => (
@@ -160,6 +182,7 @@ function HmDashboard({ onNav, onOpenRun, onOpenApp, workspaceId }: any) {
               ))}
             </div>
           </div>
+          )}
         </HmCard>
       </div>
     </>

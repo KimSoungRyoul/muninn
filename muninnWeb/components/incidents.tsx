@@ -8,7 +8,7 @@
 import * as React from "react";
 import { Icon } from "@/components/icons";
 import { HmPageHead, HmCard, StatusLabel, fmtMoney, fmtTimeAgo, runStatusLabel, appInitials, PHASE_TO_STATUS, PHASE_LABEL } from "@/components/common";
-import { Badge, Chip, Empty, Button } from "@/components/ui";
+import { Badge, Chip, Empty, Button, Skeleton } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useApi } from "@/lib/use-api";
 
@@ -118,7 +118,10 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
   // 다른 페이지(대시보드·앱 목록)와 동일하게 현재 워크스페이스로 스코프한다.
   // /api/issues 는 단일 app 필터만 지원하므로, 워크스페이스의 앱 집합으로 클라이언트에서 필터.
   const { workspaceId } = useWorkspace();
-  const { data: apps = [] } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
+  const { data: apps = [], loading: appsLoading } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
+  // issues 와 apps 두 fetch 가 모두 준비되기 전엔 스켈레톤을 유지한다 — 한쪽만 도착하면
+  // visible 이 잠깐 빈 배열이 되어 '장애 없음' Empty 가 깜빡이는 레이스를 막는다.
+  const booting = loading || appsLoading;
   // 워크스페이스 앱 집합으로 클라이언트 필터 — apps/items 가 바뀔 때만 재계산.
   const visible = useMemo(() => {
     const wsAppNames = new Set((apps ?? []).map((a) => a.name));
@@ -150,11 +153,27 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
         </span>
       </div>
 
-      {loading && <div className="dim" style={{ padding: 24 }}>불러오는 중…</div>}
+      {booting && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }} aria-busy="true">
+          <span className="sr-only" role="status">Incidents 불러오는 중…</span>
+          {Array.from({ length: 3 }, (_, i) => (
+            <HmCard key={i}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Skeleton w={32} h={32} r={8} style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <Skeleton w="40%" h={14} />
+                  <Skeleton w="65%" h={12} />
+                </div>
+              </div>
+              <Skeleton w="80%" h={13} style={{ marginTop: 12 }} />
+            </HmCard>
+          ))}
+        </div>
+      )}
       {error && !loading && (
         <HmCard><div className="dim" style={{ padding: 8 }}>조회 오류: {error}</div></HmCard>
       )}
-      {!loading && !error && visible.length === 0 && (
+      {!booting && !error && visible.length === 0 && (
         <Empty icon="alert" title="표시할 장애가 없습니다" sub="진행 중인 HuginnIssue 가 없거나, 클러스터에 연결되지 않았습니다." />
       )}
 

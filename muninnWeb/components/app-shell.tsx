@@ -4,6 +4,7 @@ import React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { HmSidebar, HmHeader, HmStatusBar } from "@/components/shell";
 import { MuninnCopilot } from "@/components/muninn-copilot";
+import { CommandPalette } from "@/components/command-palette";
 import { useWorkspace } from "@/lib/workspace-context";
 import { navPath, sectionFromPath } from "@/lib/nav";
 import { useApi } from "@/lib/use-api";
@@ -35,6 +36,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       document.body.style.overflow = prevOverflow;
     };
   }, [drawerOpen]);
+
+  // ⌘K / Ctrl+K 로 명령 팔레트(페이지 빠른 이동) 토글.
+  const [cmdOpen, setCmdOpen] = React.useState(false);
+  // 팔레트를 연 직전 포커스를 저장 → 닫을 때 그 요소로 복원(WCAG 2.4.3).
+  const lastFocusRef = React.useRef<HTMLElement | null>(null);
+  const openCmd = React.useCallback(() => {
+    lastFocusRef.current = (document.activeElement as HTMLElement) ?? null;
+    setCmdOpen(true);
+  }, []);
+  const closeCmd = React.useCallback(() => {
+    setCmdOpen(false);
+    lastFocusRef.current?.focus?.();
+  }, []);
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        // 편집 필드 안의 Ctrl+K(macOS kill-line 등)는 가로채지 않는다 — ⌘(meta)만 가로챔.
+        const t = e.target as HTMLElement | null;
+        const editable = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+        if (e.ctrlKey && !e.metaKey && editable) return;
+        e.preventDefault();
+        if (cmdOpen) closeCmd(); else openCmd();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [cmdOpen, openCmd, closeCmd]);
 
   // 승인 대기(awaiting) run 을 현재 워크스페이스 기준으로 집계 — 대시보드 KPI 와 동일한 소스.
   // 가장 오래된 awaiting run 을 벨 클릭 시 열도록 연결한다. mock 직접 참조 대신 API 로 조회한다.
@@ -80,6 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         onMenu={() => setDrawerOpen((v) => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
+        onCommand={openCmd}
         onNotif={() =>
           router.push(oldestAwaiting ? `/runs/${oldestAwaiting.id}` : "/apps")
         }
@@ -88,6 +117,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <HmStatusBar wsConnected={true} queueDepth={0} />
       {/* CopilotKit 사이드바 + readable context + frontend tools */}
       <MuninnCopilot />
+      {/* ⌘K 명령 팔레트 — 열릴 때만 마운트(깨끗한 초기 상태) */}
+      {cmdOpen && (
+        <CommandPalette
+          onClose={closeCmd}
+          onNavigate={(path: string) => {
+            setDrawerOpen(false);
+            router.push(path);
+          }}
+        />
+      )}
     </div>
   );
 }

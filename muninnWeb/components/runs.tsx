@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { Icon } from "@/components/icons";
-import { Tabs, Button, Toggle, Empty } from "@/components/ui";
+import { Tabs, Button, Toggle, Empty, SkeletonRows } from "@/components/ui";
 import {
   fmtMoney,
   fmtTokens,
@@ -32,7 +32,8 @@ const { useState: useS_RD, useEffect: useE_RD } = React;
 function HmRunsList({ onOpenRun }: any) {
   const [filter, setFilter] = useS_RD("all");
   // mock 직접 참조 대신 /api/runs 로 조회(미연결 시 라우트가 mock fallback).
-  const { data: recent = [] } = useApi<any[]>(`/api/runs`);
+  const { data: recent = [], loading } = useApi<any[]>(`/api/runs`);
+  const firstLoad = loading && recent.length === 0;
   const filtered = filter === "all" ? recent : recent.filter(r => r.status === filter);
 
   return (
@@ -67,7 +68,8 @@ function HmRunsList({ onOpenRun }: any) {
           <Button size="sm" variant="ghost" leftIcon="filter" disabled title="미구현">필터</Button>
           <Button size="sm" variant="ghost" leftIcon="download" disabled title="미구현">내보내기</Button>
         </div>
-        <div className="hm-table-scroll" tabIndex={0}>
+        {firstLoad && <span className="sr-only" role="status">실행 내역 불러오는 중…</span>}
+        <div className="hm-table-scroll" tabIndex={0} aria-busy={firstLoad}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -81,6 +83,7 @@ function HmRunsList({ onOpenRun }: any) {
               <th style={{width:24}}></th>
             </tr>
           </thead>
+          {firstLoad ? <SkeletonRows rows={6} cols={8}/> : (
           <tbody>
             {filtered.map(r => (
               <tr key={r.id} onClick={() => onOpenRun(r.id)}>
@@ -100,6 +103,7 @@ function HmRunsList({ onOpenRun }: any) {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
         </div>
       </HmCard>
