@@ -80,7 +80,7 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" id="hm-sidebar">
       <div className="sidebar-brand">
         <span className="mark" style={{background:"transparent", border:"0", padding:0, width:40, height:36, display:"inline-flex", alignItems:"center", justifyContent:"center", color:"var(--on-surface)"}}>
           <BrandLogo size={40}/>
@@ -118,9 +118,19 @@ function HmSidebar({ section, onNav, workspaceId, onSwitchWorkspace, onManageWor
   );
 }
 
-function HmHeader({ onCommand, onNotif, pendingApprovals = 0, todayCost = 4.12 }: any) {
+function HmHeader({ onCommand, onNotif, onMenu, drawerOpen = false, pendingApprovals = 0, todayCost = 4.12 }: any) {
   return (
     <header className="topbar">
+      {/* 모바일 전용 햄버거 — 사이드바 드로어 토글 (데스크탑에서는 CSS 로 숨김) */}
+      <button
+        className="btn btn-icon hm-hamburger"
+        onClick={onMenu}
+        aria-label={drawerOpen ? "메뉴 닫기" : "메뉴 열기"}
+        aria-expanded={drawerOpen}
+        aria-controls="hm-sidebar"
+      >
+        <Icon name={drawerOpen ? "close" : "menu"} size={20}/>
+      </button>
       <div className="topbar-search">
         <Icon name="search" size={15}/>
         <input placeholder="검색하거나 명령 실행 (apps, events, runs, memories...)" onClick={onCommand} readOnly/>

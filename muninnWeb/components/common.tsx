@@ -296,10 +296,10 @@ function StackedBars({ buckets, w = 720, h = 120 }: any) {
 function HealthDots({ services }: any) {
   return (
     <span className="seg">
-      {services.map((s, i) => (
-        <span key={s.name} className="tooltip-wrap" style={{display:"inline-flex",alignItems:"center",gap:4}}>
+      {services.map((s) => (
+        <span key={s.name} className="tooltip-wrap hm-health-item">
           <StatusDot status={s.status}/>
-          <span style={{fontSize:10, color: s.status === "healthy" ? "var(--on-surface-variant)" : "var(--error-55)"}}>{s.name}</span>
+          <span className={`hm-health-label${s.status === "healthy" ? "" : " is-down"}`}>{s.name}</span>
         </span>
       ))}
     </span>

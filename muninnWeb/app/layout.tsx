@@ -4,6 +4,8 @@ import "@copilotkit/react-core/v2/styles.css";
 import "./tokens.css";
 import "./styles.css";
 import "./hm-theme.css";
+// 반응형 레이어는 마지막에 — 동일 specificity 충돌 시 우선해야 한다.
+import "./responsive.css";
 import type { Metadata } from "next";
 import { CopilotRoot } from "@/components/copilot-root";
 import { WorkspaceProvider } from "@/lib/workspace-context";

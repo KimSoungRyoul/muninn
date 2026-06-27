@@ -12,7 +12,7 @@ import { Badge, Chip, Empty, Button } from "@/components/ui";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useApi } from "@/lib/use-api";
 
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useMemo } = React;
 
 interface RunVM {
   id: string; app: string; status: string; phase: string;
@@ -44,26 +44,28 @@ function IncidentRunsTable({ runs, onOpenRun }: { runs: RunVM[]; onOpenRun?: (id
     );
   }
   return (
-    <table className="hm-table" style={{ marginTop: 12 }}>
-      <thead>
-        <tr>
-          <th>Run</th><th>상태</th><th>단계</th><th>비용</th><th>결과</th>
-        </tr>
-      </thead>
-      <tbody>
-        {runs.map((r) => (
-          <tr key={r.id} onClick={() => onOpenRun?.(r.id)} style={{ cursor: onOpenRun ? "pointer" : "default" }}>
-            <td><span className="hm-mono" style={{ fontSize: 12.5 }}>{r.id}</span></td>
-            <td><StatusLabel status={r.status}>{runStatusLabel(r.status)}{r.approval ? ` · ${r.approval}` : ""}</StatusLabel></td>
-            <td className="hm-mono">{r.step != null ? `${r.step}/${r.max}` : `–/${r.max}`}</td>
-            <td className="hm-mono">{fmtMoney(r.cost)}</td>
-            <td style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {r.output || <span className="dim">–</span>}
-            </td>
+    <div className="hm-table-scroll" style={{ marginTop: 12 }} tabIndex={0}>
+      <table className="hm-table">
+        <thead>
+          <tr>
+            <th>Run</th><th>상태</th><th>단계</th><th>비용</th><th>결과</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {runs.map((r) => (
+            <tr key={r.id} onClick={() => onOpenRun?.(r.id)} style={{ cursor: onOpenRun ? "pointer" : "default" }}>
+              <td><span className="hm-mono" style={{ fontSize: 12.5 }}>{r.id}</span></td>
+              <td><StatusLabel status={r.status}>{runStatusLabel(r.status)}{r.approval ? ` · ${r.approval}` : ""}</StatusLabel></td>
+              <td className="hm-mono">{r.step != null ? `${r.step}/${r.max}` : `–/${r.max}`}</td>
+              <td className="hm-mono">{fmtMoney(r.cost)}</td>
+              <td className="hm-cell-clip">
+                {r.output || <span className="dim">–</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -117,8 +119,11 @@ export function HmIncidents({ onOpenRun }: { onOpenRun?: (id: string) => void })
   // /api/issues 는 단일 app 필터만 지원하므로, 워크스페이스의 앱 집합으로 클라이언트에서 필터.
   const { workspaceId } = useWorkspace();
   const { data: apps = [] } = useApi<any[]>(`/api/apps?workspace=${encodeURIComponent(workspaceId)}`);
-  const wsAppNames = new Set((apps ?? []).map((a) => a.name));
-  const visible = items.filter((i) => wsAppNames.has(i.app));
+  // 워크스페이스 앱 집합으로 클라이언트 필터 — apps/items 가 바뀔 때만 재계산.
+  const visible = useMemo(() => {
+    const wsAppNames = new Set((apps ?? []).map((a) => a.name));
+    return items.filter((i) => wsAppNames.has(i.app));
+  }, [apps, items]);
 
   const activeCount = visible.filter((i) => ["Pending", "Running", "AwaitingApproval"].includes(i.phase)).length;
 

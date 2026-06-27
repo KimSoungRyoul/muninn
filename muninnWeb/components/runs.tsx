@@ -67,6 +67,7 @@ function HmRunsList({ onOpenRun }: any) {
           <Button size="sm" variant="ghost" leftIcon="filter" disabled title="미구현">필터</Button>
           <Button size="sm" variant="ghost" leftIcon="download" disabled title="미구현">내보내기</Button>
         </div>
+        <div className="hm-table-scroll" tabIndex={0}>
         <table className="hm-table">
           <thead>
             <tr>
@@ -100,6 +101,7 @@ function HmRunsList({ onOpenRun }: any) {
             ))}
           </tbody>
         </table>
+        </div>
       </HmCard>
     </>
   );
@@ -184,7 +186,7 @@ function HmRunDetail({ runId, onBack, awaitingMode, runVm, loading, onDecided }:
       {status === "awaiting" && <ApprovalPanel runId={runId || R.id} requestedAt={R.started} onDecided={onDecided}/>}
 
       {/* Top stats row */}
-      <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
+      <div className="hm-stat-grid">
         <HmCard>
           <div style={{display:"flex", alignItems:"center", gap:10}}>
             <RavenMark which="huginn" size={20}/>
@@ -352,7 +354,7 @@ function RunSummaryDetail({ runId, run, onBack, fullRunId, runVm, onDecided }: a
       )}
 
       {/* Top stats row */}
-      <div style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:14}}>
+      <div className="hm-stat-grid">
         <HmCard>
           <div style={{display:"flex", alignItems:"center", gap:10}}>
             <RavenMark which="huginn" size={20}/>

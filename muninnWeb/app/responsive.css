@@ -1,0 +1,204 @@
+/* =====================================================================
+   responsive.css — muninnWeb 반응형 레이어 (mobile / iPad / desktop)
+
+   hm-theme.css 다음에 import 되어, 동일 specificity 충돌 시 source-order 로 우선한다.
+   브레이크포인트: 데스크탑 > 1024px · 태블릿 ≤ 1024px · 모바일 ≤ 768px · 소형 ≤ 480px
+   (기존 폼 그리드용 720px 미디어쿼리들과는 셀렉터가 겹치지 않는다 — hm-theme.css 참고)
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   공용 유틸 (전 뷰포트)
+   --------------------------------------------------------------------- */
+
+/* 테이블 가로 스크롤 래퍼 — JSX 에서 <table class="hm-table"> 를 감싼다.
+   .app 가 overflow:hidden 이라 래퍼 없이는 넓은 표가 잘려 사용 불가. */
+.hm-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* 반응형 그리드 유틸 (컴포넌트의 인라인 grid 를 대체) */
+.hm-dash-split {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.hm-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.hm-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+/* UI 프리미티브 — 정적 인라인 스타일을 클래스로 추출(렌더당 객체 생성 제거) */
+.avatar-img { width: 100%; height: 100%; object-fit: cover; }
+.tab-count { margin-left: 6px; font-size: 11px; opacity: 0.7; }
+.empty-action { margin-top: 8px; }
+
+/* 셀 텍스트 말줄임 — 모바일에서는 폭 축소 */
+.hm-cell-clip { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* statusbar HealthDots — 인라인 스타일을 클래스로 추출(렌더당 객체 생성 제거) */
+.hm-health-item { display: inline-flex; align-items: center; gap: 4px; }
+.hm-health-label { font-size: 10px; color: var(--on-surface-variant); }
+.hm-health-label.is-down { color: var(--error-55); }
+
+/* 모바일 드로어용 햄버거 / 백드롭 — 데스크탑에서는 숨김 */
+.hm-hamburger { display: none; }
+.hm-drawer-backdrop { display: none; }
+
+/* ---------------------------------------------------------------------
+   태블릿 (≤ 1024px) — iPad landscape: 여백·다단 그리드 정리(사이드바는 유지)
+   --------------------------------------------------------------------- */
+@media (max-width: 1024px) {
+  [data-app="hm"] .main { padding: 20px 20px 28px; }
+
+  .hm-dash-split { grid-template-columns: 1fr; }
+  [data-app="hm"] .hm-split { grid-template-columns: 1fr; }
+}
+
+/* ---------------------------------------------------------------------
+   모바일 (≤ 768px) — 사이드바 오프캔버스 드로어 + 레이아웃 재배치
+   (iPad portrait 768px 포함 — 본문 공간 확보 우선)
+   --------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  /* 그리드: 사이드바 컬럼 제거, 단일 컬럼 */
+  [data-app="hm"].app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 56px 1fr 28px;
+    grid-template-areas:
+      "topbar"
+      "main"
+      "statusbar";
+  }
+
+  /* 사이드바 → 오프캔버스 드로어.
+     z-index 는 CopilotKit v2 의 토글 FAB(1100)·열린 사이드바(1200) 위로 둬야
+     드로어가 진짜 모달처럼 동작한다(아래면 FAB 가 백드롭 위로 새어나옴).
+     닫힘 상태에서는 visibility:hidden 으로 탭 순서/스크린리더에서 제거(포커스 누수 방지),
+     슬라이드 아웃이 끝난 뒤 숨기도록 visibility 전환에 지연을 준다. */
+  [data-app="hm"] .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 284px;
+    max-width: 84vw;
+    z-index: 2001;
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 240ms;
+    will-change: transform;
+  }
+  [data-app="hm"].app[data-drawer="open"] .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+    transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s;
+  }
+
+  /* 백드롭 (app-shell 에서 항상 렌더, 열림 상태에서만 활성) */
+  .hm-drawer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: rgba(15, 18, 24, 0.44);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 240ms ease;
+  }
+  [data-app="hm"].app[data-drawer="open"] .hm-drawer-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* 햄버거 노출 — 주 모바일 내비 컨트롤이므로 터치 타깃 44×44 보장 */
+  .hm-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+  }
+
+  /* topbar */
+  [data-app="hm"] .topbar { height: 56px; padding: 0 10px; gap: 6px; }
+  [data-app="hm"] .topbar-search { max-width: none; }
+  [data-app="hm"] .topbar-search kbd { display: none; }
+  [data-app="hm"] .topbar .cost-pill { display: none; }
+  [data-app="hm"] .topbar-divider { display: none; }
+
+  /* main */
+  [data-app="hm"] .main { padding: 16px 14px 24px; }
+
+  /* page head: 제목 / 액션 세로 스택 */
+  [data-app="hm"] .hm-page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  [data-app="hm"] .hm-page-head h1 { font-size: 20px; }
+
+  /* KPI 2열 */
+  [data-app="hm"] .hm-kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  [data-app="hm"] .hm-kpi { padding: 14px 16px; }
+
+  /* 인라인 grid 대체 클래스: 모바일 1열 / stat 2열 */
+  .hm-grid-2 { grid-template-columns: 1fr; }
+  .hm-stat-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* statusbar 압축 + 가로 스크롤(넘침 방지), HealthDots 라벨 숨김 */
+  [data-app="hm"] .statusbar {
+    padding: 0 12px;
+    gap: 10px;
+    font-size: 11px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  [data-app="hm"] .statusbar::-webkit-scrollbar { display: none; }
+  [data-app="hm"] .hm-health-label { display: none; }
+
+  /* 테이블 셀 패딩 / 폰트 축소 */
+  [data-app="hm"] .hm-table th,
+  [data-app="hm"] .hm-table td { padding: 11px 12px; }
+  [data-app="hm"] .hm-table { font-size: 13px; }
+  .hm-cell-clip { max-width: 160px; }
+
+  /* grid 기반 이벤트 행: 깨짐 대신 가로 스크롤(부모 .hm-table-scroll) */
+  .hm-evrow { min-width: 560px; }
+  .hm-evsubrow { min-width: 600px; }
+
+  /* 터치 타깃 ≥ 44px (WCAG) */
+  [data-app="hm"] .nav-item { height: 44px; }
+  [data-app="hm"] .btn { height: 38px; }
+  [data-app="hm"] .btn-sm { height: 34px; }
+  .chip { height: 34px; }
+
+  /* 필터 입력 풀폭 */
+  .hm-filter-grow { flex: 1 1 100% !important; }
+
+  /* CopilotKit v2 사이드바 폭 안전장치 (모바일에서 화면 가림 방지).
+     v2 aside 의 실제 속성은 data-copilot-sidebar(단수). 라이브러리가 ≤767px 에서
+     이미 width:100% 를 강제하므로 보강 성격이다. */
+  .copilotKitSidebar,
+  [data-copilot-sidebar] { max-width: 100dvw !important; }
+}
+
+/* ---------------------------------------------------------------------
+   소형 모바일 (≤ 480px)
+   --------------------------------------------------------------------- */
+@media (max-width: 480px) {
+  [data-app="hm"] .hm-kpi-grid { grid-template-columns: 1fr; }
+  [data-app="hm"] .topbar-search input { font-size: 13px; }
+}
