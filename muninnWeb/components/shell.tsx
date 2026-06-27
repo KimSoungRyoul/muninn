@@ -181,7 +181,7 @@ function HmStatusBar({ wsConnected = true, queueDepth = 0 }: any) {
       <HealthDots services={services}/>
       <span style={{flex:1}}></span>
       <span className="seg">v0.1.0</span>
-      <a className="seg" href="#">↗ docs</a>
+      <a className="seg" href="https://kimsoungryoul.github.io/muninn/" target="_blank" rel="noreferrer noopener">↗ docs</a>
     </div>
   );
 }

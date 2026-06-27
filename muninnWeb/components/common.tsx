@@ -28,7 +28,7 @@ const fmtClock = (iso) => new Date(iso).toLocaleTimeString("en-US", { hour12: fa
 
 // ---------- StatusDot ----------
 function StatusDot({ status }: any) {
-  return <span className={`status-dot is-${status}`} aria-label={status}></span>;
+  return <span className={`status-dot is-${status}`} aria-label={runStatusLabel(status)}></span>;
 }
 function StatusLabel({ status, children }: any) {
   return <span className="status-label"><StatusDot status={status}/>{children || status}</span>;
