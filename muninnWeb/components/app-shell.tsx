@@ -17,9 +17,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const section = sectionFromPath(pathname);
 
   // 모바일(≤768px) 오프캔버스 사이드바 드로어 상태. 데스크탑에서는 CSS 가 무시한다.
+  // 드로어 안 nav/워크스페이스 전환 시 직접 닫는다(라우트 effect 대신 — 정확하고 setState-in-effect 회피).
   const [drawerOpen, setDrawerOpen] = React.useState(false);
-  // 라우트가 바뀌면 드로어를 닫는다(모바일에서 nav 탭 후 본문이 가려지지 않도록).
-  React.useEffect(() => setDrawerOpen(false), [pathname]);
   // 드로어가 열리면 modal 처럼: ESC 로 닫고, 배경 본문 스크롤을 잠근다.
   React.useEffect(() => {
     if (!drawerOpen) return;
@@ -55,9 +54,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     >
       <HmSidebar
         section={section}
-        onNav={(name: string) => router.push(navPath(name))}
+        onNav={(name: string) => {
+          setDrawerOpen(false);
+          router.push(navPath(name));
+        }}
         workspaceId={workspaceId}
         onSwitchWorkspace={(id: string) => {
+          setDrawerOpen(false);
           setWorkspaceId(id);
           router.push("/");
         }}

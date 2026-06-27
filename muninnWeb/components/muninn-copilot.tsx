@@ -19,12 +19,11 @@ import {
   useHumanInTheLoop,
 } from "@copilotkit/react-core/v2";
 import { z } from "zod";
-import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useWorkspace } from "@/lib/workspace-context";
 import { navPath, appPath, sectionFromPath } from "@/lib/nav";
 import { useMuninnToolRenderers, DelegationApprovalCard } from "@/components/copilot-tool-cards";
-import { useMediaQuery } from "@/lib/use-media-query";
+import { useMediaQuery, useMounted } from "@/lib/use-media-query";
 
 const json = (v: unknown) => JSON.stringify(v, null, 0);
 
@@ -47,10 +46,10 @@ export function MuninnCopilot() {
   const isMobile = useMediaQuery("(max-width: 768px)");
   // iPad(≤1024)까지는 docked 사이드바가 본문을 잠식하지 않도록 collapsed 로 시작한다.
   const isNarrow = useMediaQuery("(max-width: 1024px)");
-  // useMediaQuery 는 SSR/첫 페인트에 false 다. 마운트 전에는 항상 closed 로 시작해
-  // 모바일에서 사이드바가 열린 채 깜빡였다 닫히는 FOUC 를 막는다(데스크탑은 마운트 후 open).
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // 마운트(하이드레이션) 전에는 항상 closed 로 시작해 모바일에서 사이드바가 열린 채
+  // 깜빡였다 닫히는 FOUC 를 막는다(데스크탑은 마운트 후 open). useMounted 는
+  // useSyncExternalStore 기반이라 effect 내 setState 없이 안전하다.
+  const mounted = useMounted();
   const narrow = !mounted || isNarrow;
 
   // 현재 화면 맥락(네비게이션) — 식별자 참조/동적 추천에 쓴다. 실 데이터는 server tool 로 조회한다.
