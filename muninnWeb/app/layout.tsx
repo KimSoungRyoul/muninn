@@ -18,8 +18,18 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ko">
+    // 인라인 스크립트가 페인트 전에 <html> 의 data-theme/.dark 를 칠하므로
+    // 서버 마크업과 달라진다 — suppressHydrationWarning 으로 <html> 속성 경고를 억제(next-themes 패턴).
+    <html lang="ko" suppressHydrationWarning>
       <head>
+        {/* 테마 pre-hydration: 페인트 전에 <html> data-theme 를 칠해 다크모드 FOUC 를 막는다.
+            저장된 선택(muninn-theme) 우선, 없으면 시스템 prefers-color-scheme. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var m=localStorage.getItem('muninn-theme');var s=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';var r=(m==='light'||m==='dark')?m:s;document.documentElement.setAttribute('data-theme',r);document.documentElement.classList.toggle('dark',r==='dark');}catch(e){}})();",
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
           href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"

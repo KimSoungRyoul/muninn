@@ -202,3 +202,50 @@
   [data-app="hm"] .hm-kpi-grid { grid-template-columns: 1fr; }
   [data-app="hm"] .topbar-search input { font-size: 13px; }
 }
+
+/* =====================================================================
+   다크모드 색상 보정 — 하드코딩된 light 상태 틴트 배경(amber KPI·warn 배지·
+   approval 패널·diff·tool 상태·배너·announce)이 다크에서 밝게 뜨는 문제를,
+   다크 표면 위 의미 틴트(color-mix)로 교체. data-theme 는 .app 에 있으므로
+   자손 셀렉터로 매칭되고, 추가 셀렉터 + source-order 로 base 규칙을 이긴다.
+   ===================================================================== */
+[data-theme="dark"] .hm-kpi.is-amber {
+  background: linear-gradient(180deg, color-mix(in oklch, var(--warning-50) 18%, var(--surface)), var(--surface) 70%);
+}
+[data-theme="dark"] [data-app="hm"] .nav-item .count.is-warn {
+  background: color-mix(in oklch, var(--warning-50) 24%, var(--surface));
+  color: var(--warning-55);
+}
+[data-theme="dark"] .hm-approval {
+  background: color-mix(in oklch, var(--warning-50) 12%, var(--surface));
+  border-color: color-mix(in oklch, var(--warning-50) 38%, var(--surface));
+}
+[data-theme="dark"] .hm-tool-head .status.ok,
+[data-theme="dark"] .hm-diff .add,
+[data-theme="dark"] .hm-banner.is-success {
+  background: color-mix(in oklch, var(--positive-50) 18%, var(--surface));
+}
+[data-theme="dark"] .hm-tool-head .status.err,
+[data-theme="dark"] .hm-diff .rem,
+[data-theme="dark"] .hm-banner.is-failure {
+  background: color-mix(in oklch, var(--error-50) 18%, var(--surface));
+}
+[data-theme="dark"] .hm-tool-head .status.run {
+  background: color-mix(in oklch, var(--warning-50) 18%, var(--surface));
+}
+[data-theme="dark"] .hm-announce.tone-warning {
+  border-color: color-mix(in oklch, var(--warning-50) 40%, var(--surface));
+  background: linear-gradient(90deg, color-mix(in oklch, var(--warning-50) 14%, var(--surface)), var(--surface) 80%);
+}
+[data-theme="dark"] .hm-announce.tone-success {
+  border-color: color-mix(in oklch, var(--positive-50) 40%, var(--surface));
+  background: linear-gradient(90deg, color-mix(in oklch, var(--positive-50) 14%, var(--surface)), var(--surface) 80%);
+}
+[data-theme="dark"] .hm-announce.tone-warning .ico {
+  background: color-mix(in oklch, var(--warning-50) 26%, var(--surface));
+  color: var(--warning-55);
+}
+[data-theme="dark"] .hm-announce.tone-success .ico {
+  background: color-mix(in oklch, var(--positive-50) 26%, var(--surface));
+  color: var(--positive-50);
+}
