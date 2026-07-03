@@ -12,7 +12,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.83",
+    "@ai-sdk/anthropic": "^4.0.7",
     "@copilotkit/react-core": "^1.60.0",
     "@copilotkit/react-ui": "^1.60.0",
     "@copilotkit/runtime": "^1.60.0",
