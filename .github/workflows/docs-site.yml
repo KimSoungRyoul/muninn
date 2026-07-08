@@ -38,7 +38,7 @@ jobs:
         working-directory: muninnDocs
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # pnpm/action-setup: 레포 루트엔 package.json 이 없어(앱 루트=muninnDocs) packageManager
       #   자동탐지가 실패한다 → version 을 명시한다(muninnDocs/package.json 의 pnpm@9.12.0 과 일치).
