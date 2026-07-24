@@ -13,17 +13,17 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.83",
-    "@copilotkit/react-core": "^1.60.0",
-    "@copilotkit/react-ui": "^1.60.0",
-    "@copilotkit/runtime": "^1.60.0",
+    "@copilotkit/react-core": "^1.63.2",
+    "@copilotkit/react-ui": "^1.63.2",
+    "@copilotkit/runtime": "^1.63.2",
     "@kubernetes/client-node": "^1.4.0",
     "ai": "^6.0.202",
     "drizzle-orm": "^0.45.2",
-    "jose": "^6.2.3",
-    "next": "16.2.9",
-    "pg": "^8.21.0",
-    "react": "19.2.7",
-    "react-dom": "19.2.7",
+    "jose": "^6.2.4",
+    "next": "16.2.11",
+    "pg": "^8.22.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -33,7 +33,7 @@
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.0",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "16.2.11",
     "typescript": "^6.0.3"
   }
 }
